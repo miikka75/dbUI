@@ -58,12 +58,19 @@
       rows.forEach(function(r) {
         var title = (s.titleColumns || []).map(function(c) { return ctx.displayValue(c, r[c], '', calCfg); }).filter(Boolean).join(' — ');
         var d = Calendar.toDateStr(r[s.dateColumn]);
-        var key = d || '__undated__';                 // an undated row is still the user's row: bucket it
+        // `endColumn`: a row that lasts (a pause week) is on every day from its date to its end, each
+        // carrying the whole range. Capped at 92 days, so a mistyped end cannot flood the grid.
+        var e = s.endColumn ? Calendar.toDateStr(r[s.endColumn]) : '';
+        var days = [d];
+        if (d && e && e > d) { days = []; for (var cur = d, n = 0; cur <= e && n < 92; n++) { days.push(cur); var p = cur.split('-'); cur = Calendar.fmtDate(new Date(+p[0], +p[1] - 1, +p[2] + 1)); } }
+        days.forEach(function(day) {
+        var key = day || '__undated__';                 // an undated row is still the user's row: bucket it
         (out[key] = out[key] || []).push({            // rather than dropping it silently
-          id: s.table + ':' + s.dateColumn + ':' + r.id, title: title || tag, label: tag,
+          id: s.table + ':' + s.dateColumn + ':' + r.id + (days.length > 1 ? ':' + day : ''), title: title || tag, label: tag, range: days.length > 1 ? [d, e] : null,
           color: ctx.hashColor(s.label || s.table), table: s.table, dateCol: s.dateColumn, row: r, respond: s.respond || null,
           // A datetime's instant: orders a day's events by when they start, and shows the time.
           at: String(r[s.dateColumn] || '').length > 10 ? String(r[s.dateColumn]) : ''
+        });
         });
       });
     });

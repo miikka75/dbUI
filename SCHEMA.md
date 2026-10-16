@@ -1261,7 +1261,9 @@ appointment date and an expiry date):
 }
 ```
 Per-source fields: `table` (req), `dateColumn` (req), `titleColumns` (opt), `filter` (opt, data-view
-grammar), `label` (opt — the type tag + colour key; defaults to the table's translated `tab.<table>`).
+grammar), `label` (opt — the type tag + colour key; defaults to the table's translated `tab.<table>`),
+`endColumn` (opt — a row that lasts, such as a pause week, shows on every day from `dateColumn` to it,
+with its range; capped at 92 days; may be a computed column).
 
 ### Filters the reader picks (`filters`)
 
@@ -1394,7 +1396,8 @@ The events live in one table; responses in another that has an **`owner` column*
     "picker": "toggle",              // OPTIONAL — status control: "dropdown" (default) | "toggle" | "chips"
     "showCounts": true,              // OPTIONAL — show a per-event count of each response
     "rosterVisibility": "all",       // OPTIONAL — who sees the participant roster (see below)
-    "closeBefore": 30                 // OPTIONAL — minutes before the start when booking from anywhere stops (see below)
+    "closeBefore": 30,                // OPTIONAL — minutes before the start when booking from anywhere stops (see below)
+    "blockedBy": { … }               // OPTIONAL — days of the member's own periods (a pause) when booking is refused
   }
 }
 ```
@@ -1448,6 +1451,18 @@ checks the member in to it at once.
 It is a screen rule, not a rule the server holds: the server cannot tell "at the venue" from a typed
 code, because the real code is stored nowhere (see `checkin`). What a member gains by going round it is
 a booking that was never checked in, and the organizer's list shows it as such.
+
+### `blockedBy` — refused during the member's own periods
+
+```json
+"rsvp": { …, "blockedBy": { "table": "pauses", "from": "starts_on", "to": "pause_until",
+                       "where": { "sent": "yes" }, "message": "text.paused" } }
+```
+
+A day inside one of the caller's **own** rows of `table` (its `owner` column) — from `from` to `to`
+(default: the same day), filtered by `where` — cannot be booked or checked in to; the row shows `message`
+(a translation key or text). `to` may be a computed column. The same key on a `scan` view refuses the scan
+on such a day with that message. Like `closeBefore`, it is a screen rule.
 
 ### `checkin` — self check-in with a shared code
 

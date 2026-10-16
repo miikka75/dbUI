@@ -1243,6 +1243,20 @@ intervals, task durations), so three general pieces:
 The names are the schema's, never the engine's. **Medium**: the derivation sits on the row path every view
 uses, so it is tested there.
 
+#### 16. Periods that refuse, periods that last, and one clock *(landed)*
+
+A paused member could still book classes and open the door, a pause showed on its first day only, and a
+calendar left open since the morning still offered the 07:00 class. Three general pieces:
+
+- **`blockedBy`** on an rsvp or a scan: days inside the caller's own rows of another table (from..to,
+  `where`) are refused with a message — booking, the shared-code check-in, and the scan. Any "not while
+  suspended / on leave / banned" period has the same shape.
+- **`endColumn`** on a calendar source: a row that lasts shows on each day it spans, with its range.
+- **One app clock** (`clockNow`, ticking every 30 s) for the booking rules, instead of per-component
+  clocks — the calendar's booking control had none and froze at the moment it was drawn.
+
+Screen rules, as `closeBefore` is. **Small.**
+
 #### Not proposed
 
 - **Opening the gate.** It needs the gate controller's own API and a server to call it from; the

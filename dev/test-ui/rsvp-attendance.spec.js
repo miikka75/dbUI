@@ -578,3 +578,44 @@ test('a viewer adds their own row from a calendar day (self-service is decided b
   await page.locator('[data-testid="cal-add-on-day"]').click();
   await expect.poll(async () => ((await (await page.request.post('/api/getTableData', { data: { tableId: 'logs', tab: 'active' }, headers: ADMIN })).json()).rows || []).map((r) => r.owner)).toEqual(['ann@x']);
 });
+
+test('a row that lasts (endColumn) is on every day it spans, with its range; a pause blocks booking those days', async ({ page }) => {
+  const schema = JSON.parse(JSON.stringify(SCHEMA));
+  schema.tables.leaves = { ownerWritable: ['starts_on', 'ends_on'], columns: [{ name: 'owner', type: 'owner' }, { name: 'starts_on', type: 'date' }, { name: 'ends_on', type: 'date' }] };
+  schema.views[0].rsvp.blockedBy = { table: 'leaves', from: 'starts_on', to: 'ends_on', message: 'On leave' };
+  schema.views.push({ name: 'mycal', kind: 'calendar', calendar: { sources: [{ table: 'leaves', dateColumn: 'starts_on', endColumn: 'ends_on', label: 'Leave' }], defaultView: 'list' } });
+  schema.nav.items.push({ view: 'mycal' });
+  await setup(page);
+  await page.request.post('/api/saveSchema', { data: { schema }, headers: ADMIN });
+  const day = (n) => { const d = new Date(future + 'T12:00:00'); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); };
+  await page.request.post('/api/putRow', { data: { tableId: 'practices', tab: 'active', data: { id: 'p2', date: day(5), title: 'After' } }, headers: ADMIN });
+  await page.request.post('/api/putRow', { data: { tableId: 'leaves', tab: 'active', data: { id: 'l1', owner: 'ann@x', starts_on: day(-1), ends_on: day(1) } }, headers: ADMIN });
+  await bootAs(page, 'ann@x');
+  const row = (title) => page.locator('tr', { hasText: title });
+  await expect(row('Tuesday').locator('[data-testid="rsvp-places"]')).toHaveText('On leave');
+  await expect(row('Tuesday').locator('button', { hasText: 'coming' })).toBeDisabled();
+  await expect(row('After').locator('button', { hasText: 'coming' })).toBeEnabled();
+  const days = await page.evaluate(() => { const e = appInstance.calEventsFor('mycal', { from: '2000-01-01', to: '2100-01-01' }); return Object.keys(e).filter((k) => e[k].length).sort(); });
+  expect(days).toEqual([day(-1), day(0), day(1)]);
+  await page.evaluate(() => appInstance.selectTab('mycal'));
+  await expect(page.locator('[data-testid="cal-event-range"]').first()).toBeVisible();
+});
+
+test('one app clock: a class closes on the calendar left open, without a reload', async ({ page }) => {
+  const schema = JSON.parse(JSON.stringify(SCHEMA));
+  schema.tables.practices.columns[0] = { name: 'date', type: 'datetime' };
+  schema.views[0].rsvp.closeBefore = 30;
+  schema.views.push({ name: 'timetable', kind: 'calendar', calendar: { sources: [{ table: 'practices', dateColumn: 'date', titleColumns: ['title'], respond: 'my_rsvp' }], defaultView: 'list' } });
+  schema.nav.items.push({ view: 'timetable' });
+  await setup(page);
+  await page.request.post('/api/saveSchema', { data: { schema }, headers: ADMIN });
+  const noon = new Date(); noon.setHours(12, 0, 0, 0);
+  await page.request.post('/api/putRow', { data: { tableId: 'practices', tab: 'active', data: { id: 'p1', date: new Date(noon.getTime() + 45 * 60000).toISOString(), title: 'Spin' } }, headers: ADMIN });
+  await page.clock.install({ time: noon });
+  await bootAs(page, 'ann@x');
+  await page.evaluate(() => appInstance.selectTab('timetable'));
+  const coming = page.locator('[data-testid="cal-book"]').first().locator('button', { hasText: 'coming' });
+  await expect(coming).toBeEnabled();
+  await page.clock.fastForward(20 * 60000);               // 25 minutes before: inside closeBefore
+  await expect(coming).toBeDisabled();
+});

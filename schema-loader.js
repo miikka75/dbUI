@@ -544,6 +544,7 @@ function validateSchema() {
       csrcs.forEach(function(s) {
         if (!s || !s.table) { errors.push('calendar "' + v + '": each source needs a table'); return; }
         if (!SCHEMA[s.table]) { errors.push('calendar "' + v + '" references non-existent table "' + s.table + '"'); return; }
+        if (s.endColumn !== undefined && !(SCHEMA[s.table].columns || {})[s.endColumn]) errors.push('calendar "' + v + '" source "' + s.table + '": `endColumn` "' + s.endColumn + '" is not a column of it');
         // `respond`: book an event from the calendar, through an rsvp view over THIS source's table -- any other
         // view would put a booking control on events it does not know, which would never show a choice.
         if (s.respond !== undefined) {
@@ -795,6 +796,17 @@ function validateSchema() {
       if (!lk || lk.view === undefined) return;
       if (!VIEWS[lk.view]) errors.push('view "' + v + '": `lookup.view` names missing view "' + lk.view + '"');
       else if (lk.view === v) errors.push('view "' + v + '": `lookup.view` cannot read the view it is in');
+    });
+    // `blockedBy` on an rsvp or a scan: periods of the caller's own rows in another table. A table or a
+    // column that does not exist would block nothing, which looks exactly like "not paused".
+    [view.rsvp && view.rsvp.blockedBy, view.scan && view.scan.blockedBy].forEach(function(bb) {
+      if (bb === undefined || bb === null) return;
+      var bat = 'view "' + v + '" `blockedBy`: ';
+      if (typeof bb !== 'object' || !SCHEMA[bb.table]) { errors.push(bat + '`table` must name a table (got "' + (bb && bb.table) + '")'); return; }
+      var bcols = SCHEMA[bb.table].columns || {};
+      ['from', 'to'].forEach(function(k) { if (bb[k] !== undefined && !bcols[bb[k]]) errors.push(bat + '`' + k + '` "' + bb[k] + '" is not a column of "' + bb.table + '"'); });
+      if (!bb.from) errors.push(bat + 'needs `from`, the column the period starts on');
+      if (!Columns.ownerColOf(SCHEMA[bb.table])) errors.push(bat + '"' + bb.table + '" has no owner column, so no row is the caller\x27s own');
     });
     // A form taking a fresh record each time finds the one being filled in as the caller's latest one not
     // yet submitted -- so without `submitColumn` it can never find it, and Start would make a row nobody

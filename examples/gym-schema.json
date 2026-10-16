@@ -744,6 +744,15 @@
             "verified": "yes"
           },
           "rotateMinutes": 5
+        },
+        "blockedBy": {
+          "table": "pauses",
+          "from": "starts_on",
+          "to": "pause_until",
+          "where": {
+            "sent": "yes"
+          },
+          "message": "text.paused"
         }
       }
     },
@@ -773,7 +782,16 @@
           "rotateMinutes": 5,
           "link": "submit"
         },
-        "closeBefore": 30
+        "closeBefore": 30,
+        "blockedBy": {
+          "table": "pauses",
+          "from": "starts_on",
+          "to": "pause_until",
+          "where": {
+            "sent": "yes"
+          },
+          "message": "text.paused"
+        }
       }
     },
     {
@@ -1130,7 +1148,8 @@
             "label": "Pause",
             "filter": {
               "sent": "yes"
-            }
+            },
+            "endColumn": "pause_until"
           },
           {
             "table": "pt_sessions",

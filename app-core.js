@@ -355,6 +355,9 @@ function createVueApp() {
       // A code a `?scan=` deep link handed over, and the scan view it belongs to. Held here rather
       // than in the component because it arrives before that component exists.
       pendingScan: null,
+      // THE clock booking rules read (rsvpClosed): ticks every 30 s, so a class closes on every screen
+      // showing it -- a calendar left open since the morning included -- when its window does.
+      clockNow: Date.now(),
       // The scan button (nav.scan): its typing dialog, what is typed, and which view a typed code is for.
       scanDialog: false, scanTyped: '', scanNote: '',
       dataCache: {},
@@ -1123,7 +1126,7 @@ function createVueApp() {
          'msg.server_error', 'msg.import_blocked', 'msg.import_error', 'msg.palette_applied', 'msg.error', 'msg.locked',
          'msg.ref_has_children',
          'pivot.total', 'stats.empty',
-         'board.lane_blocked', 'scan.code', 'scan.press', 'scan.foreign', 'scan.claimed', 'scan.door', 'scan.created', 'scan.already', 'scan.unknown', 'scan.ambiguous', 'scan.recent',
+         'board.lane_blocked', 'scan.code', 'scan.press', 'scan.foreign', 'scan.claimed', 'scan.door', 'scan.blocked', 'scan.created', 'scan.already', 'scan.unknown', 'scan.ambiguous', 'scan.recent',
          'scan.print_codes', 'scan.print_code', 'scan.no_barcode',
          'scan.camera', 'scan.no_code_found', 'scan.several_codes', 'scan.camera_failed',
          'board.move_to', 'board.unassigned', 'board.add_in_lane', 'board.archive', 'board.confirm_archive',
@@ -2806,6 +2809,9 @@ function createVueApp() {
         // guard, same message, as setRsvp and formRecord.
         if (!me) { this.notify(this.t('msg.sign_in_respond')); return null; }
         var now = new Date();
+        if (cfg.blockedBy && this.blockedOn(cfg.blockedBy, fmtDate(now))) {
+          return { outcome: 'blocked', code: String(code || '').trim(), message: this.tOr(cfg.blockedBy.message, cfg.blockedBy.message || '') };
+        }
         var res = Scan.plan(code, {
           catalog: this.dataCache[ref.table] || [],
           rows: this.dataCache[table] || [],
@@ -2926,16 +2932,35 @@ function createVueApp() {
       rsvpClosed: function(name, ev, now) {
         var mins = ((VIEWS[name] && VIEWS[name].rsvp) || {}).closeBefore, st = String(ev.date || '').length > 10 ? Date.parse(ev.date) : NaN;
         if (mins === undefined || isNaN(st)) return false;
-        now = now || Date.now();
+        now = now || this.clockNow;
         if (now >= st) return true;
         if (now < st - mins * 60000) return false;
         return !(this.rsvpOnSite(name) && ev.isToday);
       },
       // Frozen (attendance verified), or full or closed and not mine to keep: a full class cannot be
       // joined, but a member holding a place in it can still give it up.
-      rsvpLocked: function(name, ev, now) { return this.rsvpFrozen(name, ev.key) || (!ev.myHolds && (ev.full || this.rsvpClosed(name, ev, now))); },
-      rsvpPlacesShown: function(name, ev, now) { return ev.capacity !== null || (!ev.myHolds && this.rsvpClosed(name, ev, now)); },
+      // `blockedBy`: periods of the caller's OWN rows in another table during which this is refused -- a
+      // member's pause weeks. { table, from, to, where?, message }. `day` is a YYYY-MM-DD; `to` defaults to
+      // `from` (a one-day block). Read through deriveRows, so `to` may be a computed end. Display-level, as
+      // closeBefore is: it stops the app offering the choice, not a write made around it.
+      blockedOn: function(blk, day) {
+        if (!blk || !blk.table || !day || !SCHEMA[blk.table]) return false;
+        var me = this.currentUserEmail || '', oc = getOwnerCol(blk.table) || 'owner';
+        var rows = this.deriveRows(blk.table, Rows.partitionRows(this.dataCache, blk.table, 'active'));
+        return rows.some(function(r) {
+          if (r[oc] !== me || (blk.where && !condMatches(r, blk.where))) return false;
+          var a = String(r[blk.from] || '').slice(0, 10), b = String(r[blk.to || blk.from] || a).slice(0, 10);
+          return !!a && day >= a && day <= b;
+        });
+      },
+      rsvpBlocked: function(name, ev) {
+        var blk = ((VIEWS[name] && VIEWS[name].rsvp) || {}).blockedBy;
+        return !!blk && this.blockedOn(blk, Calendar.toDateStr(ev.date));
+      },
+      rsvpLocked: function(name, ev, now) { return this.rsvpFrozen(name, ev.key) || (!ev.myHolds && (ev.full || this.rsvpClosed(name, ev, now) || this.rsvpBlocked(name, ev))); },
+      rsvpPlacesShown: function(name, ev, now) { return ev.capacity !== null || (!ev.myHolds && (this.rsvpClosed(name, ev, now) || this.rsvpBlocked(name, ev))); },
       rsvpPlacesText: function(name, ev, now) {
+        if (!ev.myHolds && this.rsvpBlocked(name, ev)) { var bm = VIEWS[name].rsvp.blockedBy.message; return this.tOr(bm, bm || this.t('rsvp.closed')); }
         if (!ev.myHolds && this.rsvpClosed(name, ev, now)) return this.t('rsvp.closed');
         return ev.full ? this.t('rsvp.full') : this.t('rsvp.places_left') + ': ' + Math.max(0, ev.capacity - ev.booked);
       },
@@ -2950,6 +2975,7 @@ function createVueApp() {
         var link = this.rsvpLink(cfg).linkColumn, keys = this.rsvpTodayKeys(name), value = String(code || '').trim();
         (this.dataCache[table] || []).forEach(function(r) {
           if (r[ownerCol] !== me || keys.indexOf(r[link]) < 0 || self.rsvpFrozen(name, r[link])) return;
+          if (cfg.blockedBy && self.blockedOn(cfg.blockedBy, fmtDate(new Date()))) return;   // paused today: no check-in
           self.saveField(r, ci.codeColumn, value, table);
         });
       },
@@ -3192,6 +3218,10 @@ function createVueApp() {
           var sref = getColumnRef((v.sources || [])[0], v.scan.column);
           if (sref && sref.table) push(sref.table);
         }
+        // `blockedBy` reads the caller's own periods in another table; unloaded, nothing is ever blocked.
+        [v.rsvp, v.scan].forEach(function(c) { if (c && c.blockedBy && c.blockedBy.table) push(c.blockedBy.table); });
+        // A calendar source that books through an rsvp view (`respond`) reads everything that view does.
+        if (v.calendar) Calendar.sources(VIEWS, name).forEach(function(s) { if (s && s.respond) expand(s.respond); });
         AccessFeatures.viewTables(v).forEach(expand);
         viewImplicitTables(v).forEach(expand);
 
@@ -3705,7 +3735,8 @@ function createVueApp() {
           if (view.calendar) {
             // One answer to "what does this calendar read", shared with the export path — see
             // Feeds.tablesOf. Built inline here until the two disagreed.
-            self._ensureCached(Feeds.tablesOf(VIEWS, self.currentTable), null, self._viewNeedsArchive(self.currentTable));
+            // Plus what its events book through (`respond`) -- _viewTables follows that.
+            self._ensureCached(Feeds.tablesOf(VIEWS, self.currentTable).concat(self._viewTables(self.currentTable)), null, self._viewNeedsArchive(self.currentTable));
             return;
           }
           // rotationView (third view kind): generate rows from range; no sources to read.
@@ -3728,11 +3759,9 @@ function createVueApp() {
                                null, self._viewNeedsArchive(self.currentTable));
             return;
           }
-          // RSVP view: load the events + responses tables; rsvpFor() builds the list, re-derives on load.
+          // RSVP view: everything it reads (events, responses, `blockedBy`); rsvpFor() re-derives on load.
           if (view.rsvp) {
-            var rsTables = (VIEWS[view.rsvp.events] ? (VIEWS[view.rsvp.events].sources || []) : [view.rsvp.events]).slice();
-            if (view.rsvp.responses) rsTables.push(view.rsvp.responses);
-            self._ensureCached(rsTables, null, self._viewNeedsArchive(self.currentTable));
+            self._ensureCached(self._viewTables(self.currentTable), null, self._viewNeedsArchive(self.currentTable));
             return;
           }
           // Union or join view
@@ -8085,6 +8114,7 @@ function createVueApp() {
       var self = this;
       // Rows.js derives a table's computed columns and follows reference paths through these, since only
       // the root knows the schema and the cache.
+      setInterval(function() { self.clockNow = Date.now(); }, 30000);
       Rows.setHooks({ derive: function(t, rows, cache) { return self.deriveRows(t, rows, cache); }, path: function(r, p) { return self.rowPath(r, p); } });
       window.addEventListener('resize', function() { self.mobile = window.innerWidth < 768; self.windowWidth = window.innerWidth; });
       window.addEventListener('popstate', function() { self._onPopState(); });
@@ -8186,7 +8216,8 @@ function createVueApp() {
           addOnDay: function(name, date) { vm.calendarAddOnDay(name, date); },
           // A `filters` column's choices: the dropdown's own (a ref's catalogue, a list's values).
           filterOptions: function(col) { return vm.colIsRef(col) ? vm.getRefOptions(col, {}).filter(function(o) { return o.value !== ''; }) : vm.getListOptions(col); },
-          fieldLabel: function(col) { return vm.tOr('field.' + col, col); }
+          fieldLabel: function(col) { return vm.tOr('field.' + col, col); },
+          dateLabel: function(v) { return vm.dateLabel(v); }
         },
         // The shared UI elements (CLAUDE.md "UI conventions"): words, and the clipboard with its notice.
         uiHost: {
@@ -8679,6 +8710,7 @@ function createVueApp() {
       + '<div :style="(compact ? \'padding:3px 0;font-size:0.9rem\' : \'padding:5px 12px;font-size:0.88rem;border-bottom:1px solid rgb(var(--v-theme-outline),0.06)\') + \';display:flex;align-items:center;gap:8px\'">'
       + '<span :style="{ width:\'9px\', height:\'9px\', borderRadius:\'50%\', background: ev.color, flex:\'0 0 auto\' }"></span>'
       + '<span v-if="ev.at" style="font-variant-numeric:tabular-nums;opacity:0.75" data-testid="cal-event-time">{{ timeOf(ev.at) }}</span>'
+      + '<span v-if="ev.range" style="font-size:0.75rem;opacity:0.7" data-testid="cal-event-range">{{ calendarHost.dateLabel(ev.range[0]) }} – {{ calendarHost.dateLabel(ev.range[1]) }}</span>'
       + '<b style="opacity:0.8">{{ ev.label }}</b> <span style="opacity:0.85">{{ ev.title }}</span>'
       + '<span v-if="ev.readOnly" style="opacity:0.5;font-size:0.7rem">(read-only)</span>'
       + '<rsvp-event-picker v-if="ev.respond" :view="ev.respond" :event-id="ev.row && ev.row.id" style="margin-left:auto"></rsvp-event-picker>'
@@ -8689,7 +8721,6 @@ function createVueApp() {
   // event the rsvp view does not list (one already past) gets none.
   app.component('rsvp-event-picker', {
     props: { view: String, eventId: String },
-    data: function() { return { now: Date.now() }; },
     computed: {
       a: function() { return appInstance; },
       ev: function() { var id = this.eventId; return appInstance.rsvpFor(this.view).events.filter(function(e) { return e.id === id; })[0] || null; },
@@ -8697,8 +8728,8 @@ function createVueApp() {
     },
     template: ''
       + '<span v-if="ev" class="d-inline-flex align-center" style="gap:8px" data-testid="cal-book">'
-      +   '<span v-if="a.rsvpPlacesShown(view, ev, now)" style="font-size:0.75rem;opacity:0.7">{{ a.rsvpPlacesText(view, ev, now) }}</span>'
-      +   '<rsvp-picker :options="a.rsvpOptions(view)" :picker="picker" :value="ev.myStatus" :disabled="a.rsvpLocked(view, ev, now)" @set="a.setRsvp(view, ev.key, $event || \'\')"></rsvp-picker>'
+      +   '<span v-if="a.rsvpPlacesShown(view, ev)" style="font-size:0.75rem;opacity:0.7">{{ a.rsvpPlacesText(view, ev) }}</span>'
+      +   '<rsvp-picker :options="a.rsvpOptions(view)" :picker="picker" :value="ev.myStatus" :disabled="a.rsvpLocked(view, ev)" @set="a.setRsvp(view, ev.key, $event || \'\')"></rsvp-picker>'
       + '</span>'
   });
 
@@ -9889,7 +9920,7 @@ function createVueApp() {
       +   '</template>'
       + '</v-text-field>'
       + '<v-alert v-if="last" :type="tone" density="compact" variant="tonal" class="mt-3" data-testid="scan-outcome" :data-outcome="last.outcome">'
-      +   '<span>{{ a.t(\'scan.\' + last.outcome) }}</span>&nbsp;'
+      +   '<span>{{ last.message || a.t(\'scan.\' + last.outcome) }}</span>&nbsp;'
       // A resolved scan names the CATALOGUE ROW it hit, through the same renderer the grid uses for that
       // column -- so a translated vocabulary reads the same here as everywhere else. A refused one can
       // only echo what was typed, since it resolved to nothing.
@@ -10218,9 +10249,7 @@ function createVueApp() {
     // null = the engine's own order (chronological, upcoming first) -- the view's natural default.
     // `pageQr`: the organizer's "QR code for this page" dialog, for a tablet or a printout at the venue.
     // `now`: ticks every 30 s, so an event closes on screen when its booking window does.
-    data: function() { return { sortCol: null, sortAsc: true, pageQr: false, now: Date.now(), clock: null }; },
-    mounted: function() { var self = this; if (this.cfg.closeBefore !== undefined) this.clock = setInterval(function() { self.now = Date.now(); }, 30000); },
-    beforeUnmount: function() { if (this.clock) clearInterval(this.clock); },
+    data: function() { return { sortCol: null, sortAsc: true, pageQr: false }; },
     computed: {
       a: function() { return appInstance; },
       viewName: function() { return this.name || appInstance.currentTable; },
@@ -10280,10 +10309,10 @@ function createVueApp() {
       // Frozen (attendance verified), or full and not mine to keep: a full class cannot be joined, but a
       // member holding a place in it can still give it up.
       // The rules are the root's (rsvpLocked & co.), shared with a calendar that books; `now` ticks here.
-      locked: function(ev) { return appInstance.rsvpLocked(this.viewName, ev, this.now); },
-      closed: function(ev) { return appInstance.rsvpClosed(this.viewName, ev, this.now); },
-      placesText: function(ev) { return appInstance.rsvpPlacesText(this.viewName, ev, this.now); },
-      placesShown: function(ev) { return appInstance.rsvpPlacesShown(this.viewName, ev, this.now); },
+      locked: function(ev) { return appInstance.rsvpLocked(this.viewName, ev); },
+      closed: function(ev) { return appInstance.rsvpClosed(this.viewName, ev); },
+      placesText: function(ev) { return appInstance.rsvpPlacesText(this.viewName, ev); },
+      placesShown: function(ev) { return appInstance.rsvpPlacesShown(this.viewName, ev); },
       toDateStr: toDateStr,
       // Translated label for a status VALUE, keyed by `list.<statusList||statusColumn>.<value>` (falls back
       // to the raw value). `statusList` lets the view name a translation namespace distinct from the column

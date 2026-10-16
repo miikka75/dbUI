@@ -171,6 +171,7 @@
       "text.pause_none_left": "Tällä jäsenyydellä ei ole taukoviikkoja jäljellä.",
       "text.pause_outside": "Viikon on oltava jäsenyyden aikana.",
       "text.pause_start": "Pidä taukoviikko",
+      "text.paused": "Tauolla tällä viikolla",
       "text.pulse_km_week": "Matka tällä viikolla (km)",
       "text.pulse_minutes_month": "Treeniminuutit tässä kuussa",
       "text.pulse_visits_month": "Salikäynnit tässä kuussa",

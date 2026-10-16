@@ -171,6 +171,7 @@
       "text.pause_none_left": "No pause weeks left on this membership.",
       "text.pause_outside": "The week must fall inside the membership.",
       "text.pause_start": "Pause a week",
+      "text.paused": "Paused this week",
       "text.pulse_km_week": "Distance this week (km)",
       "text.pulse_minutes_month": "Minutes trained this month",
       "text.pulse_visits_month": "Gym visits this month",

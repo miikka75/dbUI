@@ -219,3 +219,31 @@ test('a page names its own activity: { add: view } adds a row there, { open: vie
   expect(err).toContain('`fab.add` names missing view "nope"');
   expect(err).toContain('`fab` object names one activity');
 });
+
+test('blockedBy: on a day inside my own pause, the door scan and the class check-in are refused, with the reason', async ({ page }) => {
+  const schema = JSON.parse(JSON.stringify(SCHEMA));
+  schema.tables.leaves = { ownerWritable: ['starts_on', 'ends_on'], columns: [{ name: 'owner', type: 'owner' }, { name: 'starts_on', type: 'date' }, { name: 'ends_on', type: 'date' }] };
+  const blk = { table: 'leaves', from: 'starts_on', to: 'ends_on', message: 'On leave' };
+  schema.views[0].scan.blockedBy = blk;
+  schema.views[1].rsvp.blockedBy = blk;
+  await setup(page, schema);
+  const day = (n) => { const d = new Date(); d.setDate(d.getDate() + n); return ymd(d); };
+  await page.request.post('/api/putRow', { data: { tableId: 'leaves', tab: 'active', data: { id: 'l1', owner: 'ann@x', starts_on: day(-2), ends_on: day(4) } }, headers: ADMIN });
+  await boot(page, 'ann@x');
+  await page.locator('[data-testid="scan-fab"]').click();
+  await page.locator('[data-testid="scan-typed"] input').fill('FRONT-1');
+  await page.locator('[data-testid="scan-typed-go"]').click();
+  await expect(page.locator('[data-testid="scan-outcome"]')).toHaveAttribute('data-outcome', 'blocked');
+  await expect(page.locator('[data-testid="scan-outcome"]')).toContainText('On leave');
+  await page.locator('[data-testid="scan-fab"]').click();
+  await page.locator('[data-testid="scan-typed"] input').fill('bk7pqm');
+  await page.locator('[data-testid="scan-typed-go"]').click();
+  await page.evaluate(() => appInstance.selectTab('book'));
+  // She booked before the pause: leaving stays open, but the check-in claim is not saved.
+  await expect(page.locator('[data-testid="rsvp-toggle"]').first()).toBeVisible();
+  expect((await rows(page, 'visits')).length).toBe(0);
+  expect((await rows(page, 'bookings')).map((r) => r.checkin_code)).toEqual(['']);
+  // validateSchema names a period it cannot read.
+  const err = await page.evaluate(() => { VIEWS.door.scan.blockedBy = { table: 'leaves', from: 'nope' }; const e = validateSchema().join(' | '); return e; });
+  expect(err).toContain('`from` "nope" is not a column of "leaves"');
+});
