@@ -619,3 +619,24 @@ test('one app clock: a class closes on the calendar left open, without a reload'
   await page.clock.fastForward(20 * 60000);               // 25 minutes before: inside closeBefore
   await expect(coming).toBeDisabled();
 });
+
+test('a started event: nobody joins or leaves, holder included, and the calendar list moves past it', async ({ page }) => {
+  const schema = JSON.parse(JSON.stringify(SCHEMA));
+  schema.tables.practices.columns[0] = { name: 'date', type: 'datetime' };
+  schema.views.push({ name: 'timetable', kind: 'calendar', calendar: { sources: [{ table: 'practices', dateColumn: 'date', titleColumns: ['title'], respond: 'my_rsvp' }], defaultView: 'list' } });
+  schema.nav.items.push({ view: 'timetable' });
+  await setup(page);
+  await page.request.post('/api/saveSchema', { data: { schema }, headers: ADMIN });
+  const noon = new Date(); noon.setHours(12, 0, 0, 0);
+  await page.request.post('/api/putRow', { data: { tableId: 'practices', tab: 'active', data: { id: 'p1', date: new Date(noon.getTime() + 10 * 60000).toISOString(), title: 'Spin' } }, headers: ADMIN });
+  await page.clock.install({ time: noon });
+  await bootAs(page, 'ann@x');
+  const row = page.locator('tr', { hasText: 'Spin' });
+  await row.locator('button', { hasText: 'coming' }).click();
+  await expect.poll(async () => (await stored(page)).map((r) => r.response)).toEqual(['coming']);
+  await page.clock.fastForward(15 * 60000);
+  await expect(row.locator('[data-testid="rsvp-places"]')).toHaveText('rsvp.started');
+  await expect(row.locator('button', { hasText: 'out' })).toBeDisabled();
+  await page.evaluate(() => appInstance.selectTab('timetable'));
+  await expect(page.locator('[data-testid="cal-view"]')).not.toContainText('Spin');
+});

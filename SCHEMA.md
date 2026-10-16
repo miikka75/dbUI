@@ -1445,7 +1445,8 @@ The events live in one table; responses in another that has an **`owner` column*
 With a **datetime** `dateColumn`, `closeBefore: 30` stops joining an event from anywhere 30 minutes before
 it starts; the row says *Book at the gym*. From then until the start it is open only to a member **at the
 venue**: one who opened the check-in link (`?view=…&scan=…`) or has already checked in today. Once it
-has started, nobody joins. Leaving is never closed. With `checkin.link: "submit"`, booking at the venue
+has started, nobody joins or leaves (with a datetime `dateColumn`, with or without `closeBefore`), and the
+calendar list moves past it. Before that, leaving is never closed. With `checkin.link: "submit"`, booking at the venue
 checks the member in to it at once.
 
 It is a screen rule, not a rule the server holds: the server cannot tell "at the venue" from a typed

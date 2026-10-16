@@ -1148,7 +1148,7 @@ function createVueApp() {
          'role.admin', 'role.editor', 'role.viewer',
          'settings.rotation_anchor', 'settings.rotation_from', 'settings.rotation_periods', 'settings.rotation_every', 'settings.rotation_cycle', 'cal.today', 'btn.reset',
          'cal.month', 'cal.week', 'cal.list', 'cal.undated', 'cal.no_events', 'cal.items', 'cal.add_on_day',
-         'rsvp.date', 'rsvp.title', 'rsvp.your_response', 'rsvp.responses', 'rsvp.who', 'rsvp.none', 'rsvp.checkin_code', 'rsvp.checkin', 'rsvp.show_code', 'rsvp.page_qr', 'rsvp.places_left', 'rsvp.full', 'rsvp.closed', 'msg.capacity_full', 'msg.checked_in',
+         'rsvp.date', 'rsvp.title', 'rsvp.your_response', 'rsvp.responses', 'rsvp.who', 'rsvp.none', 'rsvp.checkin_code', 'rsvp.checkin', 'rsvp.show_code', 'rsvp.page_qr', 'rsvp.places_left', 'rsvp.full', 'rsvp.closed', 'rsvp.started', 'msg.capacity_full', 'msg.checked_in',
          'access.request_access', 'access.request_sent', 'access.your_name', 'access.pending_requests', 'access.approve', 'access.deny', 'access.name_required',
          'profile.title', 'profile.email', 'profile.share_name', 'profile.picture',
          'period.this_week', 'period.weeks_ago', 'period.current',
@@ -2929,6 +2929,12 @@ function createVueApp() {
       // `closeBefore` minutes before the start, joining from anywhere stops; from then until the start it
       // is open only to a member at the venue, and once the event has started, to nobody. Leaving is never
       // closed. A date with no time has no start to count back from (validateSchema says so).
+      // An event with a start TIME that has passed: nobody joins or leaves it any more, whether or not
+      // the view sets closeBefore. Check-in is not this rule's (setRsvpCode): arriving late still counts.
+      rsvpStarted: function(ev, now) {
+        var st = String(ev.date || '').length > 10 ? Date.parse(ev.date) : NaN;
+        return !isNaN(st) && (now || this.clockNow) >= st;
+      },
       rsvpClosed: function(name, ev, now) {
         var mins = ((VIEWS[name] && VIEWS[name].rsvp) || {}).closeBefore, st = String(ev.date || '').length > 10 ? Date.parse(ev.date) : NaN;
         if (mins === undefined || isNaN(st)) return false;
@@ -2957,9 +2963,10 @@ function createVueApp() {
         var blk = ((VIEWS[name] && VIEWS[name].rsvp) || {}).blockedBy;
         return !!blk && this.blockedOn(blk, Calendar.toDateStr(ev.date));
       },
-      rsvpLocked: function(name, ev, now) { return this.rsvpFrozen(name, ev.key) || (!ev.myHolds && (ev.full || this.rsvpClosed(name, ev, now) || this.rsvpBlocked(name, ev))); },
-      rsvpPlacesShown: function(name, ev, now) { return ev.capacity !== null || (!ev.myHolds && (this.rsvpClosed(name, ev, now) || this.rsvpBlocked(name, ev))); },
+      rsvpLocked: function(name, ev, now) { return this.rsvpFrozen(name, ev.key) || this.rsvpStarted(ev, now) || (!ev.myHolds && (ev.full || this.rsvpClosed(name, ev, now) || this.rsvpBlocked(name, ev))); },
+      rsvpPlacesShown: function(name, ev, now) { return ev.capacity !== null || this.rsvpStarted(ev, now) || (!ev.myHolds && (this.rsvpClosed(name, ev, now) || this.rsvpBlocked(name, ev))); },
       rsvpPlacesText: function(name, ev, now) {
+        if (this.rsvpStarted(ev, now)) return this.t('rsvp.started');
         if (!ev.myHolds && this.rsvpBlocked(name, ev)) { var bm = VIEWS[name].rsvp.blockedBy.message; return this.tOr(bm, bm || this.t('rsvp.closed')); }
         if (!ev.myHolds && this.rsvpClosed(name, ev, now)) return this.t('rsvp.closed');
         return ev.full ? this.t('rsvp.full') : this.t('rsvp.places_left') + ': ' + Math.max(0, ev.capacity - ev.booked);
@@ -8217,7 +8224,8 @@ function createVueApp() {
           // A `filters` column's choices: the dropdown's own (a ref's catalogue, a list's values).
           filterOptions: function(col) { return vm.colIsRef(col) ? vm.getRefOptions(col, {}).filter(function(o) { return o.value !== ''; }) : vm.getListOptions(col); },
           fieldLabel: function(col) { return vm.tOr('field.' + col, col); },
-          dateLabel: function(v) { return vm.dateLabel(v); }
+          dateLabel: function(v) { return vm.dateLabel(v); },
+          now: function() { return vm.clockNow; }
         },
         // The shared UI elements (CLAUDE.md "UI conventions"): words, and the clipboard with its notice.
         uiHost: {
@@ -9344,7 +9352,16 @@ function createVueApp() {
       selEvents: function() { return this.events[this.sel] || []; },
       selLabel: function() { if (!this.sel) return ''; var p = this.sel.split('-'); return new Intl.DateTimeFormat(this.calendarHost.locale(), { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date(+p[0], +p[1] - 1, +p[2])); },
       // A list reads FORWARD: today and after. The month and week grids are where the past is browsed.
-      listDays: function() { var ev = this.events, loc = this.calendarHost.locale(), today = fmtDate(new Date()); return Object.keys(ev).filter(function(k) { return k !== '__undated__' && k >= today; }).sort().map(function(k) { var p = k.split('-'); return { date: k, label: new Intl.DateTimeFormat(loc, { weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(+p[0], +p[1] - 1, +p[2])), events: ev[k] }; }); },
+      // The list reads forward from NOW: past days are left out, and so is an event of today whose start
+      // time has passed. The month and week grids still show the whole day.
+      listDays: function() {
+        var ev = this.events, loc = this.calendarHost.locale(), now = this.calendarHost.now(), today = fmtDate(new Date(now));
+        return Object.keys(ev).filter(function(k) { return k !== '__undated__' && k >= today; }).sort().map(function(k) {
+          var p = k.split('-');
+          var evs = k > today ? ev[k] : ev[k].filter(function(e) { return !e.at || Date.parse(e.at) > now; });
+          return { date: k, label: new Intl.DateTimeFormat(loc, { weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(+p[0], +p[1] - 1, +p[2])), events: evs };
+        }).filter(function(d) { return d.events.length; });
+      },
       undated: function() { return this.events['__undated__'] || []; },
       canAdd: function() { return this.calendarHost.canAdd(this.name); },
       body: function() { return window.viewPartFor('calendar', this.displayMode) || 'cal-agenda'; }
