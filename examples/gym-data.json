@@ -55,6 +55,11 @@
       "Beginner",
       "Intermediate",
       "Advanced"
+    ],
+    "rooms": [
+      "Cycling studio",
+      "Main hall",
+      "Studio 2"
     ]
   },
   "tables": {
@@ -236,7 +241,8 @@
         "reward": "Day pass for a friend",
         "claimed_on": "2026-10-08",
         "sent": "yes",
-        "claim_status": "granted"
+        "claim_status": "granted",
+        "updated_at": "2026-10-08T10:00:00.000Z"
       }
     ],
     "classes": [
@@ -248,7 +254,6 @@
         "room": "Cycling studio",
         "instructor": "Mikko",
         "capacity": 25,
-        "coins": 100,
         "booked": 0
       },
       {
@@ -259,7 +264,6 @@
         "room": "Main hall",
         "instructor": "Laura",
         "capacity": 25,
-        "coins": 100,
         "booked": 1
       },
       {
@@ -270,7 +274,6 @@
         "room": "Main hall",
         "instructor": "Sanna",
         "capacity": 15,
-        "coins": 100,
         "booked": 0
       },
       {
@@ -281,7 +284,6 @@
         "room": "Main hall",
         "instructor": "Mikko",
         "capacity": 25,
-        "coins": 150,
         "booked": 0
       },
       {
@@ -292,7 +294,6 @@
         "room": "Cycling studio",
         "instructor": "Mikko",
         "capacity": 25,
-        "coins": 100,
         "booked": 1
       },
       {
@@ -303,7 +304,6 @@
         "room": "Main hall",
         "instructor": "Laura",
         "capacity": 25,
-        "coins": 100,
         "booked": 0
       },
       {
@@ -314,7 +314,6 @@
         "room": "Main hall",
         "instructor": "Sanna",
         "capacity": 15,
-        "coins": 100,
         "booked": 0
       },
       {
@@ -325,7 +324,6 @@
         "room": "Main hall",
         "instructor": "Mikko",
         "capacity": 25,
-        "coins": 150,
         "booked": 1
       },
       {
@@ -336,7 +334,6 @@
         "room": "Cycling studio",
         "instructor": "Mikko",
         "capacity": 25,
-        "coins": 100,
         "booked": 0
       },
       {
@@ -347,7 +344,6 @@
         "room": "Main hall",
         "instructor": "Laura",
         "capacity": 25,
-        "coins": 100,
         "booked": 0
       },
       {
@@ -358,7 +354,6 @@
         "room": "Main hall",
         "instructor": "Sanna",
         "capacity": 15,
-        "coins": 100,
         "booked": 1
       },
       {
@@ -369,7 +364,6 @@
         "room": "Main hall",
         "instructor": "Mikko",
         "capacity": 25,
-        "coins": 150,
         "booked": 0
       },
       {
@@ -380,7 +374,6 @@
         "room": "Cycling studio",
         "instructor": "Mikko",
         "capacity": 25,
-        "coins": 100,
         "booked": 0
       },
       {
@@ -391,7 +384,6 @@
         "room": "Main hall",
         "instructor": "Laura",
         "capacity": 25,
-        "coins": 100,
         "booked": 0
       },
       {
@@ -402,7 +394,6 @@
         "room": "Main hall",
         "instructor": "Sanna",
         "capacity": 15,
-        "coins": 100,
         "booked": 0
       },
       {
@@ -413,7 +404,6 @@
         "room": "Main hall",
         "instructor": "Mikko",
         "capacity": 25,
-        "coins": 150,
         "booked": 1
       },
       {
@@ -424,7 +414,6 @@
         "room": "Cycling studio",
         "instructor": "Mikko",
         "capacity": 25,
-        "coins": 100,
         "booked": 0
       },
       {
@@ -435,7 +424,6 @@
         "room": "Main hall",
         "instructor": "Laura",
         "capacity": 25,
-        "coins": 100,
         "booked": 1
       },
       {
@@ -446,7 +434,6 @@
         "room": "Main hall",
         "instructor": "Sanna",
         "capacity": 15,
-        "coins": 100,
         "booked": 0
       },
       {
@@ -457,7 +444,6 @@
         "room": "Main hall",
         "instructor": "Mikko",
         "capacity": 25,
-        "coins": 150,
         "booked": 0
       },
       {
@@ -468,7 +454,6 @@
         "room": "Cycling studio",
         "instructor": "Mikko",
         "capacity": 25,
-        "coins": 100,
         "booked": 0
       },
       {
@@ -479,7 +464,6 @@
         "room": "Main hall",
         "instructor": "Laura",
         "capacity": 25,
-        "coins": 100,
         "booked": 2
       },
       {
@@ -490,7 +474,6 @@
         "room": "Main hall",
         "instructor": "Sanna",
         "capacity": 15,
-        "coins": 100,
         "booked": 0
       },
       {
@@ -501,7 +484,6 @@
         "room": "Main hall",
         "instructor": "Mikko",
         "capacity": 25,
-        "coins": 150,
         "booked": 0
       },
       {
@@ -512,7 +494,6 @@
         "room": "Cycling studio",
         "instructor": "Mikko",
         "capacity": 25,
-        "coins": 100,
         "booked": 1
       },
       {
@@ -523,7 +504,6 @@
         "room": "Main hall",
         "instructor": "Laura",
         "capacity": 25,
-        "coins": 100,
         "booked": 0
       },
       {
@@ -534,7 +514,6 @@
         "room": "Main hall",
         "instructor": "Sanna",
         "capacity": 15,
-        "coins": 100,
         "booked": 0
       },
       {
@@ -545,7 +524,6 @@
         "room": "Main hall",
         "instructor": "Mikko",
         "capacity": 25,
-        "coins": 150,
         "booked": 0
       },
       {
@@ -556,7 +534,6 @@
         "room": "Cycling studio",
         "instructor": "Mikko",
         "capacity": 25,
-        "coins": 100,
         "booked": 0
       },
       {
@@ -567,7 +544,6 @@
         "room": "Main hall",
         "instructor": "Laura",
         "capacity": 25,
-        "coins": 100,
         "booked": 0
       },
       {
@@ -578,7 +554,6 @@
         "room": "Main hall",
         "instructor": "Sanna",
         "capacity": 15,
-        "coins": 100,
         "booked": 1
       },
       {
@@ -589,7 +564,6 @@
         "room": "Main hall",
         "instructor": "Mikko",
         "capacity": 25,
-        "coins": 150,
         "booked": 0
       },
       {
@@ -600,7 +574,6 @@
         "room": "Cycling studio",
         "instructor": "Mikko",
         "capacity": 25,
-        "coins": 100,
         "booked": 0
       },
       {
@@ -611,7 +584,6 @@
         "room": "Main hall",
         "instructor": "Laura",
         "capacity": 25,
-        "coins": 100,
         "booked": 0
       },
       {
@@ -622,7 +594,6 @@
         "room": "Main hall",
         "instructor": "Sanna",
         "capacity": 15,
-        "coins": 100,
         "booked": 0
       },
       {
@@ -633,7 +604,6 @@
         "room": "Main hall",
         "instructor": "Mikko",
         "capacity": 25,
-        "coins": 150,
         "booked": 0
       },
       {
@@ -644,7 +614,6 @@
         "room": "Cycling studio",
         "instructor": "Mikko",
         "capacity": 25,
-        "coins": 100,
         "booked": 0
       },
       {
@@ -655,7 +624,6 @@
         "room": "Main hall",
         "instructor": "Laura",
         "capacity": 25,
-        "coins": 100,
         "booked": 0
       },
       {
@@ -666,7 +634,6 @@
         "room": "Main hall",
         "instructor": "Sanna",
         "capacity": 15,
-        "coins": 100,
         "booked": 0
       },
       {
@@ -677,7 +644,6 @@
         "room": "Main hall",
         "instructor": "Mikko",
         "capacity": 25,
-        "coins": 150,
         "booked": 0
       },
       {
@@ -688,7 +654,6 @@
         "room": "Main hall",
         "instructor": "Sanna",
         "capacity": 15,
-        "coins": 100,
         "booked": 0
       },
       {
@@ -699,7 +664,6 @@
         "room": "Main hall",
         "instructor": "Sanna",
         "capacity": 15,
-        "coins": 100,
         "booked": 0
       },
       {
@@ -710,7 +674,6 @@
         "room": "Cycling studio",
         "instructor": "Mikko",
         "capacity": 25,
-        "coins": 100,
         "booked": 0
       },
       {
@@ -721,7 +684,6 @@
         "room": "Main hall",
         "instructor": "Laura",
         "capacity": 25,
-        "coins": 100,
         "booked": 0
       },
       {
@@ -732,7 +694,6 @@
         "room": "Main hall",
         "instructor": "Sanna",
         "capacity": 15,
-        "coins": 100,
         "booked": 0
       },
       {
@@ -743,7 +704,6 @@
         "room": "Main hall",
         "instructor": "Mikko",
         "capacity": 25,
-        "coins": 150,
         "booked": 0
       },
       {
@@ -754,7 +714,6 @@
         "room": "Cycling studio",
         "instructor": "Mikko",
         "capacity": 25,
-        "coins": 100,
         "booked": 0
       },
       {
@@ -765,7 +724,6 @@
         "room": "Main hall",
         "instructor": "Laura",
         "capacity": 25,
-        "coins": 100,
         "booked": 0
       },
       {
@@ -776,7 +734,6 @@
         "room": "Main hall",
         "instructor": "Sanna",
         "capacity": 15,
-        "coins": 100,
         "booked": 0
       },
       {
@@ -787,7 +744,6 @@
         "room": "Main hall",
         "instructor": "Mikko",
         "capacity": 25,
-        "coins": 150,
         "booked": 0
       },
       {
@@ -798,7 +754,6 @@
         "room": "Cycling studio",
         "instructor": "Mikko",
         "capacity": 25,
-        "coins": 100,
         "booked": 0
       },
       {
@@ -809,7 +764,6 @@
         "room": "Main hall",
         "instructor": "Laura",
         "capacity": 25,
-        "coins": 100,
         "booked": 0
       },
       {
@@ -820,7 +774,6 @@
         "room": "Main hall",
         "instructor": "Sanna",
         "capacity": 15,
-        "coins": 100,
         "booked": 0
       },
       {
@@ -831,7 +784,6 @@
         "room": "Main hall",
         "instructor": "Mikko",
         "capacity": 25,
-        "coins": 150,
         "booked": 0
       },
       {
@@ -842,7 +794,6 @@
         "room": "Cycling studio",
         "instructor": "Mikko",
         "capacity": 25,
-        "coins": 100,
         "booked": 0
       },
       {
@@ -853,7 +804,6 @@
         "room": "Main hall",
         "instructor": "Laura",
         "capacity": 25,
-        "coins": 100,
         "booked": 0
       },
       {
@@ -864,7 +814,6 @@
         "room": "Main hall",
         "instructor": "Sanna",
         "capacity": 15,
-        "coins": 100,
         "booked": 0
       },
       {
@@ -875,7 +824,6 @@
         "room": "Main hall",
         "instructor": "Mikko",
         "capacity": 25,
-        "coins": 150,
         "booked": 0
       },
       {
@@ -886,7 +834,6 @@
         "room": "Cycling studio",
         "instructor": "Mikko",
         "capacity": 25,
-        "coins": 100,
         "booked": 0
       },
       {
@@ -897,7 +844,6 @@
         "room": "Main hall",
         "instructor": "Laura",
         "capacity": 25,
-        "coins": 100,
         "booked": 0
       },
       {
@@ -908,7 +854,6 @@
         "room": "Main hall",
         "instructor": "Sanna",
         "capacity": 15,
-        "coins": 100,
         "booked": 0
       },
       {
@@ -919,7 +864,6 @@
         "room": "Main hall",
         "instructor": "Mikko",
         "capacity": 25,
-        "coins": 150,
         "booked": 0
       },
       {
@@ -930,7 +874,6 @@
         "room": "Main hall",
         "instructor": "Sanna",
         "capacity": 15,
-        "coins": 100,
         "booked": 0
       },
       {
@@ -941,7 +884,6 @@
         "room": "Main hall",
         "instructor": "Sanna",
         "capacity": 15,
-        "coins": 100,
         "booked": 0
       },
       {
@@ -952,7 +894,6 @@
         "room": "Cycling studio",
         "instructor": "Mikko",
         "capacity": 25,
-        "coins": 100,
         "booked": 0
       },
       {
@@ -963,7 +904,6 @@
         "room": "Main hall",
         "instructor": "Laura",
         "capacity": 25,
-        "coins": 100,
         "booked": 0
       },
       {
@@ -974,7 +914,6 @@
         "room": "Main hall",
         "instructor": "Sanna",
         "capacity": 15,
-        "coins": 100,
         "booked": 0
       },
       {
@@ -985,7 +924,6 @@
         "room": "Main hall",
         "instructor": "Mikko",
         "capacity": 25,
-        "coins": 150,
         "booked": 0
       },
       {
@@ -996,7 +934,6 @@
         "room": "Cycling studio",
         "instructor": "Mikko",
         "capacity": 25,
-        "coins": 100,
         "booked": 0
       },
       {
@@ -1007,7 +944,6 @@
         "room": "Main hall",
         "instructor": "Laura",
         "capacity": 25,
-        "coins": 100,
         "booked": 0
       },
       {
@@ -1018,7 +954,6 @@
         "room": "Main hall",
         "instructor": "Sanna",
         "capacity": 15,
-        "coins": 100,
         "booked": 0
       },
       {
@@ -1029,7 +964,6 @@
         "room": "Main hall",
         "instructor": "Mikko",
         "capacity": 25,
-        "coins": 150,
         "booked": 0
       },
       {
@@ -1040,7 +974,6 @@
         "room": "Cycling studio",
         "instructor": "Mikko",
         "capacity": 25,
-        "coins": 100,
         "booked": 0
       },
       {
@@ -1051,7 +984,6 @@
         "room": "Main hall",
         "instructor": "Laura",
         "capacity": 25,
-        "coins": 100,
         "booked": 0
       },
       {
@@ -1062,7 +994,6 @@
         "room": "Main hall",
         "instructor": "Sanna",
         "capacity": 15,
-        "coins": 100,
         "booked": 0
       },
       {
@@ -1073,7 +1004,6 @@
         "room": "Main hall",
         "instructor": "Mikko",
         "capacity": 25,
-        "coins": 150,
         "booked": 0
       },
       {
@@ -1084,7 +1014,6 @@
         "room": "Cycling studio",
         "instructor": "Mikko",
         "capacity": 25,
-        "coins": 100,
         "booked": 0
       },
       {
@@ -1095,7 +1024,6 @@
         "room": "Main hall",
         "instructor": "Laura",
         "capacity": 25,
-        "coins": 100,
         "booked": 0
       },
       {
@@ -1106,7 +1034,6 @@
         "room": "Main hall",
         "instructor": "Sanna",
         "capacity": 15,
-        "coins": 100,
         "booked": 0
       },
       {
@@ -1117,7 +1044,6 @@
         "room": "Main hall",
         "instructor": "Mikko",
         "capacity": 25,
-        "coins": 150,
         "booked": 0
       },
       {
@@ -1128,7 +1054,6 @@
         "room": "Cycling studio",
         "instructor": "Mikko",
         "capacity": 25,
-        "coins": 100,
         "booked": 0
       },
       {
@@ -1139,7 +1064,6 @@
         "room": "Main hall",
         "instructor": "Laura",
         "capacity": 25,
-        "coins": 100,
         "booked": 0
       },
       {
@@ -1150,7 +1074,6 @@
         "room": "Main hall",
         "instructor": "Sanna",
         "capacity": 15,
-        "coins": 100,
         "booked": 0
       },
       {
@@ -1161,7 +1084,6 @@
         "room": "Main hall",
         "instructor": "Mikko",
         "capacity": 25,
-        "coins": 150,
         "booked": 0
       },
       {
@@ -1172,7 +1094,6 @@
         "room": "Main hall",
         "instructor": "Sanna",
         "capacity": 15,
-        "coins": 100,
         "booked": 0
       },
       {
@@ -1183,7 +1104,6 @@
         "room": "Main hall",
         "instructor": "Sanna",
         "capacity": 15,
-        "coins": 100,
         "booked": 0
       }
     ],

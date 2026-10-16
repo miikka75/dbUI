@@ -605,6 +605,8 @@
   // `idx` is resolveComputed's per-CALL lookup index cache (see there); never null when called from it.
   function _computeInto(r, d, rows, cache, ctx, idx) {
     var comp = d.computed;
+    // `value`: the same amount on every row -- a per-row rate an aggregate sums (coins per class attended).
+    if ('value' in comp) { r[d.name] = comp.value; return; }
     // Rotation columns: index into a pre-authored ordered list (rotationTable) by computed POSITION
     // (occurrence count or elapsed calendar intervals). Output is the slot's value (often an array).
     if (comp.rotationTable) {

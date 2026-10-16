@@ -161,25 +161,25 @@
       "views": 36,
       "schema": {
         "file": "gym-schema.json",
-        "hash": "54c77f010e979033"
+        "hash": "2e1c0c6cecc9999e"
       },
       "languages": [
         {
           "code": "en",
           "name": "English",
           "file": "gym-lang-en.json",
-          "hash": "ec41c1b78b0193ad"
+          "hash": "970c76cf1f92ad29"
         },
         {
           "code": "fi",
           "name": "Suomi",
           "file": "gym-lang-fi.json",
-          "hash": "bdcd7a7d47453083"
+          "hash": "a30018add6bdef7b"
         }
       ],
       "data": {
         "file": "gym-data.json",
-        "hash": "480d2ea37e961255"
+        "hash": "0161c707310b5625"
       },
       "about": {
         "file": "gym-about.json",

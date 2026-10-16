@@ -553,3 +553,11 @@ describe('rows.js — days relative to today, and a view limited to its first N 
     assert.deepEqual(ids({}).length, 3);
   });
 });
+
+describe('rows.js — computed `value`', () => {
+  it('puts the same amount on every row of its source', () => {
+    const rows = [{ _source: 'bookings' }, { _source: 'claims' }, { _source: 'bookings' }];
+    Rows.resolveComputed(rows, [{ name: 'delta', source: 'bookings', computed: { value: 100 } }], { dataCache: {} });
+    assert.deepEqual(rows.map((r) => r.delta), [100, undefined, 100]);
+  });
+});

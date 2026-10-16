@@ -629,6 +629,8 @@ Shapes:
   months, then weeks and days; an amount may name another column, a computed one earlier in the list included. Months
   clamp to the month end (31 Jan + 1 month = 28 Feb). A blank start, or an amount that is not a number, gives
   no date. Renders and sorts as a date.
+- **A fixed amount** (`value`): `{ "value": 100 }` puts the same number on every row — a rate an aggregate
+  sums, such as coins per class attended (`"source"` limits it to one table of a union).
 - **Age of a row** (`daysSince`): whole days from a date column to today, as a **number** (negative for a
   future date, `""` when the date is blank or unparseable):
   ```json

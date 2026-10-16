@@ -143,7 +143,10 @@
         },
         {
           "name": "room",
-          "type": "text"
+          "type": "select",
+          "list": "rooms",
+          "allowNew": true,
+          "sorted": true
         },
         {
           "name": "instructor",
@@ -159,11 +162,6 @@
         {
           "name": "booked",
           "type": "number"
-        },
-        {
-          "name": "coins",
-          "type": "number",
-          "default": 100
         }
       ]
     },
@@ -641,6 +639,11 @@
           "list": "claim_status",
           "picker": "toggle",
           "default": "requested"
+        },
+        {
+          "name": "updated_at",
+          "type": "text",
+          "hidden": true
         }
       ],
       "ownerWritable": [
@@ -651,6 +654,14 @@
       ],
       "ownerWritableWhile": {
         "claim_status": "requested"
+      },
+      "archiveAfter": {
+        "column": "claim_status",
+        "values": [
+          "granted",
+          "denied"
+        ],
+        "days": 1
       }
     },
     "pauses": {
@@ -1472,7 +1483,6 @@
       ],
       "mode": "join",
       "layout": "card",
-      "readonly": true,
       "defaultSort": "gym",
       "columns": [
         "gym",
@@ -1606,13 +1616,7 @@
           "name": "delta",
           "source": "bookings",
           "computed": {
-            "lookup": {
-              "table": "classes",
-              "match": "class",
-              "on": "id",
-              "field": "coins",
-              "default": 0
-            }
+            "value": 100
           }
         },
         {
@@ -1681,13 +1685,17 @@
         "reward",
         "claim_status"
       ],
-      "readonly": true
+      "readonly": true,
+      "partitionLabels": {
+        "active": "text.rewards_open",
+        "archive": "text.rewards_done"
+      }
     },
     {
       "name": "doc_loyalty",
       "kind": "page",
       "icon": "mdi-star-circle",
-      "markdown": "## {{t:text.loyalty_coins}}\n\n{{view:my_coins}}\n\n## {{t:text.loyalty_shop}}\n\n{{view:reward_claim_form}}\n\n## {{t:text.loyalty_mine}}\n\n{{view:reward_mine}}\n"
+      "markdown": "## {{t:text.loyalty_coins}}\n\n{{view:my_coins}}\n\n## {{t:text.loyalty_shop}}\n\n{{view:reward_claim_form}}\n\n## {{t:text.loyalty_mine}}\n\n{{view:reward_mine@both}}\n"
     },
     {
       "name": "reward_board",
@@ -1788,13 +1796,7 @@
           "name": "delta",
           "source": "bookings",
           "computed": {
-            "lookup": {
-              "table": "classes",
-              "match": "class",
-              "on": "id",
-              "field": "coins",
-              "default": 0
-            }
+            "value": 100
           }
         },
         {
@@ -1862,13 +1864,7 @@
           "name": "delta",
           "source": "bookings",
           "computed": {
-            "lookup": {
-              "table": "classes",
-              "match": "class",
-              "on": "id",
-              "field": "coins",
-              "default": 0
-            }
+            "value": 100
           }
         },
         {
