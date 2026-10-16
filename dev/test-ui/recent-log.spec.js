@@ -94,3 +94,28 @@ test('on a phone, Month is the month grid, not the list', async ({ page }) => {
   await page.evaluate(() => appInstance.selectTab('cal'));
   await expect(page.locator('[data-testid="cal-cell-' + ymd(0) + '"]')).toBeVisible();
 });
+
+test('preview: an embed shows its first N rows, Show all expands, Show fewer folds back', async ({ page }) => {
+  const schema = JSON.parse(JSON.stringify(SCHEMA));
+  schema.views = [
+    { name: 'log', kind: 'data', sources: ['logs'], mode: 'union', layout: 'table', columns: ['done_on', 'what'], defaultSort: 'done_on', defaultSortDesc: true, preview: 2 },
+    { name: 'page', kind: 'page', markdown: '{{view:log}}' }
+  ];
+  schema.nav = { items: [{ view: 'page' }] };
+  await page.request.post('/api/resetData');
+  await page.request.post('/api/setUserRole', { data: { uid: 'org@x', role: 'admin', user: 'org@x', tables: 'all' } });
+  await page.request.post('/api/saveSchema', { data: { schema }, headers: ADMIN });
+  for (const n of [0, -1, -2, -3]) await page.request.post('/api/putRow', { data: { tableId: 'logs', tab: 'active', data: { id: 'r' + -n, owner: 'org@x', done_on: ymd(n), what: 'w' + n } }, headers: ADMIN });
+  await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); localStorage.setItem('test_user', 'org@x'); });
+  await page.goto('/');
+  await page.waitForFunction(() => window.appInstance && !appInstance.loading, { timeout: 30000 });
+  await page.evaluate(() => appInstance.selectTab('page'));
+  const toggle = page.locator('[data-testid="embed-preview"]');
+  const bodyRows = page.locator('main tbody tr');
+  await expect(bodyRows).toHaveCount(2);
+  await expect(toggle).toContainText('(4)');
+  await toggle.click();
+  await expect(bodyRows).toHaveCount(4);
+  await toggle.click();
+  await expect(bodyRows).toHaveCount(2);
+});

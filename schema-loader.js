@@ -810,6 +810,7 @@ function validateSchema() {
         });
       })(f);
     });
+    if (view.preview !== undefined && !(typeof view.preview === 'number' && view.preview > 0 && Math.floor(view.preview) === view.preview)) errors.push('view "' + v + '": `preview` must be a whole number above 0');
     // `limit` keeps the first N rows of the default order, so without a defaultSort it would keep an
     // arbitrary N.
     if (view.limit !== undefined) {

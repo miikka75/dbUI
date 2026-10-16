@@ -61,6 +61,8 @@
       "btn.search": "Hae",
       "btn.show_active": "Tulevat",
       "btn.show_archived": "Menneet",
+      "btn.show_all": "Näytä kaikki",
+      "btn.show_fewer": "Näytä vähemmän",
       "btn.undo": "Kumoa",
       "cal.add_on_day": "Lisää päivälle",
       "cal.err_date_col": "Valitse paivamaaran sisaltava sarake",

@@ -1084,7 +1084,8 @@
         "km",
         "note"
       ],
-      "defaultSortDesc": true
+      "defaultSortDesc": true,
+      "preview": 5
     },
     {
       "name": "my_visits",
@@ -1110,7 +1111,8 @@
         "gym",
         "verified"
       ],
-      "defaultSortDesc": true
+      "defaultSortDesc": true,
+      "preview": 5
     },
     {
       "name": "exercise_heatmap",

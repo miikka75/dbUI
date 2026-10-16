@@ -1287,6 +1287,12 @@ under it kept their own fixed periods. General pieces:
 
 Next, not built: a **series** tile — the period broken into its weeks or months as bars. **Medium.**
 
+#### 19. A folded embed — `preview: N` *(landed)*
+
+The workout log and the visits under My calendar can be long for a year. `preview: 5` on a view shows an
+embed of it as its first 5 rows with **Show all (M)** / **Show fewer**. Display only: the rows are all
+there for the totals and for the top-level screen. **Small.**
+
 #### Not proposed
 
 - **Opening the gate.** It needs the gate controller's own API and a server to call it from; the

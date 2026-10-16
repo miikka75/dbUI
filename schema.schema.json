@@ -259,6 +259,7 @@
         "collapsed": { "type": "boolean", "description": "Cards start collapsed (accordion)." },
         "defaultSort": { "type": "string", "description": "Default sort column." },
         "defaultSortDesc": { "type": "boolean", "description": "Sort `defaultSort` descending: newest first." },
+        "preview": { "type": "integer", "minimum": 1, "description": "Embedded, show the first N rows with a Show all / Show fewer toggle." },
         "limit": { "type": "integer", "minimum": 1, "description": "Keep only the first N rows of the default order (needs `defaultSort`)." },
         "feedSubscribers": {
           "type": "object",

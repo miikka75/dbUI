@@ -1112,7 +1112,7 @@ function createVueApp() {
         return Leftovers.corpus([doc, VIEWS, this.pageCache, cfg], [doc.tables || {}], [doc.views || [], VIEWS]);
       },
       staticTranslationKeys: function() {
-        return ['app.title', 'btn.add', 'btn.show_active', 'btn.show_archived', 'btn.more',
+        return ['app.title', 'btn.add', 'btn.show_active', 'btn.show_archived', 'btn.show_all', 'btn.show_fewer', 'btn.more',
          'btn.edit', 'btn.copy', 'btn.show', 'btn.hide', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'cal.feed_url', 'feed.subscribe', 'feed.link_pending', 'feed.unsubscribe', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.no_blob_store', 'msg.feed_cap_reached', 'settings.feeds', 'settings.feed_regenerate', 'settings.feed_unpublish', 'settings.feed_not_republishing', 'settings.feed_all_personal', 'settings.feed_subscribers', 'settings.feed_revoking', 'settings.feed_over_cap', 'settings.feed_unpublished', 'settings.feed_revoked', 'settings.feed_sweep', 'settings.csp_reports', 'settings.csp_token', 'settings.csp_bad_token', 'settings.csp_read_failed', 'settings.csp_none', 'settings.csp_extensions', 'settings.csp_directive', 'settings.csp_blocked', 'settings.csp_count', 'settings.csp_last_seen', 'btn.refresh', 'settings.csp_rotate', 'msg.feed_swept', 'cal.err_no_source', 'cal.err_table', 'cal.err_date_col', 'cal.err_not_date', 'cal.err_title_col', 'settings.add_calendar', 'settings.cal_title', 'settings.cal_table', 'settings.cal_date_col', 'settings.cal_title_cols', 'settings.cal_add_source', 'btn.delete', 'btn.confirm_delete', 'cal.err_not_rotation', 'settings.cal_rotations', 'msg.name_taken', 'cal.err_name', 'lang.add_language', 'btn.cancel', 'timeline.empty', 'col.switch_list',
          'img.replace', 'img.upload', 'img.remove', 'img.url', 'img.view', 'img.open_original',
          'btn.close', 'btn.previous', 'btn.next',
@@ -8359,7 +8359,7 @@ function createVueApp() {
     // Per-embed inline-edit state for doc-view embeds (each embed edits its own page independently),
     // which half of a `@both` embed is showing (per embed: two toggles on one page move independently),
     // and the reader's header sort -- per instance too: one member's callings sorting is not another's.
-    data: function() { return { editing: false, docDraft: '', showArchive: false, sortCol: null, sortAsc: true }; },
+    data: function() { return { editing: false, docDraft: '', showArchive: false, sortCol: null, sortAsc: true, previewOpen: false }; },
     created: function() {
       // A doc-view embed renders the ACCESS-GATED server body, not the world-readable schema seed. Kick
       // off the single-page read (server-filtered) once, but only if the viewer may see it -- a restricted
@@ -8455,7 +8455,12 @@ function createVueApp() {
       // What a table layout renders: `rows` (already in the embed's defaultSort) until the reader clicks a
       // header, then re-sorted through the same sortByCol the primary grid uses, so a ref or lookup-backed
       // column sorts in catalogue order here too. colCfg lets an aggregate's key inherit its source's order.
-      shown: function() { return this.sortCol ? Rows.sortByCol(this.rows, this.sortCol, this.colCfg, this.sortAsc) : this.rows; },
+      sorted: function() { return this.sortCol ? Rows.sortByCol(this.rows, this.sortCol, this.colCfg, this.sortAsc) : this.rows; },
+      // `preview: N` on the embedded view or table: its first N rows until the reader asks for all of them.
+      previewN: function() { var c = this.spec ? null : (this.type === 'view' ? VIEWS[this.name] : SCHEMA[this.name]); return (c && c.preview > 0) ? c.preview : 0; },
+      previewMore: function() { return this.previewN > 0 && this.rows.length > this.previewN; },
+      shown: function() { return (this.previewMore && !this.previewOpen) ? this.sorted.slice(0, this.previewN) : this.sorted; },
+      previewLabel: function() { return this.previewOpen ? this.t('btn.show_fewer') : this.t('btn.show_all') + ' (' + this.rows.length + ')'; },
       canMutate: function() { return !this.effPart && appInstance && appInstance.canMutateEmbed(this.type, this.name); },
       hasArchive: function() { return !this.effPart && appInstance && appInstance.embedHasArchive(this.type, this.name); },
       layout: function() { return appInstance ? appInstance.embedViewLayout(this.type, this.name) : 'table'; },
@@ -8547,12 +8552,12 @@ function createVueApp() {
       +   '<template v-slot:actions="{ item }"><template v-if="canMutateRow(item)"><confirm-x v-if="hasArchive" :armed="isArchArmed(item)" action="archive" dense @click="archRow(item)"></confirm-x><confirm-x :armed="isDelArmed(item)" dense @click="delRow(item)"></confirm-x></template></template>'
       + '</data-gallery>'
       + '<v-list v-else-if="layout===\'list\'" density="compact" class="my-2">'
-      + '<v-list-item v-for="(item, ri) in rows" :key="item.id || ri" class="px-2">'
+      + '<v-list-item v-for="(item, ri) in shown" :key="item.id || ri" class="px-2">'
       + '<template v-slot:default><span v-for="(col, i) in colsFor(item)" :key="col" style="font-size:0.85rem"><list-value :col="col" :value="item[col]" :view-cfg="obscureCfg"></list-value><span v-if="i < colsFor(item).length - 1" style="opacity:0.3;margin:0 6px">·</span></span></template>'
       + '<template v-slot:append><template v-if="canMutateRow(item)"><confirm-x v-if="hasArchive" :armed="isArchArmed(item)" action="archive" dense @click="archRow(item)"></confirm-x><confirm-x :armed="isDelArmed(item)" dense @click="delRow(item)"></confirm-x></template></template>'
       + '</v-list-item></v-list>'
       + '<div v-else-if="layout===\'card\'" class="my-2">'
-      + '<v-card v-for="(item, ri) in rows" :key="item.id || ri" variant="flat" class="ma-2 pa-2" style="border-bottom:1px solid rgb(var(--v-theme-outline),0.2)">'
+      + '<v-card v-for="(item, ri) in shown" :key="item.id || ri" variant="flat" class="ma-2 pa-2" style="border-bottom:1px solid rgb(var(--v-theme-outline),0.2)">'
       + '<div v-for="col in colsFor(item)" :key="col" class="d-flex align-center mb-1"><span style="min-width:120px;flex-shrink:0;font-size:0.75rem;opacity:0.6;padding-right:8px">{{ t(\'field.\' + col) || col }}</span><span style="opacity:0.8"><list-value :col="col" :value="item[col]" :view-cfg="obscureCfg"></list-value></span></div>'
       + '<div v-if="canMutateRow(item)" style="text-align:right"><confirm-x v-if="hasArchive" :armed="isArchArmed(item)" action="archive" dense @click="archRow(item)"></confirm-x><confirm-x :armed="isDelArmed(item)" dense @click="delRow(item)"></confirm-x></div>'
       + '</v-card></div>'
@@ -8565,7 +8570,10 @@ function createVueApp() {
       + '<confirm-x :armed="isDelArmed(item)" dense @click="delRow(item)"></confirm-x>'
       + '</template></td></tr></tbody>'
       + '</template></v-table>'
+      + '<div class="d-flex flex-wrap align-center">'
       + '<v-btn v-if="canMutate" variant="text" size="small" prepend-icon="mdi-plus" @click="addRow">{{ t(\'btn.add\') || \'Add\' }}</v-btn>'
+      + '<v-btn v-if="previewMore" variant="text" size="small" :prepend-icon="previewOpen ? \'mdi-chevron-up\' : \'mdi-chevron-down\'" :aria-expanded="String(previewOpen)" data-testid="embed-preview" @click="previewOpen = !previewOpen">{{ previewLabel }}</v-btn>'
+      + '</div>'
       + '</div>'
   });
 

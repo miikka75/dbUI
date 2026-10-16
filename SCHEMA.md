@@ -323,6 +323,7 @@ Named, reusable. Views are flat — hierarchy lives in `nav` (no `views.views` n
 | `collapsed` | boolean | Cards start collapsed (accordion) |
 | `defaultSort` | string | Default sort column |
 | `defaultSortDesc` | boolean | Sort `defaultSort` descending — newest first, for a log |
+| `preview` | number | **Embedded** (`{{view:x}}`): show the first N rows of the view's order, with **Show all (M)** under them to expand and **Show fewer** to fold back. All rows stay in the view — totals and the top-level screen see them all; only the embed's display is folded |
 | `limit` | number | Keep only the first N rows of the default order (needs `defaultSort`): with `defaultSortDesc`, the latest N. The view IS those rows, so a stats view over it counts them only |
 | `hideEmpty` | boolean | Hide empty columns. **Table** layout drops a column empty across *all* rows; **card / board** layouts drop it per row, so each card shows only the fields it has (edit mode still shows every field, or the one you needed to fill in would be the one missing). Override per column with `{ "name": col, "hideEmpty": false }` |
 | `icon` | string | MDI icon for the sidebar |
