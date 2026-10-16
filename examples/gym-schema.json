@@ -704,6 +704,38 @@
       "ownerWritableWhile": {
         "sent": ""
       }
+    },
+    "feed_subs": {
+      "privateRoster": true,
+      "columns": [
+        {
+          "name": "owner",
+          "type": "owner"
+        },
+        {
+          "name": "lang",
+          "type": "text"
+        },
+        {
+          "name": "active",
+          "type": "text"
+        },
+        {
+          "name": "fid",
+          "type": "text"
+        },
+        {
+          "name": "url",
+          "type": "text"
+        }
+      ],
+      "ownerWritable": [
+        "lang",
+        "active"
+      ],
+      "ownerWritableWhile": {
+        "active": "yes"
+      }
     }
   },
   "views": [
@@ -818,7 +850,8 @@
         "weekStart": 1,
         "filters": [
           "gym"
-        ]
+        ],
+        "export": false
       }
     },
     {
@@ -1140,8 +1173,10 @@
             ],
             "label": "Class",
             "filter": {
-              "booking": "booked"
-            }
+              "booking": "booked",
+              "owner": "@me"
+            },
+            "durationColumn": "class.class_type.duration_min"
           },
           {
             "table": "workouts",
@@ -1163,7 +1198,8 @@
             "label": "Visit",
             "filter": {
               "member": "@me"
-            }
+            },
+            "feed": false
           },
           {
             "table": "pauses",
@@ -1175,7 +1211,8 @@
             "filter": {
               "sent": "yes"
             },
-            "endColumn": "pause_until"
+            "endColumn": "pause_until",
+            "feed": false
           },
           {
             "table": "pt_sessions",
@@ -1190,12 +1227,21 @@
               "pt_status": {
                 "ne": "cancelled"
               }
-            }
+            },
+            "feed": false
           }
         ],
         "defaultView": "month",
         "weekStart": 1,
         "addTo": "workouts"
+      },
+      "feed": "per-person",
+      "feedSubscribers": {
+        "table": "feed_subs",
+        "langColumn": "lang",
+        "activeColumn": "active",
+        "idColumn": "fid",
+        "urlColumn": "url"
       }
     },
     {
@@ -1502,10 +1548,6 @@
         "display": "number",
         "tiles": [
           {
-            "label": "text.classes_attended",
-            "agg": "count"
-          },
-          {
             "label": "text.streak_classes",
             "agg": "streak",
             "column": "class_start",
@@ -1528,6 +1570,10 @@
                 "icon": "mdi-crown"
               }
             ]
+          },
+          {
+            "label": "text.classes_attended",
+            "agg": "count"
           }
         ]
       },

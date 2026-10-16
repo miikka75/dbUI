@@ -1845,6 +1845,7 @@ function createVueApp() {
         return {
           views: VIEWS, dataCache: this.dataCache,
           deriveRows: function(t, rows) { return self.deriveRows(t, rows); },
+          rowPath: function(r, p) { return self.rowPath(r, p); },
           today: function() { return self._calToday(); },
           t: function(k) { return self.t(k); },
           tOr: function(k, fb) { return self.tOr(k, fb); },
@@ -1866,7 +1867,8 @@ function createVueApp() {
       // Build the { 'YYYY-MM-DD': [events] } map for a calendar view. Undated rows -> '__undated__'.
       // Fail-closed per source: a table the user cannot read contributes nothing. When `window` is
       // given, rotationSources' generated duties are added (bounded to that window).
-      calEventsFor: function(name, window) { return Events.build(name, window, this._eventsCtx()); },
+      // `forFeed`: building a published file, which leaves out `feed: false` sources.
+      calEventsFor: function(name, window, forFeed) { var ctx = this._eventsCtx(); if (forFeed) ctx.forFeed = true; return Events.build(name, window, ctx); },
       // The same ctx, rendering as SOMEBODY ELSE — the per-person feed's whole rendering path. Only the
       // two identity-dependent functions are swapped; everything else is shared, so this cannot drift
       // from what the app itself draws.
@@ -1886,7 +1888,7 @@ function createVueApp() {
         });
         return ctx;
       },
-      calEventsAsFor: function(name, window, identity) { return Events.build(name, window, this._eventsCtxAs(identity)); },
+      calEventsAsFor: function(name, window, identity, forFeed) { var ctx = this._eventsCtxAs(identity); if (forFeed) ctx.forFeed = true; return Events.build(name, window, ctx); },
       // --- Calendars defined in the DATABASE ----------------------------------------------------
       // A calendar is a saved question over tables that already exist, so it does not have to be part of
       // the schema document. These live in the FOLDER CONFIG -- which already holds per-view runtime
@@ -2134,7 +2136,9 @@ function createVueApp() {
       // and there is no promise to await). Bounded, because a table nobody can read never arrives and an
       // export that hangs is worse than one that is honestly short.
       _awaitViewData: function(name) {
-        var self = this, tables = Feeds.tablesOf(VIEWS, name);
+        // The sources, and what reading them needs (_viewTables: a `durationColumn` path, a `respond` view) --
+        // the same set the calendar screen loads, so a file cannot carry less than the screen shows.
+        var self = this, tables = Feeds.tablesOf(VIEWS, name).concat(this._viewTables(name)).filter(function(t, i, a) { return a.indexOf(t) === i; });
         var missing = function() {
           return tables.filter(function(t) { return self.canReachTable(t) && !self.dataCache[t]; });
         };
@@ -2257,12 +2261,13 @@ function createVueApp() {
       // covers all of it without threading a strings map through displayValue's twenty-one call sites.
       // `identity` renders the calendar as THAT person rather than as the signed-in user — a per-person
       // feed's whole difference. Absent, this is the shared path and nothing changes.
-      _renderIcs: function(name, win, strings, identity) {
+      // `forFeed`: a published file, which leaves out the sources marked `feed: false`.
+      _renderIcs: function(name, win, strings, identity, forFeed) {
         var saved = this.strings;
         if (strings) this.strings = strings;
         try {
           var title = this.tOr('view.' + name, this.tOr('tab.' + name, name));
-          return Ics.build(identity ? this.calEventsAsFor(name, win, identity) : this.calEventsFor(name, win), {
+          return Ics.build(identity ? this.calEventsAsFor(name, win, identity, forFeed) : this.calEventsFor(name, win, forFeed), {
             name: title,
             domain: (typeof Databases !== 'undefined' && Databases.activeKey()) || 'dbui.local'
           });
@@ -2383,7 +2388,7 @@ function createVueApp() {
         return this._awaitViewData(name).then(function() {
           return self._icsStringsFor(self.calendarIcsFor(name).lang, false);
         }).then(function(strings) {
-          return self._uploadFeed(id, self._renderIcs(name, win, strings));
+          return self._uploadFeed(id, self._renderIcs(name, win, strings, null, true));
         })
           .then(function(url) {
             self._setFeedInfo(name, { id: id, url: url, at: new Date().toISOString() });
@@ -2615,7 +2620,7 @@ function createVueApp() {
         var id = sub.id || Feeds.newId();
         // Their chosen language while the database still declares it, else the calendar's (Feeds.languageFor).
         return this._icsStringsFor(Feeds.languageFor(sub.lang, declared, viewLang), false).then(function(strings) {
-          return self._uploadFeed(id, self._renderIcs(name, win, strings, self.identityFor(sub.owner)));
+          return self._uploadFeed(id, self._renderIcs(name, win, strings, self.identityFor(sub.owner), true));
         }).then(function(url) {
           return self._patchSubscriberRow(cfg, sub, id, url);
         });
@@ -3236,7 +3241,12 @@ function createVueApp() {
         // `blockedBy` reads the caller's own periods in another table; unloaded, nothing is ever blocked.
         [v.rsvp, v.scan].forEach(function(c) { if (c && c.blockedBy && c.blockedBy.table) push(c.blockedBy.table); });
         // A calendar source that books through an rsvp view (`respond`) reads everything that view does.
-        if (v.calendar) Calendar.sources(VIEWS, name).forEach(function(s) { if (s && s.respond) expand(s.respond); });
+        // And a `durationColumn` path (class.type.minutes) reads every table along it.
+        if (v.calendar) Calendar.sources(VIEWS, name).forEach(function(s) {
+          if (s && s.respond) expand(s.respond);
+          var parts = (s && s.durationColumn) ? String(s.durationColumn).split('.') : [];
+          for (var i = 0; i < parts.length - 1; i++) { var pr = getColumnRef(null, parts[i]); if (!pr || !pr.table) break; push(pr.table); }
+        });
         AccessFeatures.viewTables(v).forEach(expand);
         viewImplicitTables(v).forEach(expand);
 
@@ -6599,8 +6609,13 @@ function createVueApp() {
       //   otherwise     -> my profile display name (the value a `users`-backed list is populated from).
       // Without the first branch, `@me` on a userlink list compared my profile name against a curated
       // value and silently matched nothing whenever the two differed.
-      meValueFor: function(col) {
-        return this.meValueForList(col ? getColumnList(null, col) : null);
+      meValueFor: function(col) { return this._meFor(this._myIdentity(), col); },
+      // What `@me` means under column `col` for `identity`: under an OWNER column, the account's email --
+      // what that column holds -- so a self-service table can be narrowed to a person (a per-person feed
+      // needs that); under any other column, their list value or display name.
+      _meFor: function(identity, col) {
+        if (col && Object.keys(SCHEMA).some(function(t) { return getOwnerCol(t) === col; })) return identity.email || '';
+        return this._listValueOf(identity, col ? getColumnList(null, col) : null);
       },
       // The columns a view's filter compares against `@me` (walking $or/$and, which carry no column of
       // their own — the same traversal resolveMeTokens does).
@@ -6635,7 +6650,7 @@ function createVueApp() {
       // two branches must not exist twice — a copy that drifted would filter one person's calendar by
       // another person's name and still render something plausible.
       _myIdentity: function() {
-        return { email: (this.userEmail || ''), listValues: this.myListValues || {}, displayName: this.myDisplayName };
+        return { email: (this.currentUserEmail || ''), listValues: this.myListValues || {}, displayName: this.myDisplayName };
       },
       // The identity of an arbitrary account, for rendering a feed as that subscriber. Admin-only data
       // (`listUserLinks`), which is why only a full-access client publishes.
@@ -6664,7 +6679,7 @@ function createVueApp() {
       resolveMeTokensAs: function(identity, filter) {
         var self = this;
         return this._resolveMeWith(filter, function(col) {
-          return self._listValueOf(identity, col ? getColumnList(null, col) : null);
+          return self._meFor(identity, col);
         });
       },
       _resolveMeWith: function(filter, valueForCol) {
@@ -8512,7 +8527,7 @@ function createVueApp() {
     }),
     template: ''
       + '<template v-if="denied"></template>'
-      + '<calendar-view v-else-if="kind===\'calendar\'" :name="calName" :embed="true"></calendar-view>'
+      + '<calendar-view v-else-if="kind===\'calendar\'" :name="calName" :embed="true"><template v-slot:actions><feed-subscribe-menu :name="calName"></feed-subscribe-menu></template></calendar-view>'
       + '<rotation-view v-else-if="kind===\'rotation\'" :name="calName" :embed="true"></rotation-view>'
       + '<pivot-view v-else-if="kind===\'pivot\'" :name="calName" :embed="true"></pivot-view>'
       + '<rsvp-view v-else-if="kind===\'rsvp\'" :name="calName" :embed="true"></rsvp-view>'
@@ -9484,6 +9499,20 @@ function createVueApp() {
   // Those are this app's feeds, backend and admin rules rather than part of a calendar, so they live
   // here and not in the reusable view, and read the root through `a` as the other app screens do.
   // An embedded calendar sits inside someone else's page, where these controls for one block are noise.
+  // A member's Subscribe menu for a per-person feed, on the calendar's toolbar -- the top-level screen's
+  // and an embedded calendar's alike, since a page like My calendar is where the calendar actually lives.
+  app.component('feed-subscribe-menu', {
+    props: { name: String },
+    computed: { show: function() { return Feeds.isPerPerson(window.VIEWS[this.name]) && appInstance.canSubscribeFeed(this.name); } },
+    methods: { t: function(k) { return appInstance.t(k); } },
+    template: ''
+      + '<v-menu v-if="show" :close-on-content-click="false" location="bottom end">'
+      + '<template v-slot:activator="{ props }"><v-btn v-bind="props" icon="mdi-calendar-sync" size="small" variant="text" :title="t(\'feed.subscribe\')" :aria-label="t(\'feed.subscribe\')" data-testid="cal-subscribe-btn"></v-btn></template>'
+      + '<v-card max-width="380" class="pa-3" data-testid="cal-subscribe">'
+      + '<feed-subscription :name="name"></feed-subscription>'
+      + '</v-card></v-menu>'
+  });
+
   app.component('calendar-screen', {
     computed: {
       a: function() { return appInstance; },
@@ -9494,7 +9523,8 @@ function createVueApp() {
       feedPublishing: function() { return appInstance.feedPublishing(this.viewName); },
       // Per-person feeds only: a shared feed's link is one bearer credential for everybody, handed out
       // by whoever publishes it, while a per-person link belongs to the one person it was minted for.
-      canSubscribe: function() { return this.perPerson && appInstance.canSubscribeFeed(this.viewName); },
+      // `export: false` on the calendar: no download button (a public timetable has nothing of yours to take).
+      canExport: function() { return ((window.VIEWS[this.viewName] || {}).calendar || {}).export !== false; },
       win: function() { return appInstance.calendarIcsFor(this.viewName); },
       // Blank first: the default is not a language but a RULE ("whichever the reader is using", and for
       // a feed the deployment default), so it is named rather than left as an empty row.
@@ -9513,7 +9543,7 @@ function createVueApp() {
     }),
     template: ''
       + '<calendar-view :name="viewName"><template v-slot:actions>'
-      + '<v-btn icon="mdi-calendar-export" size="small" variant="text" @click="exportIcs()" :title="t(\'btn.export_ics\')" data-testid="cal-export-ics"></v-btn>'
+      + '<v-btn v-if="canExport" icon="mdi-calendar-export" size="small" variant="text" @click="exportIcs()" :title="t(\'btn.export_ics\')" data-testid="cal-export-ics"></v-btn>'
       // The subscription. Offered only to someone who could publish it, because the URL is a bearer
       // credential -- anyone holding the link reads this calendar -- so it is not put in front of people
       // who have no reason to be handing it out.
@@ -9523,11 +9553,7 @@ function createVueApp() {
       // The subscriber's own control, for a per-person feed: subscribe, their link, its language, and
       // unsubscribe. The link is theirs alone -- it lives in their owner-stamped row, which nobody else
       // reads -- so unlike the publish button above this is offered to every member.
-      + '<v-menu v-if="canSubscribe" :close-on-content-click="false" location="bottom end">'
-      + '<template v-slot:activator="{ props }"><v-btn v-bind="props" icon="mdi-calendar-sync" size="small" variant="text" :title="t(\'feed.subscribe\')" :aria-label="t(\'feed.subscribe\')" data-testid="cal-subscribe-btn"></v-btn></template>'
-      + '<v-card max-width="380" class="pa-3" data-testid="cal-subscribe">'
-      + '<feed-subscription :name="viewName"></feed-subscription>'
-      + '</v-card></v-menu></template>'
+      + '<feed-subscribe-menu :name="viewName"></feed-subscribe-menu></template>'
       + '<template v-slot:tools>'
       // Export/publish range. Mirrors the rotation toolbar: only an admin writes it through. Sits beside the buttons it governs so "how far does this file reach"
       // is answered where the file is produced, rather than in a settings screen away from it.

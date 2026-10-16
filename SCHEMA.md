@@ -1268,7 +1268,13 @@ appointment date and an expiry date):
 Per-source fields: `table` (req), `dateColumn` (req), `titleColumns` (opt), `filter` (opt, data-view
 grammar), `label` (opt — the type tag + colour key; defaults to the table's translated `tab.<table>`),
 `endColumn` (opt — a row that lasts, such as a pause week, shows on every day from `dateColumn` to it,
-with its range; capped at 92 days; may be a computed column).
+with its range; capped at 92 days; may be a computed column), `durationColumn` (opt — minutes a timed
+event lasts, a column or a reference path like `class.class_type.duration_min`; it sets the end time in
+an `.ics`), `feed: false` (opt — shown on screen, left out of a published feed; such a source needs no
+`@me` on a per-person feed).
+
+On the calendar itself, `"export": false` removes the download button — a public timetable has nothing
+of the reader's to take away.
 
 ### Filters the reader picks (`filters`)
 
@@ -2078,7 +2084,8 @@ calendar that is different for each person, use a per-person feed.
 #### Per-person feeds (`feed: "per-person"`)
 
 One file per **subscriber**, each rendered as that person sees the calendar. The rule inverts: every
-source must carry an `@me` filter and every overlaid rotation must be `mineOnly`, because an unfiltered
+source (except one marked `feed: false`) must carry an `@me` filter — on a self-service table,
+`{ "owner": "@me" }` is the subscriber's own rows, since `@me` under an owner column is the account's email — and every overlaid rotation must be `mineOnly`, because an unfiltered
 source would put its rows in everybody's file.
 
 Subscribing is a row the person creates for themselves in an owner-stamped table, named by
@@ -2123,6 +2130,11 @@ app. Revocation waits for the same pass.
 many hours, and it is not controllable from here. Publishing on write buys *correctness* — the file
 never disagrees with the database — not speed. For an immediate copy, use the calendar's download
 button.
+
+**A timed event keeps its time.** A source whose `dateColumn` is a `datetime` becomes a timed event in
+the file (in UTC, which every client shows in local time), ending `durationColumn` minutes later; without
+one it has no end time. A `date` stays all-day. The Subscribe menu also sits on an **embedded** calendar,
+so a page like *My calendar* that embeds it offers it where the calendar is.
 
 Requires a backend with a blob store. Firebase Storage needs the Blaze plan; Supabase Storage is on the
 free tier. Without one the publish button does not appear. See ROADMAP, "A subscribable calendar feed",

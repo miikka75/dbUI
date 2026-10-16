@@ -544,6 +544,8 @@ function validateSchema() {
       csrcs.forEach(function(s) {
         if (!s || !s.table) { errors.push('calendar "' + v + '": each source needs a table'); return; }
         if (!SCHEMA[s.table]) { errors.push('calendar "' + v + '" references non-existent table "' + s.table + '"'); return; }
+        if (s.feed !== undefined && typeof s.feed !== 'boolean') errors.push('calendar "' + v + '" source "' + s.table + '": `feed` is true or false (false leaves it out of a published file)');
+        if (s.durationColumn !== undefined && String(s.durationColumn).indexOf('.') < 0 && !(SCHEMA[s.table].columns || {})[s.durationColumn]) errors.push('calendar "' + v + '" source "' + s.table + '": `durationColumn` "' + s.durationColumn + '" is not a column of it');
         if (s.endColumn !== undefined && !(SCHEMA[s.table].columns || {})[s.endColumn]) errors.push('calendar "' + v + '" source "' + s.table + '": `endColumn` "' + s.endColumn + '" is not a column of it');
         // `respond`: book an event from the calendar, through an rsvp view over THIS source's table -- any other
         // view would put a booking control on events it does not know, which would never show a choice.

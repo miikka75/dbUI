@@ -80,18 +80,19 @@
     return String(ev.id).replace(/[\s@]+/g, '_') + '@' + (domain || 'dbui.local');
   }
 
-  // One VEVENT. All-day by construction: the app's calendar places rows on a DAY, and no source carries
-  // a time of day, so inventing one (or a timezone to interpret it in) would be fabricating precision
-  // the data does not have.
+  // One VEVENT. All-day unless the row carries a moment (`at`, a datetime column's UTC instant): then it
+  // starts then, in UTC, and ends `minutes` later when the source names a duration -- without one it has
+  // no DTEND, which RFC 5545 reads as ending when it starts, rather than inventing a length.
   function event(date, ev, meta) {
+    var timed = ev.at && !isNaN(Date.parse(ev.at));
+    var when = timed
+      ? ['DTSTART:' + stamp(ev.at)].concat(ev.minutes > 0 ? ['DTEND:' + stamp(new Date(Date.parse(ev.at) + ev.minutes * 60000))] : [])
+      : ['DTSTART;VALUE=DATE:' + dateVal(date), 'DTEND;VALUE=DATE:' + nextDay(date)];
     var lines = [
       'BEGIN:VEVENT',
       'UID:' + uid(ev, meta.domain),
-      'DTSTAMP:' + meta.dtstamp,
-      'DTSTART;VALUE=DATE:' + dateVal(date),
-      'DTEND;VALUE=DATE:' + nextDay(date),
-      'SUMMARY:' + escapeText(ev.title || ev.label || '')
-    ];
+      'DTSTAMP:' + meta.dtstamp
+    ].concat(when, ['SUMMARY:' + escapeText(ev.title || ev.label || '')]);
     // The source tag (a table's tab label, a roster's name) as a category -- clients group and colour on
     // it, which is the same thing the on-screen chip colour conveys.
     if (ev.label) lines.push('CATEGORIES:' + escapeText(ev.label));

@@ -50,6 +50,7 @@
                                             // calendar obscures by its own config, not by the page it sits on
     Calendar.sources(ctx.views, name).forEach(function(s) {
       if (!s || !s.table || !s.dateColumn) return;
+      if (ctx.forFeed && s.feed === false) return;   // `feed: false`: on screen, not in a published file
       if (!ctx.canReachTable(s.table)) return;
       // The table's computed columns too (a booking dated by its class), via the root's derivation.
       var raw = ctx.dataCache[s.table] || [];
@@ -69,7 +70,9 @@
           id: s.table + ':' + s.dateColumn + ':' + r.id + (days.length > 1 ? ':' + day : ''), title: title || tag, label: tag, range: days.length > 1 ? [d, e] : null,
           color: ctx.hashColor(s.label || s.table), table: s.table, dateCol: s.dateColumn, row: r, respond: s.respond || null,
           // A datetime's instant: orders a day's events by when they start, and shows the time.
-          at: String(r[s.dateColumn] || '').length > 10 ? String(r[s.dateColumn]) : ''
+          at: String(r[s.dateColumn] || '').length > 10 ? String(r[s.dateColumn]) : '',
+          // `durationColumn` (a column or a reference path): how long a timed event lasts, for the .ics.
+          minutes: s.durationColumn ? (Number(ctx.rowPath ? ctx.rowPath(r, s.durationColumn) : r[s.durationColumn]) || 0) : 0
         });
         });
       });

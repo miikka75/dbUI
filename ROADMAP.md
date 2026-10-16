@@ -1293,6 +1293,18 @@ The workout log and the visits under My calendar can be long for a year. `previe
 embed of it as its first 5 rows with **Show all (M)** / **Show fewer**. Display only: the rows are all
 there for the totals and for the top-level screen. **Small.**
 
+#### 20. My calendar as a feed *(landed)*
+
+A member subscribes to their own booked classes and workouts in their phone's calendar. Pieces:
+
+- **`@me` under an owner column** is the account's email, so a self-service table narrows to a person —
+  what a per-person feed requires of every source. (The signed-in identity's email was never set; fixed.)
+- **`feed: false`** on a calendar source: on screen, out of the file (visits, pauses).
+- **Timed events in the .ics**, with `durationColumn` (a column or a path) for the end.
+- **Subscribe on an embedded calendar**, and **`export: false`** to drop the download button.
+
+**Medium.**
+
 #### Not proposed
 
 - **Opening the gate.** It needs the gate controller's own API and a server to call it from; the
