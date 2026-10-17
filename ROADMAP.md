@@ -1344,6 +1344,31 @@ layers), and dropping the gym's curated members list for the owner column.
 - **Removing a user** also unlinks them from user-linked lists, and the feed pass revokes the feed of
   anyone no longer registered.
 
+#### 25. Visitors, open sign-up, and member-only pages *(proposed)*
+
+Joining today takes three steps: create an account, request access, and wait for an admin to approve —
+only then can someone buy a membership. A gym wants a visitor to see the schedule and prices without an
+account, sign up on their own, buy, and only then see the member pages. Four pieces:
+
+1. **Public tables** — `"public": true` on a table (the schedule, gyms, class types, plans, news) makes
+   it readable without signing in, read-only. Mirrored like `ownerTables` (`_meta/publicTables`): a
+   Firestore read rule for those collections, an `anon` select policy in Supabase, and the dev server
+   answering a request with no user for them only. The app boots a signed-out visitor into the views
+   whose tables are all public, with a Sign in button; a Book button says to sign in.
+2. **Open sign-up** — `newUser.open: true`: a signed-in account with no user record registers itself
+   with exactly the `newUser` grant, no approval. The rules check that the record it writes equals the
+   mirrored grant, so nobody can sign themselves up for more. The grant must name its tables (an empty
+   grant reads as unrestricted).
+3. **Member-only pages** — `requires` on a VIEW (the shape rsvp and scan already use): hidden from the
+   menu until the person has a covering row today (an active membership). My calendar, Rewards, Coach
+   and Personal training appear once a membership is active, and go away when it lapses.
+4. **History through a lapse** — nothing is deleted when a membership ends: bookings, workouts, visits
+   and coins stay, out of sight with the member pages, and are all there again on renewal.
+
+Not in this: taking payment. Buying still files an order the front desk activates; real payment needs a
+provider (a Stripe Checkout link, or a Supabase Edge Function — the Firebase free plan allows no
+functions). **Large**: three access layers, and the first signed-out mode of the app.
+
 #### Not proposed
 
 - **Opening the gate.** It needs the gate controller's own API and a server to call it from; the
