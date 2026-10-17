@@ -18,9 +18,8 @@ and write what, and `storage.rules` does the same for uploaded images and publis
 ## Project setup
 
 1. Create project at [console.firebase.google.com](https://console.firebase.google.com)
-2. Enable Firestore Database + Google Auth provider. For sign-in without Google, also enable
-   **Email/Password → Email link (passwordless sign-in)**: the app emails a sign-in link. The rules count a
-   caller only with a verified email (`signedIn()`), so email + password without verification grants nothing.
+2. Enable Firestore Database + Google Auth provider. For sign-in without Google, see
+   [Email sign-in](#email-sign-in): one command sets it up.
 3. Add your domain to Authentication → Authorized domains — **every origin the app is served from**,
    e.g. `127.0.0.1` for local dev and `dbui.ddns.net` for the deployed site. Sign-in fails with
    `auth/unauthorized-domain` from an origin that is not listed, so a change of hosting domain has to
@@ -38,6 +37,45 @@ First user is auto-registered as admin (bootstrap mode). After that, only regist
 >
 > A stronger fix, if you would rather not rely on timing: seed the admin `/_users/<email>` document
 > at deploy time, which closes the window entirely rather than shortening it.
+
+
+## Email sign-in
+
+Beside Google, the app signs people in with an emailed **link** — no password, and it proves the person
+owns the address. **There is no mail server to set up**: Firebase sends these emails itself, for free, from
+`noreply@<project>.firebaseapp.com` (the text is under **Authentication → Templates**; a custom sender
+domain is optional). The rules count a caller only with a verified email (`signedIn()`), so even email +
+password without verification grants nothing.
+
+### By script (recommended)
+
+```bash
+cd dev
+npm run firebase:auth                      # asks for the project id and site
+```
+
+It turns on **Email/Password → Email link (passwordless sign-in)**, adds the site's host and `localhost`
+to the authorized domains (keeping the ones there), and offers to deploy `firestore.rules` and
+`storage.rules`. It needs the [Google Cloud CLI](https://cloud.google.com/sdk) (`gcloud auth login`
+once) and, for the rules, the Firebase CLI. To answer up front:
+
+```bash
+npm run firebase:auth -- --project <firebase-project-id> --site https://gym.example.fi/ --deploy-rules [--dry-run] [--yes]
+```
+
+### By hand
+
+```bash
+gcloud auth login
+curl -X PATCH "https://identitytoolkit.googleapis.com/admin/v2/projects/<firebase-project-id>/config?updateMask=signIn.email" \
+  -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+  -H "X-Goog-User-Project: <firebase-project-id>" -H "Content-Type: application/json" \
+  -d '{"signIn":{"email":{"enabled":true,"passwordRequired":false}}}'
+firebase deploy --only firestore:rules,storage
+```
+
+Or in the console: **Authentication → Sign-in method → Email/Password**, turn on **Email link
+(passwordless sign-in)**, and add the site under **Authentication → Settings → Authorized domains**.
 
 ## Linking a clone to your project (do this once)
 
@@ -58,8 +96,8 @@ is worth checking before any deploy that matters.
 ## Deploying (and why plain `firebase deploy` may fail)
 
 ```bash
-firebase deploy --only firestore:rules          # rules FIRST — see the note below
-firebase deploy --only hosting,storage          # `storage` here is storage.rules
+firebase deploy --only firestore:rules,storage  # rules FIRST — see the note below (`storage` is storage.rules)
+firebase deploy --only hosting
 ```
 
 Rules before the app, always: the app is what starts making requests, so a deploy that ships new code
