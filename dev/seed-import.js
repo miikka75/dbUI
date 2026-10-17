@@ -95,18 +95,22 @@ const SEED = {
     users: [
       { email: 'local@dev', role: 'admin',  tables: 'all' },
       { email: 'aino@dev',  role: 'viewer', tables: GYM_MEMBER },
-      { email: 'eero@dev',  role: 'viewer', tables: GYM_MEMBER }
+      { email: 'eero@dev',  role: 'viewer', tables: GYM_MEMBER },
+      // A trainer: a member's reading, plus the PT requests -- which name the trainer they are for.
+      { email: 'mikko@dev', role: 'viewer', tables: Object.assign({ pt_sessions: 'r' }, GYM_MEMBER) }
     ],
     profiles: [
       { email: 'local@dev', name: 'Front desk', shared: true },
       { email: 'aino@dev',  name: 'Aino',       shared: true },
-      { email: 'eero@dev',  name: 'Eero',       shared: true }
+      { email: 'eero@dev',  name: 'Eero',       shared: true },
+      { email: 'mikko@dev', name: 'Mikko',      shared: true }
     ],
     links: [
       { list: 'members', value: 'Aino', email: 'aino@dev' },
-      { list: 'members', value: 'Eero', email: 'eero@dev' }
+      { list: 'members', value: 'Eero', email: 'eero@dev' },
+      { list: 'trainers', value: 'Mikko', email: 'mikko@dev' }
     ],
-    hint: '?user=aino@dev (a member: books, checks in, logs training) | ?user=local@dev (front desk)'
+    hint: '?user=aino@dev (a member: books, checks in, logs training) | ?user=mikko@dev (a trainer: their classes and PT clients on My calendar) | ?user=local@dev (front desk)'
   }
 };
 

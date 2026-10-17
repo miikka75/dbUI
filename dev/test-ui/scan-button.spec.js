@@ -137,6 +137,7 @@ test('door code that changes (scan.verify): the door screen shows it, the member
   await page.clock.install();
   await boot(page, 'org@x');
   await page.evaluate(() => appInstance.selectTab('door'));
+  await expect(page.locator('[data-testid="scan-code"]')).toHaveCount(0);   // the door screen has no member box
   await page.locator('[data-testid="scan-door"]').click();
   await page.locator('.v-overlay .v-list-item', { hasText: 'Back' }).click();
   await page.locator('[data-testid="scan-door-qr"]').click();

@@ -229,7 +229,7 @@
       "view.reward_board": "Reward claims",
       "view.reward_claim_form": "Claim a reward",
       "view.reward_mine": "My rewards",
-      "view.visit_scan": "Check in at the gym"
+      "view.visit_scan": "Door code"
     }
   }
 }

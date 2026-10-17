@@ -255,6 +255,8 @@ test('rotating code: while the QR is open it stamps by itself, accepts the previ
   await bootAs(page, 'org@x');
   // No box to type in: the code is made, not typed.
   await expect(page.locator('[data-testid="rsvp-checkin-real"]')).toHaveCount(0);
+  // ...and no button to press: it stamps by itself while shown and as it closes.
+  await expect(page.locator('[data-testid="rsvp-checkin-stamp"]')).toHaveCount(0);
   await page.locator('[data-testid="rsvp-checkin-qr"]').click();
   const caption = page.locator('[data-testid="qr-dialog-caption"]');
   await expect(caption).toHaveText(/^[A-HJKMNP-Z2-9]{5}$/);

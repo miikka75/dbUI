@@ -34,7 +34,8 @@
     "visit_check"
   ],
   "listSources": {
-    "members": "userlink"
+    "members": "userlink",
+    "trainers": "userlink"
   },
   "tables": {
     "ref_gyms": {
@@ -1247,6 +1248,35 @@
               }
             },
             "feed": false
+          },
+          {
+            "table": "classes",
+            "dateColumn": "starts_at",
+            "titleColumns": [
+              "class_type",
+              "gym",
+              "room"
+            ],
+            "label": "Teaching",
+            "filter": {
+              "instructor": "@me"
+            },
+            "durationColumn": "class_type.duration_min"
+          },
+          {
+            "table": "pt_sessions",
+            "dateColumn": "preferred_on",
+            "titleColumns": [
+              "member",
+              "goal"
+            ],
+            "label": "PT client",
+            "filter": {
+              "trainer": "@me",
+              "pt_status": {
+                "ne": "cancelled"
+              }
+            }
           }
         ],
         "defaultView": "month",
@@ -2036,6 +2066,9 @@
         "items": [
           {
             "view": "class_booking"
+          },
+          {
+            "view": "visit_scan"
           },
           {
             "view": "attendance_check"

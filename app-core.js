@@ -10063,6 +10063,8 @@ function createVueApp() {
       +   '<v-btn icon="mdi-qrcode" size="small" variant="text" :disabled="!door" :title="a.t(\'rsvp.show_code\')" :aria-label="a.t(\'rsvp.show_code\')" data-testid="scan-door-qr" @click="qrOpen = true"></v-btn>'
       +   '<qr-dialog v-model="qrOpen" :link="qrLink" :caption="current" mono></qr-dialog>'
       + '</div>'
+      // Below it, a member's own way in -- the camera and the box -- which the door screen has no use for.
+      + '<template v-if="!doorScreen">'
       + '<template v-if="cameraOk">'
       +   '<input type="file" accept="image/*" capture="environment" ref="photo" style="display:none" data-testid="scan-photo" @change="onPhoto($event)">'
       +   '<v-btn block variant="tonal" color="primary" prepend-icon="mdi-camera" class="mb-3" :loading="reading" data-testid="scan-camera" @click="$refs.photo.click()">{{ a.t(\'scan.camera\') }}</v-btn>'
@@ -10072,6 +10074,7 @@ function createVueApp() {
       +     '<v-btn size="small" icon="mdi-barcode-scan" :disabled="!code.trim()" :color="armed ? \'primary\' : undefined" :variant="armed ? \'tonal\' : \'text\'" :title="a.tOr(cfg.label, a.t(\'scan.code\'))" @click="submit()" data-testid="scan-submit"></v-btn>'
       +   '</template>'
       + '</v-text-field>'
+      + '</template>'
       + '<v-alert v-if="last" :type="tone" density="compact" variant="tonal" class="mt-3" data-testid="scan-outcome" :data-outcome="last.outcome">'
       +   '<span>{{ last.message || a.t(\'scan.\' + last.outcome) }}</span>&nbsp;'
       // A resolved scan names the CATALOGUE ROW it hit, through the same renderer the grid uses for that
@@ -10383,7 +10386,8 @@ function createVueApp() {
       + '<template v-if="canStamp">'
       +   '<v-text-field v-if="!rotateMinutes" v-model="code" :label="a.t(\'rsvp.checkin_code\')" density="compact" variant="outlined" hide-details autocomplete="off" style="max-width:200px" data-testid="rsvp-checkin-real"></v-text-field>'
       +   '<v-btn icon="mdi-qrcode" size="small" variant="text" :disabled="!rotateMinutes && !typed" :title="a.t(\'rsvp.show_code\')" :aria-label="a.t(\'rsvp.show_code\')" data-testid="rsvp-checkin-qr" @click="qrOpen = true"></v-btn>'
-      +   '<v-btn size="small" variant="text" class="text-none" :disabled="!shown" :title="a.t(\'rsvp.checkin\')" :aria-label="a.t(\'rsvp.checkin\')" data-testid="rsvp-checkin-stamp" @click="stamp()"><v-icon icon="mdi-account-check"></v-icon><span class="d-none d-sm-inline ml-2">{{ a.t(\'rsvp.checkin\') }}</span></v-btn>'
+      // A changing code stamps by itself (every 15 s while shown, and as the QR closes): no button to press.
+      +   '<v-btn v-if="!rotateMinutes" size="small" variant="text" class="text-none" :disabled="!shown" :title="a.t(\'rsvp.checkin\')" :aria-label="a.t(\'rsvp.checkin\')" data-testid="rsvp-checkin-stamp" @click="stamp()"><v-icon icon="mdi-account-check"></v-icon><span class="d-none d-sm-inline ml-2">{{ a.t(\'rsvp.checkin\') }}</span></v-btn>'
       +   '<qr-dialog v-model="qrOpen" :link="qrLink" :caption="shown" mono></qr-dialog>'
       + '</template>'
       + '<v-text-field v-else-if="!hideClaim || (armed && !autoClaim)" :model-value="armed || myCode" @change="e => claim(e.target.value)" :disabled="frozen" :label="a.t(\'rsvp.checkin_code\')" density="compact" variant="outlined" hide-details autocomplete="off" :autofocus="!!armed" style="max-width:200px" data-testid="rsvp-checkin-claim">'

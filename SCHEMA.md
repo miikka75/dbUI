@@ -1480,6 +1480,10 @@ on such a day with that message. Like `closeBefore`, it is a screen rule.
 
 ### `checkin` — self check-in with a shared code
 
+With `rotateMinutes`, the organizer's screen has only the QR button: while the QR is open it confirms
+matching claims every 15 seconds and once more when it closes, so there is no Check in button to press.
+A typed code keeps the box and the button.
+
 ```json
 "rsvp": { …, "checkin": { "codeColumn": "checkin_code", "set": { "attendance": "attended" }, "rotateMinutes": 5 } }
 ```
