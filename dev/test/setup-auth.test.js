@@ -77,3 +77,40 @@ describe('setup-firebase-auth', () => {
     assert.deepEqual(FB.parseArgs(['--project', 'my-gym-app', '--no-deploy-rules']), { project: 'my-gym-app', site: '', deployRules: false, dryRun: false, yes: false, errors: [] });
   });
 });
+
+describe('ask.mjs — the prompts', () => {
+  const { PassThrough } = require('node:stream');
+  let A;
+  before(async () => { A = await import(pathToFileURL(path.join(__dirname, '..', 'ask.mjs')).href); });
+  const io = () => {
+    const stdin = new PassThrough(), stdout = new PassThrough();
+    stdin.isTTY = true; stdin.setRawMode = () => stdin;
+    let shown = ''; stdout.on('data', (d) => { shown += d; });
+    return { stdin, stdout, shown: () => shown };
+  };
+
+  it('a question stays on screen while it waits, and returns what was typed', async () => {
+    const t = io();
+    const p = A.question('Project ref: ', t);
+    await new Promise((r) => setTimeout(r, 20));
+    // eslint-disable-next-line no-control-regex
+    assert.match(t.shown().replace(/\x1b\[[0-9;]*[A-Za-z]/g, ''), /Project ref: $/);   // visible after readline drew it
+    t.stdin.write('abc\r');
+    assert.equal(await p, 'abc');
+  });
+
+  it('a secret shows a star per character, honours Backspace, and never shows the text', async () => {
+    const t = io();
+    const p = A.readSecret('Token: ', t);
+    t.stdin.write('sb\u007fp_x\r');
+    assert.equal(await p, 'sp_x');
+    assert.doesNotMatch(t.shown(), /sp_x/);
+    assert.equal(t.shown(), 'Token: **\b \b***\n');   // \b here is Backspace: the erased star
+  });
+
+  it('with no terminal, asking fails naming what is missing instead of hanging', async () => {
+    const a = A.asker();
+    if (a.interactive) return;   // run from a terminal: nothing to prove here
+    await assert.rejects(a.ask('Project ref'), /missing: Project ref/);
+  });
+});
