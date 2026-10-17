@@ -1,9 +1,5 @@
 {
   "lists": {
-    "members": [
-      "Aino",
-      "Eero"
-    ],
     "trainers": [
       "Laura",
       "Mikko",
@@ -237,7 +233,6 @@
       {
         "id": "claim-aino-2026-10-08",
         "owner": "aino@dev",
-        "member": "Aino",
         "reward": "Day pass for a friend",
         "claimed_on": "2026-10-08",
         "sent": "yes",
@@ -1193,7 +1188,6 @@
       {
         "id": "visit-aino-2026-10-01",
         "owner": "aino@dev",
-        "member": "Aino",
         "gym": "City Centre",
         "visited_on": "2026-10-01",
         "at": "2026-10-01T16:30:00.000Z",
@@ -1203,7 +1197,6 @@
       {
         "id": "visit-aino-2026-10-03",
         "owner": "aino@dev",
-        "member": "Aino",
         "gym": "Harbour",
         "visited_on": "2026-10-03",
         "at": "2026-10-03T16:30:00.000Z",
@@ -1213,7 +1206,6 @@
       {
         "id": "visit-aino-2026-10-06",
         "owner": "aino@dev",
-        "member": "Aino",
         "gym": "City Centre",
         "visited_on": "2026-10-06",
         "at": "2026-10-06T16:30:00.000Z",
@@ -1223,7 +1215,6 @@
       {
         "id": "visit-aino-2026-10-08",
         "owner": "aino@dev",
-        "member": "Aino",
         "gym": "Harbour",
         "visited_on": "2026-10-08",
         "at": "2026-10-08T16:30:00.000Z",
@@ -1233,7 +1224,6 @@
       {
         "id": "visit-aino-2026-10-10",
         "owner": "aino@dev",
-        "member": "Aino",
         "gym": "City Centre",
         "visited_on": "2026-10-10",
         "at": "2026-10-10T16:30:00.000Z",
@@ -1243,7 +1233,6 @@
       {
         "id": "visit-eero-2026-10-02",
         "owner": "eero@dev",
-        "member": "Eero",
         "gym": "City Centre",
         "visited_on": "2026-10-02",
         "at": "2026-10-02T16:30:00.000Z",
@@ -1253,7 +1242,6 @@
       {
         "id": "visit-eero-2026-10-07",
         "owner": "eero@dev",
-        "member": "Eero",
         "gym": "Harbour",
         "visited_on": "2026-10-07",
         "at": "2026-10-07T16:30:00.000Z",
@@ -1263,7 +1251,6 @@
       {
         "id": "visit-eero-2026-10-09",
         "owner": "eero@dev",
-        "member": "Eero",
         "gym": "City Centre",
         "visited_on": "2026-10-09",
         "at": "2026-10-09T16:30:00.000Z",
@@ -1275,7 +1262,6 @@
       {
         "id": "wo-aino-2026-09-22-squat",
         "owner": "aino@dev",
-        "member": "Aino",
         "done_on": "2026-09-22",
         "exercise": "Squat",
         "sets": 4,
@@ -1288,7 +1274,6 @@
       {
         "id": "wo-aino-2026-09-24-treadmill",
         "owner": "aino@dev",
-        "member": "Aino",
         "done_on": "2026-09-24",
         "exercise": "Treadmill",
         "sets": "",
@@ -1301,7 +1286,6 @@
       {
         "id": "wo-aino-2026-09-29-deadlift",
         "owner": "aino@dev",
-        "member": "Aino",
         "done_on": "2026-09-29",
         "exercise": "Deadlift",
         "sets": 3,
@@ -1314,7 +1298,6 @@
       {
         "id": "wo-aino-2026-10-01-rowing-machine",
         "owner": "aino@dev",
-        "member": "Aino",
         "done_on": "2026-10-01",
         "exercise": "Rowing machine",
         "sets": "",
@@ -1327,7 +1310,6 @@
       {
         "id": "wo-aino-2026-10-06-squat",
         "owner": "aino@dev",
-        "member": "Aino",
         "done_on": "2026-10-06",
         "exercise": "Squat",
         "sets": 4,
@@ -1340,7 +1322,6 @@
       {
         "id": "wo-aino-2026-10-06-rowing-machine",
         "owner": "aino@dev",
-        "member": "Aino",
         "done_on": "2026-10-06",
         "exercise": "Rowing machine",
         "sets": "",
@@ -1353,7 +1334,6 @@
       {
         "id": "wo-aino-2026-10-08-deadlift",
         "owner": "aino@dev",
-        "member": "Aino",
         "done_on": "2026-10-08",
         "exercise": "Deadlift",
         "sets": 3,
@@ -1366,7 +1346,6 @@
       {
         "id": "wo-aino-2026-10-10-bench-press",
         "owner": "aino@dev",
-        "member": "Aino",
         "done_on": "2026-10-10",
         "exercise": "Bench press",
         "sets": 4,
@@ -1379,7 +1358,6 @@
       {
         "id": "wo-aino-2026-10-10-treadmill",
         "owner": "aino@dev",
-        "member": "Aino",
         "done_on": "2026-10-10",
         "exercise": "Treadmill",
         "sets": "",
@@ -1392,7 +1370,6 @@
       {
         "id": "wo-aino-2026-10-12-squat",
         "owner": "aino@dev",
-        "member": "Aino",
         "done_on": "2026-10-12",
         "exercise": "Squat",
         "sets": 5,
@@ -1405,7 +1382,6 @@
       {
         "id": "wo-eero-2026-10-07-pull-up",
         "owner": "eero@dev",
-        "member": "Eero",
         "done_on": "2026-10-07",
         "exercise": "Pull-up",
         "sets": 4,
@@ -1418,7 +1394,6 @@
       {
         "id": "wo-eero-2026-10-09-overhead-press",
         "owner": "eero@dev",
-        "member": "Eero",
         "done_on": "2026-10-09",
         "exercise": "Overhead press",
         "sets": 4,
@@ -1433,49 +1408,42 @@
       {
         "id": "steps-aino-2026-10-06",
         "owner": "aino@dev",
-        "member": "Aino",
         "day": "2026-10-06",
         "step_count": 8200
       },
       {
         "id": "steps-aino-2026-10-07",
         "owner": "aino@dev",
-        "member": "Aino",
         "day": "2026-10-07",
         "step_count": 11400
       },
       {
         "id": "steps-aino-2026-10-08",
         "owner": "aino@dev",
-        "member": "Aino",
         "day": "2026-10-08",
         "step_count": 6900
       },
       {
         "id": "steps-aino-2026-10-09",
         "owner": "aino@dev",
-        "member": "Aino",
         "day": "2026-10-09",
         "step_count": 12100
       },
       {
         "id": "steps-aino-2026-10-10",
         "owner": "aino@dev",
-        "member": "Aino",
         "day": "2026-10-10",
         "step_count": 9800
       },
       {
         "id": "steps-aino-2026-10-11",
         "owner": "aino@dev",
-        "member": "Aino",
         "day": "2026-10-11",
         "step_count": 4300
       },
       {
         "id": "steps-aino-2026-10-12",
         "owner": "aino@dev",
-        "member": "Aino",
         "day": "2026-10-12",
         "step_count": 7600
       }
@@ -1484,7 +1452,6 @@
       {
         "id": "ms-aino-1",
         "owner": "aino@dev",
-        "member": "Aino",
         "plan": "12 months",
         "start_on": "2026-01-15",
         "order_state": "submitted",
@@ -1493,7 +1460,6 @@
       {
         "id": "ms-eero-1",
         "owner": "eero@dev",
-        "member": "Eero",
         "plan": "Monthly",
         "start_on": "2026-10-20",
         "order_state": "submitted",
@@ -1504,7 +1470,6 @@
       {
         "id": "pt-aino-1",
         "owner": "aino@dev",
-        "member": "Aino",
         "trainer": "Laura",
         "preferred_on": "2026-10-21",
         "goal": "Deadlift technique",
@@ -1514,7 +1479,6 @@
       {
         "id": "pt-eero-1",
         "owner": "eero@dev",
-        "member": "Eero",
         "trainer": "Mikko",
         "preferred_on": "2026-10-23",
         "goal": "A programme to start with",

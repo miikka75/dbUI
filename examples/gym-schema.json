@@ -34,7 +34,6 @@
     "visit_check"
   ],
   "listSources": {
-    "members": "userlink",
     "trainers": "userlink"
   },
   "newUser": {
@@ -287,13 +286,6 @@
           "type": "owner"
         },
         {
-          "name": "member",
-          "type": "select",
-          "list": "members",
-          "sorted": true,
-          "defaultFrom": "@me"
-        },
-        {
           "name": "gym",
           "type": "ref",
           "table": "ref_gyms",
@@ -320,7 +312,6 @@
         }
       ],
       "ownerWritable": [
-        "member",
         "visited_on",
         "at",
         "door_code"
@@ -333,13 +324,6 @@
         {
           "name": "owner",
           "type": "owner"
-        },
-        {
-          "name": "member",
-          "type": "select",
-          "list": "members",
-          "sorted": true,
-          "defaultFrom": "@me"
         },
         {
           "name": "done_on",
@@ -378,7 +362,6 @@
         }
       ],
       "ownerWritable": [
-        "member",
         "done_on",
         "exercise",
         "sets",
@@ -398,13 +381,6 @@
           "type": "owner"
         },
         {
-          "name": "member",
-          "type": "select",
-          "list": "members",
-          "sorted": true,
-          "defaultFrom": "@me"
-        },
-        {
           "name": "day",
           "type": "date"
         },
@@ -414,7 +390,6 @@
         }
       ],
       "ownerWritable": [
-        "member",
         "day",
         "step_count"
       ]
@@ -426,13 +401,6 @@
         {
           "name": "owner",
           "type": "owner"
-        },
-        {
-          "name": "member",
-          "type": "select",
-          "list": "members",
-          "sorted": true,
-          "defaultFrom": "@me"
         },
         {
           "name": "plan",
@@ -485,7 +453,6 @@
         }
       ],
       "ownerWritable": [
-        "member",
         "plan",
         "start_on",
         "order_state"
@@ -501,13 +468,6 @@
         {
           "name": "owner",
           "type": "owner"
-        },
-        {
-          "name": "member",
-          "type": "select",
-          "list": "members",
-          "sorted": true,
-          "defaultFrom": "@me"
         },
         {
           "name": "trainer",
@@ -536,7 +496,6 @@
         }
       ],
       "ownerWritable": [
-        "member",
         "trainer",
         "preferred_on",
         "goal"
@@ -645,13 +604,6 @@
           "type": "owner"
         },
         {
-          "name": "member",
-          "type": "select",
-          "list": "members",
-          "sorted": true,
-          "defaultFrom": "@me"
-        },
-        {
           "name": "reward",
           "type": "ref",
           "table": "ref_rewards",
@@ -689,7 +641,6 @@
         }
       ],
       "ownerWritable": [
-        "member",
         "reward",
         "claimed_on",
         "sent"
@@ -809,7 +760,7 @@
       "mode": "union",
       "defaultSort": "visited_on",
       "filter": {
-        "member": "@me"
+        "owner": "@me"
       },
       "columns": [
         "visited_on",
@@ -839,6 +790,22 @@
             "sent": "yes"
           },
           "message": "text.paused"
+        },
+        "requires": {
+          "table": "memberships",
+          "from": "start_on",
+          "to": "valid_until",
+          "where": {
+            "$or": [
+              {
+                "membership_status": "active"
+              },
+              {
+                "membership_status": "paused"
+              }
+            ]
+          },
+          "message": "text.no_membership"
         }
       }
     },
@@ -877,6 +844,22 @@
             "sent": "yes"
           },
           "message": "text.paused"
+        },
+        "requires": {
+          "table": "memberships",
+          "from": "start_on",
+          "to": "valid_until",
+          "where": {
+            "$or": [
+              {
+                "membership_status": "active"
+              },
+              {
+                "membership_status": "paused"
+              }
+            ]
+          },
+          "message": "text.no_membership"
         }
       }
     },
@@ -917,7 +900,7 @@
       ],
       "mode": "union",
       "filter": {
-        "member": "@me"
+        "owner": "@me"
       },
       "readonly": true,
       "stats": {
@@ -1004,7 +987,7 @@
       "filter": {
         "$and": [
           {
-            "member": "@me"
+            "owner": "@me"
           },
           {
             "$or": [
@@ -1073,7 +1056,7 @@
       ],
       "mode": "union",
       "filter": {
-        "member": "@me",
+        "owner": "@me",
         "day": {
           "within": {
             "calendar": "my_calendar"
@@ -1121,7 +1104,7 @@
         "times"
       ],
       "filter": {
-        "member": "@me",
+        "owner": "@me",
         "done_on": {
           "within": {
             "calendar": "my_calendar"
@@ -1153,7 +1136,7 @@
       "layout": "table",
       "defaultSort": "done_on",
       "filter": {
-        "member": "@me",
+        "owner": "@me",
         "done_on": {
           "within": {
             "calendar": "my_calendar"
@@ -1185,7 +1168,7 @@
       "readonly": true,
       "defaultSort": "visited_on",
       "filter": {
-        "member": "@me",
+        "owner": "@me",
         "visited_on": {
           "within": {
             "calendar": "my_calendar"
@@ -1227,7 +1210,7 @@
             ],
             "label": "Workout",
             "filter": {
-              "member": "@me"
+              "owner": "@me"
             }
           },
           {
@@ -1238,7 +1221,7 @@
             ],
             "label": "Visit",
             "filter": {
-              "member": "@me"
+              "owner": "@me"
             },
             "feed": false
           },
@@ -1265,7 +1248,7 @@
             ],
             "label": "Trainer",
             "filter": {
-              "member": "@me",
+              "owner": "@me",
               "pt_status": {
                 "ne": "cancelled"
               }
@@ -1290,7 +1273,7 @@
             "table": "pt_sessions",
             "dateColumn": "preferred_on",
             "titleColumns": [
-              "member",
+              "owner",
               "goal"
             ],
             "label": "PT client",
@@ -1383,7 +1366,7 @@
       "readonly": true,
       "defaultSort": "start_on",
       "filter": {
-        "member": "@me",
+        "owner": "@me",
         "order_state": "submitted"
       },
       "columns": [
@@ -1411,7 +1394,7 @@
       "mode": "join",
       "defaultSort": "start_on",
       "columns": [
-        "member",
+        "owner",
         "start_on",
         "pauses_used",
         "valid_until"
@@ -1425,7 +1408,7 @@
           "ended"
         ],
         "title": "plan",
-        "color": "member"
+        "color": "owner"
       },
       "filter": {
         "order_state": "submitted"
@@ -1447,7 +1430,7 @@
       "layout": "card",
       "defaultSort": "preferred_on",
       "filter": {
-        "member": "@me"
+        "owner": "@me"
       },
       "columns": [
         "preferred_on",
@@ -1467,7 +1450,7 @@
       "mode": "join",
       "defaultSort": "preferred_on",
       "columns": [
-        "member",
+        "owner",
         "preferred_on",
         "goal",
         "trainer_notes"
@@ -1723,7 +1706,7 @@
       "layout": "table",
       "defaultSort": "claimed_on",
       "filter": {
-        "member": "@me",
+        "owner": "@me",
         "sent": "yes"
       },
       "columns": [
@@ -1753,7 +1736,7 @@
       "mode": "join",
       "defaultSort": "claimed_on",
       "columns": [
-        "member",
+        "owner",
         "claimed_on",
         {
           "name": "cost",
@@ -1788,7 +1771,7 @@
           "denied"
         ],
         "title": "reward",
-        "color": "member",
+        "color": "owner",
         "laneWhen": {
           "granted": {
             "balance": {

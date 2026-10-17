@@ -1335,6 +1335,15 @@ schema now says what a new person gets (`newUser`: role and tables) and Approve 
 proposed here: approving automatically (open registration needs a self-grant rule in all three
 layers), and dropping the gym's curated members list for the owner column.
 
+#### 24. One identity per row, and membership before booking *(landed)*
+
+- **The gym's curated members list is gone**: every row already records whose it is (`owner`), `@me`
+  under it is the account, and an owner column now reads as the person's name everywhere.
+- **`requires`** (rsvp, scan): the inverse of `blockedBy` — a day inside one of the caller's own rows
+  (an active membership), or refused with a message. Staff are exempt from both.
+- **Removing a user** also unlinks them from user-linked lists, and the feed pass revokes the feed of
+  anyone no longer registered.
+
 #### Not proposed
 
 - **Opening the gate.** It needs the gate controller's own API and a server to call it from; the

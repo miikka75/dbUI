@@ -829,9 +829,10 @@ function validateSchema() {
     }
     // `blockedBy` on an rsvp or a scan: periods of the caller's own rows in another table. A table or a
     // column that does not exist would block nothing, which looks exactly like "not paused".
-    [view.rsvp && view.rsvp.blockedBy, view.scan && view.scan.blockedBy].forEach(function(bb) {
+    [['blockedBy', view.rsvp && view.rsvp.blockedBy], ['blockedBy', view.scan && view.scan.blockedBy], ['requires', view.rsvp && view.rsvp.requires], ['requires', view.scan && view.scan.requires]].forEach(function(pair) {
+      var bb = pair[1];
       if (bb === undefined || bb === null) return;
-      var bat = 'view "' + v + '" `blockedBy`: ';
+      var bat = 'view "' + v + '" `' + pair[0] + '`: ';
       if (typeof bb !== 'object' || !SCHEMA[bb.table]) { errors.push(bat + '`table` must name a table (got "' + (bb && bb.table) + '")'); return; }
       var bcols = SCHEMA[bb.table].columns || {};
       ['from', 'to'].forEach(function(k) { if (bb[k] !== undefined && !bcols[bb[k]]) errors.push(bat + '`' + k + '` "' + bb[k] + '" is not a column of "' + bb.table + '"'); });

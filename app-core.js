@@ -2613,8 +2613,13 @@ function createVueApp() {
               self._setFeedInfo(name, { publishing: true });
             }
             var stopped = !self.feedPublishing(name);
-            var revoke = Feeds.pendingRevocation(v, rows, name, stopped);
-            var live = stopped ? [] : self.feedSubscribersFor(name).filter(function(s) { return s.active; });
+            // A subscriber whose account was removed is revoked like one who unsubscribed -- their link must
+            // stop showing their calendar. Only once the user list is known: an empty one means not loaded.
+            var known = self.usersLoaded && self.userList.length, keys = self.userList.map(function(u) { return String(u.key || '').toLowerCase(); });
+            var gone = function(s) { return known && keys.indexOf(s.owner) < 0; };
+            var revoke = Feeds.pendingRevocation(v, rows, name, stopped)
+              .concat(stopped ? [] : Feeds.subscribersOf(v, rows, name).filter(function(s) { return s.active && (s.id || s.url) && gone(s); }));
+            var live = stopped ? [] : self.feedSubscribersFor(name).filter(function(s) { return s.active && !gone(s); });
             var capped = live.slice(0, self.feedSubscriberCap());
             var skipped = live.length - capped.length, revoked = 0;
 
@@ -2848,9 +2853,8 @@ function createVueApp() {
         // guard, same message, as setRsvp and formRecord.
         if (!me) { this.notify(this.t('msg.sign_in_respond')); return null; }
         var now = new Date();
-        if (cfg.blockedBy && this.blockedOn(cfg.blockedBy, fmtDate(now))) {
-          return { outcome: 'blocked', code: String(code || '').trim(), message: this.tOr(cfg.blockedBy.message, cfg.blockedBy.message || '') };
-        }
+        var barred = this.barredOn(cfg, fmtDate(now), this.scanCanVerify(name));
+        if (barred) return { outcome: 'blocked', code: String(code || '').trim(), message: barred };
         var res = Scan.plan(code, {
           catalog: this.dataCache[ref.table] || [],
           rows: this.dataCache[table] || [],
@@ -3016,15 +3020,23 @@ function createVueApp() {
           return !!a && day >= a && day <= b;
         });
       },
-      rsvpBlocked: function(name, ev) {
-        var blk = ((VIEWS[name] && VIEWS[name].rsvp) || {}).blockedBy;
-        return !!blk && this.blockedOn(blk, Calendar.toDateStr(ev.date));
+      // What bars the caller from `cfg` on `day`, as the message to show -- or '' when nothing does:
+      // `blockedBy` (a period of their own that refuses, a pause) or `requires` (a period of their own that
+      // must cover the day, an active membership). Staff are not members: `exempt` skips both for them.
+      barredOn: function(cfg, day, exempt) {
+        if (!cfg || exempt) return '';
+        var msg = function(p) { return p.message ? this.tOr(p.message, p.message) : this.t('rsvp.closed'); }.bind(this);
+        if (cfg.blockedBy && this.blockedOn(cfg.blockedBy, day)) return msg(cfg.blockedBy);
+        if (cfg.requires && !this.blockedOn(cfg.requires, day)) return msg(cfg.requires);
+        return '';
       },
+      rsvpBlocked: function(name, ev) { return !!this.rsvpBarred(name, ev); },
+      rsvpBarred: function(name, ev) { return this.barredOn((VIEWS[name] || {}).rsvp, Calendar.toDateStr(ev.date), this.rsvpOrganizer(name)); },
       rsvpLocked: function(name, ev, now) { return this.rsvpFrozen(name, ev.key) || this.rsvpStarted(ev, now) || (!ev.myHolds && (ev.full || this.rsvpClosed(name, ev, now) || this.rsvpBlocked(name, ev))); },
       rsvpPlacesShown: function(name, ev, now) { return ev.capacity !== null || this.rsvpStarted(ev, now) || (!ev.myHolds && (this.rsvpClosed(name, ev, now) || this.rsvpBlocked(name, ev))); },
       rsvpPlacesText: function(name, ev, now) {
         if (this.rsvpStarted(ev, now)) return this.t('rsvp.started');
-        if (!ev.myHolds && this.rsvpBlocked(name, ev)) { var bm = VIEWS[name].rsvp.blockedBy.message; return this.tOr(bm, bm || this.t('rsvp.closed')); }
+        if (!ev.myHolds && this.rsvpBlocked(name, ev)) return this.rsvpBarred(name, ev);
         if (!ev.myHolds && this.rsvpClosed(name, ev, now)) return this.t('rsvp.closed');
         return ev.full ? this.t('rsvp.full') : this.t('rsvp.places_left') + ': ' + Math.max(0, ev.capacity - ev.booked);
       },
@@ -3039,7 +3051,7 @@ function createVueApp() {
         var link = this.rsvpLink(cfg).linkColumn, keys = this.rsvpTodayKeys(name), value = String(code || '').trim();
         (this.dataCache[table] || []).forEach(function(r) {
           if (r[ownerCol] !== me || keys.indexOf(r[link]) < 0 || self.rsvpFrozen(name, r[link])) return;
-          if (cfg.blockedBy && self.blockedOn(cfg.blockedBy, fmtDate(new Date()))) return;   // paused today: no check-in
+          if (self.barredOn(cfg, fmtDate(new Date()), false)) return;   // paused, or no membership, today: no check-in
           self.saveField(r, ci.codeColumn, value, table);
         });
       },
@@ -3283,7 +3295,7 @@ function createVueApp() {
           if (sref && sref.table) push(sref.table);
         }
         // `blockedBy` reads the caller's own periods in another table; unloaded, nothing is ever blocked.
-        [v.rsvp, v.scan].forEach(function(c) { if (c && c.blockedBy && c.blockedBy.table) push(c.blockedBy.table); });
+        [v.rsvp, v.scan].forEach(function(c) { if (!c) return; [c.blockedBy, c.requires].forEach(function(p) { if (p && p.table) push(p.table); }); });
         // A calendar source that books through an rsvp view (`respond`) reads everything that view does.
         // And a `durationColumn` path (class.type.minutes) reads every table along it.
         if (v.calendar) Calendar.sources(VIEWS, name).forEach(function(s) {
@@ -4428,6 +4440,8 @@ function createVueApp() {
       displayValue: function(col, val, nsCol, viewCfg, plain) {
         if (Array.isArray(val)) { var self = this; return val.map(function(x) { return self.displayValue(col, x, nsCol, viewCfg); }).filter(Boolean).join(', '); }
         if (!val) return '';
+        // An owner column holds an account's email; it reads as the person (their profile name).
+        if (!plain && this.colIsOwner(col)) return this.userLabel(val);
         if (this.colIsDateTime(col)) return this.dateTimeLabel(val);
         // A labelled ref names the row it points at, not its key ("12 months · 15/01/2026", not an id).
         var lab = !plain && this.colIsRef(col) && this.refRowLabel(col);
@@ -6660,8 +6674,10 @@ function createVueApp() {
       // What `@me` means under column `col` for `identity`: under an OWNER column, the account's email --
       // what that column holds -- so a self-service table can be narrowed to a person (a per-person feed
       // needs that); under any other column, their list value or display name.
+      // Whether `col` is some table's owner column (it holds an account's email).
+      colIsOwner: function(col) { return !!col && Object.keys(SCHEMA).some(function(t) { return getOwnerCol(t) === col; }); },
       _meFor: function(identity, col) {
-        if (col && Object.keys(SCHEMA).some(function(t) { return getOwnerCol(t) === col; })) return identity.email || '';
+        if (this.colIsOwner(col)) return identity.email || '';
         return this._listValueOf(identity, col ? getColumnList(null, col) : null);
       },
       // The columns a view's filter compares against `@me` (walking $or/$and, which carry no column of
@@ -6885,7 +6901,12 @@ function createVueApp() {
       removeUser: function(uid) {
         var self = this;
         if (this._userDraft(uid)) { this.userDrafts = this.userDrafts.filter(function(d) { return d.key !== uid; }); return; }
-        backend_users.removeUser(uid).then(function() { self.loadUsers(); });
+        // The reverse of approving: the grant goes, and so do their links to user-linked lists (a trainer's
+        // name), which would otherwise keep pointing `@me` at an account that no longer exists. Their
+        // calendar feed is revoked by the next publishing pass (publishPerPersonFeed), and their rows stay.
+        var vals = ListUsers.valuesForEmail(this.listUserLinks, String(uid || '').toLowerCase()) || {};
+        var unlink = Object.keys(vals).map(function(l) { return backend_users.setListUser ? backend_users.setListUser(l, vals[l], '') : null; });
+        backend_users.removeUser(uid).then(function() { return Promise.all(unlink); }).then(function() { self.loadUsers(); if (self.loadListUserLinks) self.loadListUserLinks(); });
       },
       // A draft row, written nowhere until it has an email (renameUser). It starts as a VIEWER: access
       // is granted on purpose, not taken back afterwards. Its tables are 'all' because the grant model

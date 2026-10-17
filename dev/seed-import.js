@@ -107,8 +107,6 @@ const SEED = {
       { email: 'mikko@dev', name: 'Mikko',      shared: true }
     ],
     links: [
-      { list: 'members', value: 'Aino', email: 'aino@dev' },
-      { list: 'members', value: 'Eero', email: 'eero@dev' },
       { list: 'trainers', value: 'Mikko', email: 'mikko@dev' }
     ],
     hint: '?user=aino@dev (a member: books, checks in, logs training) | ?user=mikko@dev (a trainer: their classes and PT clients on My calendar) | ?user=local@dev (front desk)'

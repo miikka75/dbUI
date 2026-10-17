@@ -1485,6 +1485,19 @@ A day inside one of the caller's **own** rows of `table` (its `owner` column) �
 (a translation key or text). `to` may be a computed column. The same key on a `scan` view refuses the scan
 on such a day with that message. Like `closeBefore`, it is a screen rule.
 
+### `requires` — allowed only inside the member's own periods
+
+```json
+"rsvp": { …, "requires": { "table": "memberships", "from": "start_on", "to": "valid_until",
+                      "where": { "membership_status": "active" }, "message": "text.no_membership" } }
+```
+
+The opposite of `blockedBy`, in the same shape: a day must fall inside one of the caller's **own** rows of
+`table`, or booking and the shared-code check-in are refused with `message` — a valid membership, a
+signed waiver, a paid term. A row with no `to` covers its `from` day only (a single visit). On a `scan`
+view it refuses the scan. Staff — whoever may write the responses table, or confirms a door code — are
+not held to either. A screen rule, like `closeBefore`.
+
 ### `checkin` — self check-in with a shared code
 
 With `rotateMinutes`, the organizer's screen has only the QR button: while the QR is open it confirms
@@ -2678,6 +2691,8 @@ log, only a parent may approve" expressible without a second table.
   That is why `default` matters here: it is the value the rules expect to see.
 - `id`, `owner`, `created_at`, `updated_at` and `rosterPublic` are always permitted (identity and
   bookkeeping every write stamps).
+- **An owner column reads as the person**: a cell, a board card, a calendar title or a search shows the
+  account's profile name, not the email it stores.
 - **`defaultFrom` columns cannot be gated** — they resolve per user at create time, so no server-side
   rule can predict the value. List them in `ownerWritable` (as `person` is above) or leave them out of
   the table.

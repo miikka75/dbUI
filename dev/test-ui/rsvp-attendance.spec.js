@@ -669,3 +669,26 @@ test('staff: walk-ins with − / + take places, and a tap on a booked name marks
   await row.locator('[data-testid="rsvp-arrive"]').click();
   await expect.poll(async () => (await stored('rsvps', 'r1')).attendance).toBe('pending');
 });
+
+test('requires: booking needs a day inside one of my own active periods; staff are not held to it', async ({ page, browser }) => {
+  const schema = JSON.parse(JSON.stringify(SCHEMA));
+  schema.tables.terms = { ownerWritable: ['from_on', 'to_on'], columns: [{ name: 'owner', type: 'owner' }, { name: 'from_on', type: 'date' }, { name: 'to_on', type: 'date' }, { name: 'state', type: 'text' }] };
+  schema.views[0].rsvp.requires = { table: 'terms', from: 'from_on', to: 'to_on', where: { state: 'active' }, message: 'No term' };
+  await setup(page);
+  await page.request.post('/api/saveSchema', { data: { schema }, headers: ADMIN });
+  await page.request.post('/api/setUserRole', { data: { uid: 'bea@x', role: 'editor', user: 'bea@x', tables: { practices: 'r', rsvps: 'r' } }, headers: ADMIN });
+  const today = new Date().toISOString().slice(0, 10);
+  await page.request.post('/api/putRow', { data: { tableId: 'terms', tab: 'active', data: { id: 't1', owner: 'ann@x', from_on: today, to_on: '2100-01-01', state: 'active' } }, headers: ADMIN });
+  await page.request.post('/api/putRow', { data: { tableId: 'terms', tab: 'active', data: { id: 't2', owner: 'bea@x', from_on: today, to_on: '2100-01-01', state: 'ended' } }, headers: ADMIN });
+  const as = async (user) => { const c = await browser.newContext(); const p = await c.newPage(); await bootAs(p, user); return { c, p }; };
+  const ann = await as('ann@x');
+  await expect(ann.p.locator('tr', { hasText: 'Tuesday' }).locator('button', { hasText: 'coming' })).toBeEnabled();
+  await ann.c.close();
+  const bea = await as('bea@x');
+  const row = bea.p.locator('tr', { hasText: 'Tuesday' });
+  await expect(row.locator('[data-testid="rsvp-places"]')).toHaveText('No term');
+  await expect(row.locator('button', { hasText: 'coming' })).toBeDisabled();
+  await bea.c.close();
+  await bootAs(page, 'org@x');
+  await expect(page.locator('tr', { hasText: 'Tuesday' }).locator('[data-testid="rsvp-places"]')).toHaveCount(0);
+});
