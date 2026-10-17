@@ -208,28 +208,28 @@
         "id": "rw-water-bottle",
         "reward": "Water bottle",
         "category": "Merch",
-        "cost": 1700,
+        "cost": 17,
         "details": "Steel bottle with the club logo"
       },
       {
         "id": "rw-training-t-shirt",
         "reward": "Training T-shirt",
         "category": "Merch",
-        "cost": 1400,
+        "cost": 14,
         "details": "Technical shirt, sizes S–XL"
       },
       {
         "id": "rw-body-composition-scan",
         "reward": "Body composition scan",
         "category": "Services",
-        "cost": 1900,
+        "cost": 19,
         "details": "With a trainer, about 20 minutes"
       },
       {
         "id": "rw-day-pass-for-a-friend",
         "reward": "Day pass for a friend",
         "category": "Coupons",
-        "cost": 300,
+        "cost": 3,
         "details": "One visit, any gym"
       }
     ],

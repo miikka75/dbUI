@@ -323,6 +323,7 @@ Named, reusable. Views are flat — hierarchy lives in `nav` (no `views.views` n
 | `collapsed` | boolean | Cards start collapsed (accordion) |
 | `defaultSort` | string | Default sort column |
 | `defaultSortDesc` | boolean | Sort `defaultSort` descending — newest first, for a log |
+| `filters` | string[] | **A page** (`markdown`): multi-selects above it, one per column (a list or a ref), that narrow every view embedded on it — only the rows that HAVE the column, so a trainer pick leaves visits alone. Kept per viewer in their browser. (A calendar's own `filters` live in `calendar`) |
 | `preview` | number | **Embedded** (`{{view:x}}`): show the first N rows of the view's order, with **Show all (M)** under them to expand and **Show fewer** to fold back. All rows stay in the view — totals and the top-level screen see them all; only the embed's display is folded |
 | `limit` | number | Keep only the first N rows of the default order (needs `defaultSort`): with `defaultSortDesc`, the latest N. The view IS those rows, so a stats view over it counts them only |
 | `hideEmpty` | boolean | Hide empty columns. **Table** layout drops a column empty across *all* rows; **card / board** layouts drop it per row, so each card shows only the fields it has (edit mode still shows every field, or the one you needed to fill in would be the one missing). Override per column with `{ "name": col, "hideEmpty": false }` |
@@ -629,6 +630,12 @@ Shapes:
   months, then weeks and days; an amount may name another column, a computed one earlier in the list included. Months
   clamp to the month end (31 Jan + 1 month = 28 Feb). A blank start, or an amount that is not a number, gives
   no date. Renders and sorts as a date.
+- **A sum** (`add`): `{ "add": [1, { "col": "lvl" }] }` — numbers and `{ col }` operands added up; a blank counts as 0.
+- **The streak at this row** (`streakAt`): `{ "streakAt": "class_start", "interval": "weekly", "by": "owner", "levels": [1, 3, 8, 26] }` —
+  the run of consecutive periods (`weekly` Monday-start, `daily`, `monthly`) this row's date ends, over the rows
+  of the same `by` value (optionally narrowed by `where`); with `levels`, how many of those thresholds it has
+  reached. It is the streak WHEN the row happened, so a later break never takes a bonus back. Coins per class
+  that grow with the streak: a `lvl` from `streakAt`, then `delta` = `{ "add": [1, { "col": "lvl" }] }`.
 - **A fixed amount** (`value`): `{ "value": 100 }` puts the same number on every row — a rate an aggregate
   sums, such as coins per class attended (`"source"` limits it to one table of a union).
 - **Age of a row** (`daysSince`): whole days from a date column to today, as a **number** (negative for a
@@ -1803,7 +1810,7 @@ The two are mutually exclusive; declaring both is a load-time error.
 
 | Key | Meaning |
 |-----|---------|
-| `tiles` | Explicit tiles. Each: `{ label, agg, column, when, goal, display, decimals, divide }`. `divide` shows the number in a bigger unit — `"divide": 60` turns minutes into hours — rounded to `decimals` (default 1) |
+| `tiles` | Explicit tiles. Each: `{ label, agg, column, when, goal, display, decimals, divide }`; `agg: "distinct"` counts different values (people, not visits). `divide` shows the number in a bigger unit — `"divide": 60` turns minutes into hours — rounded to `decimals` (default 1) |
 | `rowTiles` | `{ label, value, goal?, order?, skipUntargeted? }` — one tile per row instead |
 | `goal` | Default bar target for every tile: a positive number, `"max"` (scale to the largest tile), a **ladder** of levels (below), or `{ "column": "<col>" }` to read the target off each row (`rowTiles` only). No goal = no bar, just a number |
 | `display` | `"bar"` (default) or `"number"`. Per-tile, or view-wide as a default |

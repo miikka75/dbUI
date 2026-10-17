@@ -603,10 +603,45 @@
   // One computed def resolved into one row. Split out of resolveComputed so the per-source / scale
   // wrapper above stays readable; the branches are unchanged and mutually exclusive.
   // `idx` is resolveComputed's per-CALL lookup index cache (see there); never null when called from it.
+  // A date's period index: weeks (Monday-start), days or months, counted in local time.
+  function _periodOf(v, interval) {
+    var s = String(v || ''); if (!s) return null;
+    var dt = new Date(s.length > 10 ? s : s.slice(0, 10) + 'T00:00:00'); if (isNaN(dt.getTime())) return null;
+    if (interval === 'monthly') return dt.getFullYear() * 12 + dt.getMonth();
+    var day = Math.round((Date.UTC(dt.getFullYear(), dt.getMonth(), dt.getDate()) - Date.UTC(1970, 0, 5)) / 86400000);
+    return interval === 'daily' ? day : Math.floor(day / 7);
+  }
+  function _streakAt(r, d, rows, idx) {
+    var comp = d.computed, col = comp.streakAt, by = comp.by || 'owner', iv = comp.interval || 'weekly';
+    var key = 'streak\u0000' + d.name + '\u0000' + (d.source || '');
+    if (!idx[key]) {
+      var m = new Map();
+      rows.forEach(function(x) {
+        if (d.source && x._source !== d.source) return;
+        if (comp.where && !condMatches(x, comp.where)) return;
+        var p = _periodOf(_get(x, col), iv); if (p === null) return;
+        var k = x[by]; if (!m.has(k)) m.set(k, new Set()); m.get(k).add(p);
+      });
+      idx[key] = m;
+    }
+    var set = idx[key].get(r[by]), p0 = _periodOf(_get(r, col), iv);
+    if (!set || p0 === null || !set.has(p0)) return 0;
+    var n = 0; while (set.has(p0 - n)) n++;
+    if (!Array.isArray(comp.levels)) return n;
+    return comp.levels.filter(function(t) { return n >= t; }).length;
+  }
+
   function _computeInto(r, d, rows, cache, ctx, idx) {
     var comp = d.computed;
     // `value`: the same amount on every row -- a per-row rate an aggregate sums (coins per class attended).
     if ('value' in comp) { r[d.name] = comp.value; return; }
+    // `add`: the sum of numbers and `{ col }` operands -- a base plus a computed bonus. A blank counts as 0.
+    if (Array.isArray(comp.add)) { r[d.name] = comp.add.reduce(function(s, x) { var n = Number(_operand(r, x)); return s + (isNaN(n) ? 0 : n); }, 0); return; }
+    // `streakAt`: the run of consecutive periods this row's date ends, over the rows of the same `by` value
+    // (an owner) -- 1 for a week with nothing the week before. With `levels` ([1, 3, 8, 26]), how many of
+    // those thresholds the run has reached: the streak's level when this row happened, which a later break
+    // cannot take back (a bonus paid on it stays paid).
+    if (comp.streakAt) { r[d.name] = _streakAt(r, d, rows, idx); return; }
     // Rotation columns: index into a pre-authored ordered list (rotationTable) by computed POSITION
     // (occurrence count or elapsed calendar intervals). Output is the slot's value (often an array).
     if (comp.rotationTable) {

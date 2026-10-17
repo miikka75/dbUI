@@ -95,6 +95,8 @@
     // has a defaultSort and has already been through sortByCol by the time these rows get here, so
     // sorting again would silently disagree with what the same view shows as a list.
     if (agg === 'latest') return vals.length ? vals[vals.length - 1] : null;
+    // `distinct`: how many different values -- people, not visits.
+    if (agg === 'distinct') return vals.filter(function(v, i) { return vals.indexOf(v) === i; }).length;
     var nums = [];
     for (var j = 0; j < vals.length; j++) { var n = num(vals[j]); if (n !== null) nums.push(n); }
     if (!nums.length) return agg === 'sum' ? 0 : null;   // a sum of nothing is 0; an average/min of nothing is not a number
@@ -238,6 +240,8 @@
         g = raw === 'max' ? peak : num(raw);
       }
       t.goal = (g && g > 0) ? g : null;
+      // `relative`: the goal is only the leader's value ("max"), so it is no target to print as "/ N".
+      t.relative = raw === 'max';
       // A bar is only drawn for a numeric value against a positive goal. `pct` is clamped to 0..100 so
       // the bar cannot overflow its track, and `over` carries the fact that it would have — the two
       // together let a renderer show "138 / 120" with a full bar rather than pretending the goal was met

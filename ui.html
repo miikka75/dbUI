@@ -1263,11 +1263,19 @@
                  everyone is admin, and a link handed out then would hand out full access with it. -->
             <p class="text-body-2 font-weight-medium mb-2">{{ a.t('settings.share') }}</p>
             <copy-field class="mb-4" :value="a.shareLink" name="share-link"></copy-field>
+            <!-- Hundreds of members and tens of trainers: narrow by a search, by role, or by the list a user is
+                 linked to (a trainer is a viewer like a member; the link is what tells them apart). -->
+            <div class="d-flex flex-wrap align-center mb-2" style="gap:8px" data-testid="users-filter">
+              <v-text-field v-model="a.userFilter.q" density="compact" variant="outlined" hide-details clearable prepend-inner-icon="mdi-magnify" :label="a.t('btn.search')" style="max-width:240px" data-testid="users-search"></v-text-field>
+              <v-select v-model="a.userFilter.roles" :items="a.roleItems" item-title="title" item-value="value" :label="a.t('settings.role')" multiple chips closable-chips clearable density="compact" variant="outlined" hide-details style="min-width:160px;max-width:300px" data-testid="users-roles"></v-select>
+              <v-select v-if="a.userLinkListItems.length" v-model="a.userFilter.lists" :items="a.userLinkListItems" item-title="title" item-value="value" :label="a.t('settings.linked_list')" multiple chips closable-chips clearable density="compact" variant="outlined" hide-details style="min-width:160px;max-width:300px" data-testid="users-lists"></v-select>
+              <span class="text-caption text-medium-emphasis" data-testid="users-count">{{ a.shownUserList.length }} / {{ a.sortedUserList.length }}</span>
+            </div>
             <v-table v-if="a.userList.length" density="compact">
               <template v-slot:default>
               <thead><tr><th>{{ a.t('settings.user_id') }}</th><th>{{ a.t('settings.name') }}</th><th>{{ a.t('settings.role') }}</th><th>{{ a.t('settings.tables') }}</th><th>{{ a.t('settings.tables_view') }}</th><th></th></tr></thead>
               <tbody>
-                <tr v-for="u in a.sortedUserList" :key="u.key">
+                <tr v-for="u in a.shownUserList" :key="u.key">
                   <td><span class="editable-cell" contenteditable data-testid="user-email-cell" @keydown.home.stop @keydown.end.stop @blur="a.renameUser(u, $event.target.textContent.trim())">{{ u.key.indexOf('_new_') === 0 ? '' : u.key }}</span></td>
                   <td><div class="d-flex align-center" style="gap:8px"><user-avatar :email="u.key" :name="a.userDisplayName(u)" :size="28"></user-avatar><span class="editable-cell" contenteditable @keydown.home.stop @keydown.end.stop @blur="a.renameUserProfile(u, $event.target.textContent)">{{ a.userDisplayName(u) }}</span></div></td>
                   <td><v-select :model-value="u.role" :name="'role-' + u.key" :items="a.roleItems" item-title="title" item-value="value" density="compact" variant="plain" hide-details style="max-width:120px" @update:model-value="a.setUserRole(u.key, $event, u.addr, u.tables)"></v-select></td>

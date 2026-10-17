@@ -360,6 +360,10 @@ function createVueApp() {
       clockNow: Date.now(),
       // The period each mounted calendar shows ({ name: {from, toExclusive} }), for `within: { calendar }`.
       calPeriods: {},
+      // A page's `filters` picks, { page: { column: [values] } }, kept per viewer in their browser.
+      pagePicks: {},
+      // Settings -> Users: what the admin narrowed the list to (a search, roles, linked lists).
+      userFilter: { q: '', roles: [], lists: [] },
       // The scan button (nav.scan): its typing dialog, what is typed, and which view a typed code is for.
       scanDialog: false, scanTyped: '', scanNote: '',
       dataCache: {},
@@ -695,6 +699,28 @@ function createVueApp() {
       // Stable display order for the Settings user table. userList is rebuilt from Firestore map-key
       // iteration order on every loadUsers(), which is unstable — sorting by key here keeps rows put
       // across role/tables edits (the key is unchanged) instead of jumping around.
+      // The users list as narrowed in Settings: a search over email and name, the roles picked, and the
+      // userlink lists picked (trainers, members) -- a user linked to a value of any of them. New rows stay.
+      shownUserList: function() {
+        var f = this.userFilter, q = String(f.q || '').trim().toLowerCase(), self = this;
+        return this.sortedUserList.filter(function(u) {
+          if (String(u.key || '').indexOf('_new_') === 0) return true;
+          if (q && String(u.key || '').toLowerCase().indexOf(q) < 0 && String(self.userDisplayName(u) || '').toLowerCase().indexOf(q) < 0) return false;
+          if (f.roles.length && f.roles.indexOf(u.role) < 0) return false;
+          if (f.lists.length) { var vals = ListUsers.valuesForEmail(self.listUserLinks, String(u.key || '').toLowerCase()) || {}; if (!f.lists.some(function(l) { return vals[l]; })) return false; }
+          return true;
+        });
+      },
+      userLinkListItems: function() {
+        var self = this, ls = ((this.schemaData || {}).listSources) || {};
+        return Object.keys(ls).filter(function(n) { return self.isUserLinkList(n); }).map(function(n) { return { title: self.tOr('list.' + n, n), value: n }; });
+      },
+      // The current page's `filters`, and the viewer's picks for them.
+      pageFilterCols: function() { var v = VIEWS[this.currentTable]; return (v && typeof v.markdown === 'string' && Array.isArray(v.filters)) ? v.filters : []; },
+      pagePicked: function() {
+        var n = this.currentTable, p = this.pagePicks[n]; if (p) return p;
+        try { return JSON.parse(localStorage.getItem('page_filter:' + n) || '{}') || {}; } catch (e) { return {}; }
+      },
       sortedUserList: function() {
         return this.userList.slice().sort(function(a, b) {
           return (a.key || '').toLowerCase().localeCompare((b.key || '').toLowerCase());
@@ -1118,7 +1144,7 @@ function createVueApp() {
         return Leftovers.corpus([doc, VIEWS, this.pageCache, cfg], [doc.tables || {}], [doc.views || [], VIEWS]);
       },
       staticTranslationKeys: function() {
-        return ['app.title', 'btn.add', 'btn.show_active', 'btn.show_archived', 'btn.show_all', 'btn.show_fewer', 'btn.decrease', 'btn.increase', 'btn.more',
+        return ['app.title', 'btn.add', 'btn.show_active', 'btn.show_archived', 'btn.show_all', 'btn.show_fewer', 'btn.decrease', 'btn.increase', 'settings.linked_list', 'btn.more',
          'btn.edit', 'btn.copy', 'btn.show', 'btn.hide', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'cal.feed_url', 'feed.subscribe', 'feed.link_pending', 'feed.unsubscribe', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.no_blob_store', 'msg.feed_cap_reached', 'settings.feeds', 'settings.feed_regenerate', 'settings.feed_unpublish', 'settings.feed_not_republishing', 'settings.feed_all_personal', 'settings.feed_subscribers', 'settings.feed_revoking', 'settings.feed_over_cap', 'settings.feed_unpublished', 'settings.feed_revoked', 'settings.feed_sweep', 'settings.csp_reports', 'settings.csp_token', 'settings.csp_bad_token', 'settings.csp_read_failed', 'settings.csp_none', 'settings.csp_extensions', 'settings.csp_directive', 'settings.csp_blocked', 'settings.csp_count', 'settings.csp_last_seen', 'btn.refresh', 'settings.csp_rotate', 'msg.feed_swept', 'cal.err_no_source', 'cal.err_table', 'cal.err_date_col', 'cal.err_not_date', 'cal.err_title_col', 'settings.add_calendar', 'settings.cal_title', 'settings.cal_table', 'settings.cal_date_col', 'settings.cal_title_cols', 'settings.cal_add_source', 'btn.delete', 'btn.confirm_delete', 'cal.err_not_rotation', 'settings.cal_rotations', 'msg.name_taken', 'cal.err_name', 'lang.add_language', 'btn.cancel', 'timeline.empty', 'col.switch_list',
          'img.replace', 'img.upload', 'img.remove', 'img.url', 'img.view', 'img.open_original',
          'btn.close', 'btn.previous', 'btn.next',
@@ -6721,14 +6747,37 @@ function createVueApp() {
       _viewWithMe: function(view) {
         if (!view) return view;
         var fs = JSON.stringify([view.filter || null, (view.groupBy && view.groupBy.filter) || null]);
-        var hasMe = fs.indexOf('"@me"') >= 0, hasCal = fs.indexOf('"calendar"') >= 0;
-        if (!hasMe && !hasCal) return view;
+        var hasMe = fs.indexOf('"@me"') >= 0, hasCal = fs.indexOf('"calendar"') >= 0, narrow = this._pageNarrowing(view);
+        if (!hasMe && !hasCal && !narrow) return view;
         var self = this, res = function(f) { if (hasMe) f = self.resolveMeTokens(f); return hasCal ? self.resolveCalendarPeriods(f) : f; };
         var v = Object.assign({}, view);
         if (view.filter) v.filter = res(view.filter);
+        if (narrow) v.filter = { $and: [v.filter || {}].concat(narrow) };
         if (view.groupBy) { v.groupBy = Object.assign({}, view.groupBy); if (view.groupBy.filter) v.groupBy.filter = res(view.groupBy.filter); }
         return v;
       },
+      // A page's `filters`: the viewer's picks narrow every view embedded on it -- only the rows that HAVE
+      // the column (a visit has a gym but no trainer, so a trainer pick leaves visits alone). Null when the
+      // screen is not such a page, or nothing is picked.
+      _pageNarrowing: function(view) {
+        var cols = this.pageFilterCols; if (!cols.length || view === VIEWS[this.currentTable]) return null;
+        var picked = this.pagePicked, out = [];
+        cols.forEach(function(c) {
+          var vals = picked[c] || []; if (!vals.length) return;
+          var e = {}; e[c] = { empty: true };
+          out.push({ $or: [e].concat(vals.map(function(x) { var o = {}; o[c] = x; return o; })) });
+        });
+        return out.length ? out : null;
+      },
+      setPagePick: function(col, vals) {
+        var n = this.currentTable, p = Object.assign({}, this.pagePicked); p[col] = vals || [];
+        var all = Object.assign({}, this.pagePicks); all[n] = p; this.pagePicks = all;
+        try { localStorage.setItem('page_filter:' + n, JSON.stringify(p)); } catch (e) {}
+      },
+      // A filter column's choices -- a ref's catalogue, a list's values -- and its label: shared by a
+      // calendar's and a page's filters.
+      filterOptionsFor: function(col) { return this.colIsRef(col) ? this.getRefOptions(col, {}).filter(function(o) { return o.value !== ''; }) : this.getListOptions(col); },
+      fieldLabelFor: function(col) { return this.tOr('field.' + col, col); },
       // The period calendar `name` shows: the one on screen, or -- when it is not mounted -- its default
       // view around today, which is what it would show when opened.
       calendarPeriod: function(name) {
@@ -8290,7 +8339,7 @@ function createVueApp() {
           canAdd: function(name) { return vm.canCalendarAdd(name); },
           addOnDay: function(name, date) { vm.calendarAddOnDay(name, date); },
           // A `filters` column's choices: the dropdown's own (a ref's catalogue, a list's values).
-          filterOptions: function(col) { return vm.colIsRef(col) ? vm.getRefOptions(col, {}).filter(function(o) { return o.value !== ''; }) : vm.getListOptions(col); },
+          filterOptions: function(col) { return vm.filterOptionsFor(col); },
           fieldLabel: function(col) { return vm.tOr('field.' + col, col); },
           dateLabel: function(v) { return vm.dateLabel(v); },
           now: function() { return vm.clockNow; },
@@ -9302,6 +9351,16 @@ function createVueApp() {
   // A collapsible Settings section's heading, bound to the caller's flag:
   // <section-toggle v-model:collapsed="a.settings._collapseX">. The caller owns where "collapsed" lives.
   // A whole number set with − and + (walk-ins at the desk). <count-stepper :value="n" @change="…">; never below 0.
+  // Multi-selects a reader narrows something by: one per column, its picks emitted as set(column, values).
+  // A calendar's `filters` and a page's. <pick-filters :cols :picked :items="fn(col)" :label="fn(col)">
+  app.component('pick-filters', {
+    props: { cols: Array, picked: Object, items: Function, label: Function, testPrefix: { type: String, default: 'filter' } },
+    emits: ['set'],
+    template: '<div class="d-flex flex-wrap" style="gap:8px">'
+      + '<v-select v-for="c in cols" :key="c" :model-value="picked[c] || []" :items="items(c)" item-title="title" item-value="value" :label="label(c)" multiple chips closable-chips clearable density="compact" variant="outlined" hide-details style="min-width:200px;max-width:420px" :data-testid="testPrefix + \'-\' + c" @update:model-value="$emit(\'set\', c, $event || [])"></v-select>'
+      + '</div>'
+  });
+
   app.component('count-stepper', {
     props: { value: { type: Number, default: 0 } },
     inject: ['uiHost'],
@@ -9515,9 +9574,7 @@ function createVueApp() {
       + '<v-btn value="week" size="small">{{ t(\'cal.week\') }}</v-btn>'
       + '<v-btn value="list" size="small">{{ t(\'cal.list\') }}</v-btn></v-btn-toggle>'
       + '<slot name="actions"></slot></div>'
-      + '<div v-if="filters.length" class="d-flex flex-wrap px-2 pb-2" style="gap:8px" data-testid="cal-filters">'
-      +   '<v-select v-for="c in filters" :key="c" :model-value="picked[c] || []" :items="calendarHost.filterOptions(c)" item-title="title" item-value="value" :label="calendarHost.fieldLabel(c)" multiple chips closable-chips clearable density="compact" variant="outlined" hide-details style="min-width:200px;max-width:420px" :data-testid="\'cal-filter-\' + c" @update:model-value="setPicked(c, $event)"></v-select>'
-      + '</div>'
+      + '<pick-filters v-if="filters.length" class="px-2 pb-2" data-testid="cal-filters" :cols="filters" :picked="picked" :items="calendarHost.filterOptions" :label="calendarHost.fieldLabel" test-prefix="cal-filter" @set="setPicked"></pick-filters>'
       + '<slot name="tools"></slot>'
       + '<v-divider></v-divider>'
       + '<component :is="body" :cells="displayMode===\'week\'?weekCells:monthCells" :dow-names="dowNames" :days="listDays" :undated="undated" :selected="sel" :months="displayMode===\'year\' ? yearMonths : undefined" @select="selectDay" @month="openMonth"></component>'
@@ -9825,7 +9882,7 @@ function createVueApp() {
       +   '<div style="display:flex;align-items:baseline;gap:6px">'
       +     '<v-icon v-if="t.icon" :icon="t.icon" color="primary" size="26" style="align-self:center" data-testid="stat-icon"></v-icon>'
       +     '<span style="font-size:1.7rem;font-weight:700;line-height:1.1" data-testid="stat-value">{{ fmt(t) }}</span>'
-      +     '<span v-if="t.goal !== null" style="font-size:0.8rem;opacity:0.6">/ {{ t.goal }}</span>'
+      +     '<span v-if="t.goal !== null && !t.relative" style="font-size:0.8rem;opacity:0.6">/ {{ t.goal }}</span>'
       +     '<span v-if="t.tier" data-testid="stat-tier" style="font-size:0.68rem;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;padding:1px 7px;border-radius:10px;background:rgba(var(--v-theme-primary),0.16);color:rgb(var(--v-theme-primary))">{{ tierLabel(t.tier) }}</span>'
       +   '</div>'
       // The bar is drawn only when there is a goal to measure against; a tile without one is a number
@@ -10830,9 +10887,12 @@ function createVueApp() {
       + '<v-btn size="small" variant="text" density="comfortable" :icon="a.pageEditing ? \'mdi-eye\' : \'mdi-pencil\'" :title="a.pageEditing ? a.t(\'btn.preview\') : a.t(\'btn.edit\')" @click="a.togglePageEdit()" data-testid="page-edit"></v-btn>'
       + '<v-btn v-if="a.pageEditing" size="small" color="primary" prepend-icon="mdi-content-save" @click="a.savePage()" class="ml-2">{{ a.t(\'btn.save\') }}</v-btn></div>'
       + '<v-textarea v-if="a.pageEditing" :model-value="a.pageEditText" @update:model-value="a.pageEditText = $event" auto-grow variant="outlined" density="compact" placeholder="# Markdown — embed views with {{view:name}} or {{table:name}}"></v-textarea>'
-      + '<template v-else v-for="(blk, bi) in a.pageBlocks" :key="bi">'
+      + '<template v-else>'
+      + '<pick-filters v-if="a.pageFilterCols.length" class="mb-3" data-testid="page-filters" :cols="a.pageFilterCols" :picked="a.pagePicked" :items="a.filterOptionsFor" :label="a.fieldLabelFor" test-prefix="page-filter" @set="a.setPagePick"></pick-filters>'
+      + '<template v-for="(blk, bi) in a.pageBlocks" :key="bi">'
       + '<div v-if="blk.html" v-html="blk.html"></div>'
       + '<embed-view v-else :type="blk.embedType" :name="blk.embedName" :part="blk.embedPart" :both="blk.embedBoth"></embed-view>'
+      + '</template>'
       + '</template>'
       + '</v-card>'
   });

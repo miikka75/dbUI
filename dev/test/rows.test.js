@@ -561,3 +561,24 @@ describe('rows.js — computed `value`', () => {
     assert.deepEqual(rows.map((r) => r.delta), [100, undefined, 100]);
   });
 });
+
+describe('rows.js — computed `streakAt` and `add`', () => {
+  // Mondays: 2026-10-05, 10-12, 10-19, 10-26.
+  const rows = [
+    { _source: 'b', owner: 'a', on: '2026-09-21' },                     // week A
+    { _source: 'b', owner: 'a', on: '2026-10-05' }, { _source: 'b', owner: 'a', on: '2026-10-13' },
+    { _source: 'b', owner: 'a', on: '2026-10-21' }, { _source: 'b', owner: 'a', on: '2026-10-22' },
+    { _source: 'b', owner: 'z', on: '2026-10-21' },
+    { _source: 'c', owner: 'a' }
+  ];
+  it('is the run of weeks this row ends, per owner; levels count the thresholds reached; add sums', () => {
+    const out = Rows.resolveComputed(rows.map((r) => Object.assign({}, r)), [
+      { name: 'run', source: 'b', computed: { streakAt: 'on', by: 'owner' } },
+      { name: 'lvl', source: 'b', computed: { streakAt: 'on', by: 'owner', levels: [1, 3] } },
+      { name: 'delta', source: 'b', computed: { add: [1, { col: 'lvl' }] } }
+    ], { dataCache: {} });
+    assert.deepEqual(out.map((r) => r.run), [1, 1, 2, 3, 3, 1, undefined]);
+    assert.deepEqual(out.map((r) => r.lvl), [1, 1, 1, 2, 2, 1, undefined]);
+    assert.deepEqual(out.map((r) => r.delta), [2, 2, 2, 3, 3, 2, undefined]);
+  });
+});

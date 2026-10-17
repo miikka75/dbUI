@@ -213,13 +213,35 @@
           }
         },
         {
-          "name": "class_name",
+          "name": "class_type",
           "computed": {
             "lookup": {
               "table": "classes",
               "match": "class",
               "on": "id",
               "field": "class_type"
+            }
+          }
+        },
+        {
+          "name": "instructor",
+          "computed": {
+            "lookup": {
+              "table": "classes",
+              "match": "class",
+              "on": "id",
+              "field": "instructor"
+            }
+          }
+        },
+        {
+          "name": "gym",
+          "computed": {
+            "lookup": {
+              "table": "classes",
+              "match": "class",
+              "on": "id",
+              "field": "gym"
             }
           }
         }
@@ -1166,18 +1188,6 @@
       "preview": 5
     },
     {
-      "name": "exercise_heatmap",
-      "kind": "pivot",
-      "icon": "mdi-grid",
-      "pivot": {
-        "source": "workouts",
-        "row": "member",
-        "column": "exercise",
-        "aggregate": "count",
-        "totals": "count"
-      }
-    },
-    {
       "name": "my_calendar",
       "kind": "calendar",
       "icon": "mdi-calendar-account",
@@ -1187,7 +1197,7 @@
             "table": "bookings",
             "dateColumn": "class_start",
             "titleColumns": [
-              "class_name"
+              "class_type"
             ],
             "label": "Class",
             "filter": {
@@ -1545,19 +1555,6 @@
       ]
     },
     {
-      "name": "class_popularity",
-      "kind": "pivot",
-      "icon": "mdi-chart-box",
-      "includeArchive": true,
-      "pivot": {
-        "source": "classes",
-        "row": "class_type",
-        "column": "gym",
-        "aggregate": "count",
-        "totals": "count"
-      }
-    },
-    {
       "name": "my_level",
       "kind": "stats",
       "icon": "mdi-medal",
@@ -1629,10 +1626,30 @@
       "mode": "union",
       "compute": [
         {
+          "name": "lvl",
+          "source": "bookings",
+          "computed": {
+            "streakAt": "class_start",
+            "interval": "weekly",
+            "by": "owner",
+            "levels": [
+              1,
+              3,
+              8,
+              26
+            ]
+          }
+        },
+        {
           "name": "delta",
           "source": "bookings",
           "computed": {
-            "value": 100
+            "add": [
+              1,
+              {
+                "col": "lvl"
+              }
+            ]
           }
         },
         {
@@ -1809,10 +1826,30 @@
       },
       "compute": [
         {
+          "name": "lvl",
+          "source": "bookings",
+          "computed": {
+            "streakAt": "class_start",
+            "interval": "weekly",
+            "by": "owner",
+            "levels": [
+              1,
+              3,
+              8,
+              26
+            ]
+          }
+        },
+        {
           "name": "delta",
           "source": "bookings",
           "computed": {
-            "value": 100
+            "add": [
+              1,
+              {
+                "col": "lvl"
+              }
+            ]
           }
         },
         {
@@ -1877,10 +1914,30 @@
       },
       "compute": [
         {
+          "name": "lvl",
+          "source": "bookings",
+          "computed": {
+            "streakAt": "class_start",
+            "interval": "weekly",
+            "by": "owner",
+            "levels": [
+              1,
+              3,
+              8,
+              26
+            ]
+          }
+        },
+        {
           "name": "delta",
           "source": "bookings",
           "computed": {
-            "value": 100
+            "add": [
+              1,
+              {
+                "col": "lvl"
+              }
+            ]
           }
         },
         {
@@ -2027,6 +2084,178 @@
         "icon": "mdi-plus"
       },
       "markdown": "{{view:my_calendar}}\n\n## {{t:text.training_totals}}\n\n{{view:my_period_totals}}\n\n## {{t:text.training_top}}\n\n{{view:my_top_exercises}}\n\n## {{t:text.training_steps}}\n\n{{view:my_steps_week}}\n\n## {{t:text.training_log}}\n\n{{view:my_workouts}}\n\n## {{t:text.training_visits}}\n\n{{view:my_visits}}\n"
+    },
+    {
+      "name": "doc_stats",
+      "kind": "page",
+      "icon": "mdi-chart-box",
+      "filters": [
+        "gym",
+        "class_type",
+        "instructor"
+      ],
+      "markdown": "## {{t:text.stats_overview}}\n\n{{view:stats_totals}}\n\n## {{t:text.stats_classes}}\n\n{{view:stats_by_class}}\n\n## {{t:text.stats_trainers}}\n\n{{view:stats_by_trainer}}\n\n## {{t:text.stats_gyms}}\n\n{{view:stats_by_gym}}\n"
+    },
+    {
+      "name": "stats_totals",
+      "kind": "stats",
+      "icon": "mdi-chart-bar",
+      "sources": [
+        "visits",
+        "bookings"
+      ],
+      "mode": "union",
+      "readonly": true,
+      "includeArchive": true,
+      "stats": {
+        "display": "number",
+        "tiles": [
+          {
+            "label": "text.total_visits",
+            "agg": "count",
+            "when": {
+              "verified": "yes"
+            }
+          },
+          {
+            "label": "text.stat_visitors",
+            "agg": "distinct",
+            "column": "owner",
+            "when": {
+              "verified": "yes"
+            }
+          },
+          {
+            "label": "text.classes_attended",
+            "agg": "count",
+            "when": {
+              "attendance": "attended"
+            }
+          },
+          {
+            "label": "text.stat_attendees",
+            "agg": "distinct",
+            "column": "owner",
+            "when": {
+              "attendance": "attended"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "stats_by_class",
+      "kind": "stats",
+      "icon": "mdi-chart-bar",
+      "sources": [
+        "bookings"
+      ],
+      "mode": "union",
+      "readonly": true,
+      "includeArchive": true,
+      "filter": {
+        "attendance": "attended"
+      },
+      "groupBy": {
+        "column": "class_type",
+        "from": [
+          "class_type"
+        ]
+      },
+      "aggregate": {
+        "count": true,
+        "into": "attended"
+      },
+      "columns": [
+        "class_type",
+        "attended"
+      ],
+      "defaultSort": "attended",
+      "defaultSortDesc": true,
+      "stats": {
+        "rowTiles": {
+          "label": "class_type",
+          "value": "attended"
+        },
+        "goal": "max",
+        "display": "bar"
+      }
+    },
+    {
+      "name": "stats_by_trainer",
+      "kind": "stats",
+      "icon": "mdi-chart-bar",
+      "sources": [
+        "bookings"
+      ],
+      "mode": "union",
+      "readonly": true,
+      "includeArchive": true,
+      "filter": {
+        "attendance": "attended"
+      },
+      "groupBy": {
+        "column": "instructor",
+        "from": [
+          "instructor"
+        ]
+      },
+      "aggregate": {
+        "count": true,
+        "into": "attended"
+      },
+      "columns": [
+        "instructor",
+        "attended"
+      ],
+      "defaultSort": "attended",
+      "defaultSortDesc": true,
+      "stats": {
+        "rowTiles": {
+          "label": "instructor",
+          "value": "attended"
+        },
+        "goal": "max",
+        "display": "bar"
+      }
+    },
+    {
+      "name": "stats_by_gym",
+      "kind": "stats",
+      "icon": "mdi-chart-bar",
+      "sources": [
+        "visits"
+      ],
+      "mode": "union",
+      "readonly": true,
+      "includeArchive": true,
+      "filter": {
+        "verified": "yes"
+      },
+      "groupBy": {
+        "column": "gym",
+        "from": [
+          "gym"
+        ]
+      },
+      "aggregate": {
+        "count": true,
+        "into": "visits"
+      },
+      "columns": [
+        "gym",
+        "visits"
+      ],
+      "defaultSort": "visits",
+      "defaultSortDesc": true,
+      "stats": {
+        "rowTiles": {
+          "label": "gym",
+          "value": "visits"
+        },
+        "goal": "max",
+        "display": "bar"
+      }
     }
   ],
   "nav": {
@@ -2083,10 +2312,7 @@
             "view": "reward_board"
           },
           {
-            "view": "class_popularity"
-          },
-          {
-            "view": "exercise_heatmap"
+            "view": "doc_stats"
           },
           {
             "table": "classes"

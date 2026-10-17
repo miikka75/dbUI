@@ -1317,6 +1317,17 @@ Non-members signed in at the desk take places too, and a member without a phone 
 The gym's Attendance view loses its booked count and roll (now in Class check-in) and is renamed Classes.
 **Small–medium.**
 
+#### 22. Statistics, streak coins, and a users list that scales *(landed)*
+
+- **Page `filters`**: multi-selects on a page that narrow every embed on it (shared `<pick-filters>`,
+  also the calendar's). The gym's Statistics page: visits, people, attendance by class and by trainer,
+  visits by gym — filtered by gym, class type and trainer.
+- **`agg: "distinct"`** on a stats tile.
+- **Computed `streakAt`** (the streak level when a row happened) and **`add`**: coins per class = 1 + level.
+- **Settings → Users**: search, role and linked-list filters.
+
+**Medium.**
+
 #### Not proposed
 
 - **Opening the gate.** It needs the gate controller's own API and a server to call it from; the

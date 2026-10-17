@@ -688,7 +688,7 @@ function validateSchema() {
     // already checked by the data-view rules above; what is checked here is only the `stats` object.
     if (view.stats) {
       var st = view.stats;
-      var stAggs = ['count', 'sum', 'avg', 'min', 'max', 'latest', 'streak'];
+      var stAggs = ['count', 'sum', 'avg', 'min', 'max', 'latest', 'streak', 'distinct'];
       (Array.isArray(st.tiles) ? st.tiles : []).forEach(function(t, i) { if (t && t.divide !== undefined && !(typeof t.divide === 'number' && t.divide > 0)) errors.push('stats "' + v + '" tile ' + i + ': `divide` must be a number above 0'); });
       if (st.rowTiles && st.tiles) errors.push('stats "' + v + '": use `rowTiles` OR `tiles`, not both');
       else if (!st.rowTiles && !Array.isArray(st.tiles)) errors.push('stats "' + v + '" needs `tiles` (an array) or `rowTiles`');
@@ -801,6 +801,13 @@ function validateSchema() {
       if (!VIEWS[lk.view]) errors.push('view "' + v + '": `lookup.view` names missing view "' + lk.view + '"');
       else if (lk.view === v) errors.push('view "' + v + '": `lookup.view` cannot read the view it is in');
     });
+    // A page's `filters`: columns, with options, that the viewer narrows the page's embeds by.
+    if (view.filters !== undefined && !view.calendar) {
+      if (!Array.isArray(view.filters)) errors.push('view "' + v + '": `filters` must be a list of column names');
+      else view.filters.forEach(function(fc) {
+        if (!Columns.colIsList(SCHEMA, fc) && !Columns.colIsRef(SCHEMA, fc)) errors.push('view "' + v + '": filter "' + fc + '" has no options to pick — use a list or ref column');
+      });
+    }
     // `within: { calendar }` follows a calendar's period; a name that is not a calendar would match nothing.
     [view.filter, view.groupBy && view.groupBy.filter].forEach(function(f) {
       (function walk(x) {

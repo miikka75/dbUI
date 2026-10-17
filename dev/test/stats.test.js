@@ -370,3 +370,10 @@ describe('stats.js — divide', () => {
     assert.equal(Stats.build(rows, { tiles: [{ agg: 'sum', column: 'minutes', divide: 60, decimals: 2 }] }).tiles[0].value, 1.58);
   });
 });
+
+describe('stats.js — distinct', () => {
+  it('counts different values: people, not visits', () => {
+    const rows = [{ who: 'a' }, { who: 'b' }, { who: 'a' }, { who: '' }];
+    assert.equal(Stats.build(rows, { tiles: [{ agg: 'distinct', column: 'who' }] }).tiles[0].value, 2);
+  });
+});
