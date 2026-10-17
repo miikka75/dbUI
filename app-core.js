@@ -370,6 +370,8 @@ function createVueApp() {
       calPeriods: {},
       // Booted signed-out into a database with public tables (see the backends' auth handlers).
       visitorMode: false,
+      // This tablet's QR lock: { view, door, hash } -- the screen it reopens into, and the PIN's hash.
+      kioskLock: (function() { try { return JSON.parse(localStorage.getItem('kiosk_lock') || 'null'); } catch (e) { return null; } })(),
       // The sign-in dialog: Google, or an emailed code / link (when the backend offers email sign-in).
       signInOpen: false, authEmail: '', authCode: '', authSent: false, authCodeAllowed: false, authBusy: false, authError: '', authLinkPending: false,
       // A page's `filters` picks, { page: { column: [values] } }, kept per viewer in their browser.
@@ -1159,7 +1161,7 @@ function createVueApp() {
         return Leftovers.corpus([doc, VIEWS, this.pageCache, cfg], [doc.tables || {}], [doc.views || [], VIEWS]);
       },
       staticTranslationKeys: function() {
-        return ['app.title', 'btn.add', 'btn.show_active', 'btn.show_archived', 'btn.show_all', 'btn.show_fewer', 'btn.decrease', 'btn.increase', 'settings.linked_list', 'auth.sign_in', 'auth.with_google', 'auth.or', 'auth.email', 'auth.send_email', 'auth.check_email', 'auth.check_email_code', 'auth.code', 'btn.more',
+        return ['app.title', 'btn.add', 'btn.show_active', 'btn.show_archived', 'btn.show_all', 'btn.show_fewer', 'btn.decrease', 'btn.increase', 'settings.linked_list', 'auth.sign_in', 'auth.with_google', 'auth.or', 'auth.email', 'auth.send_email', 'auth.check_email', 'auth.check_email_code', 'auth.code', 'kiosk.fullscreen', 'kiosk.exit', 'kiosk.lock', 'kiosk.unlock', 'kiosk.pin', 'kiosk.pin_short', 'kiosk.wrong_pin', 'btn.more',
          'btn.edit', 'btn.copy', 'btn.show', 'btn.hide', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'cal.feed_url', 'feed.subscribe', 'feed.link_pending', 'feed.unsubscribe', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.no_blob_store', 'msg.feed_cap_reached', 'settings.feeds', 'settings.feed_regenerate', 'settings.feed_unpublish', 'settings.feed_not_republishing', 'settings.feed_all_personal', 'settings.feed_subscribers', 'settings.feed_revoking', 'settings.feed_over_cap', 'settings.feed_unpublished', 'settings.feed_revoked', 'settings.feed_sweep', 'settings.csp_reports', 'settings.csp_token', 'settings.csp_bad_token', 'settings.csp_read_failed', 'settings.csp_none', 'settings.csp_extensions', 'settings.csp_directive', 'settings.csp_blocked', 'settings.csp_count', 'settings.csp_last_seen', 'btn.refresh', 'settings.csp_rotate', 'msg.feed_swept', 'cal.err_no_source', 'cal.err_table', 'cal.err_date_col', 'cal.err_not_date', 'cal.err_title_col', 'settings.add_calendar', 'settings.cal_title', 'settings.cal_table', 'settings.cal_date_col', 'settings.cal_title_cols', 'settings.cal_add_source', 'btn.delete', 'btn.confirm_delete', 'cal.err_not_rotation', 'settings.cal_rotations', 'msg.name_taken', 'cal.err_name', 'lang.add_language', 'btn.cancel', 'timeline.empty', 'col.switch_list',
          'img.replace', 'img.upload', 'img.remove', 'img.url', 'img.view', 'img.open_original',
          'btn.close', 'btn.previous', 'btn.next',
@@ -1775,6 +1777,24 @@ function createVueApp() {
       },
       // Email sign-in, through the backend's authEmailStart / authEmailVerify (Supabase: a code and a link in
       // one email; Firebase: a link). Errors are the provider's own words.
+      // --- The QR kiosk lock (qr-dialog's `kiosk`): this tablet's, never the database's. ---
+      kioskLockMatches: function(k) { var l = this.kioskLock; return !!(l && k && l.view === k.view && String(l.door || '') === String(k.door || '')); },
+      _kioskHash: function(pin) {
+        var text = 'dbui-kiosk:' + pin;
+        if (!(window.crypto && crypto.subtle && window.TextEncoder)) return Promise.resolve(text);   // no SubtleCrypto: stored as-is, on this device only
+        return crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)).then(function(b) {
+          return Array.prototype.map.call(new Uint8Array(b), function(x) { return ('0' + x.toString(16)).slice(-2); }).join('');
+        });
+      },
+      setKioskLock: function(k, pin) {
+        var self = this;
+        return this._kioskHash(pin).then(function(h) {
+          self.kioskLock = { view: k.view, door: k.door || '', hash: h };
+          try { localStorage.setItem('kiosk_lock', JSON.stringify(self.kioskLock)); } catch (e) {}
+        });
+      },
+      kioskPinOk: function(pin) { var l = this.kioskLock; return l ? this._kioskHash(pin).then(function(h) { return h === l.hash; }) : Promise.resolve(true); },
+      clearKioskLock: function() { this.kioskLock = null; try { localStorage.removeItem('kiosk_lock'); } catch (e) {} },
       // Whether the backend offers email sign-in. A method, not a computed: the backend script defines it on
       // window after Vue has started, and a computed would keep its first answer.
       hasEmailSignIn: function() { return typeof window.authEmailStart === 'function'; },
@@ -6200,6 +6220,9 @@ function createVueApp() {
         return view;
       },
       _autoSelectTab: function() {
+        // A tablet locked on a code reopens that screen; the screen itself reopens the locked QR.
+        var kl = this.kioskLock;
+        if (kl && VIEWS[kl.view] && this.canAccessNavId(kl.view)) { this.selectTab(kl.view, true); return; }
         // A deep-linked code names the view it belongs to, so it decides which tab opens.
         var pend = this._pendingScanFromUrl();
         if (pend) { this.pendingScan = pend; this.selectTab(pend.view, true); return; }
@@ -10071,7 +10094,12 @@ function createVueApp() {
     // started the fetches a tick ago), so the write waits for `viewLoaded` rather than racing them --
     // the watcher below is what fires when they land, and runPending is a no-op if they already had.
     // A code from the scan button submits too: there the person pointing the camera is the intent.
-    mounted: function() { this.takePending(); },
+    mounted: function() {
+      this.takePending();
+      // A tablet locked on this door screen reopens it, at the same gym, behind the PIN.
+      var kl = appInstance.kioskLock;
+      if (kl && kl.view === this.viewName && this.doorScreen) { this.door = kl.door || ''; this.qrOpen = true; }
+    },
     watch: {
       viewLoaded: function(ready) { if (ready) this.runPending(); },
       // Scanned again while this view is open: the view does not remount, so the code is taken here.
@@ -10083,6 +10111,8 @@ function createVueApp() {
       cfg: function() { return (VIEWS[this.viewName] || {}).scan || {}; },
       pending: function() { return appInstance.pendingScan; },
       // The DOOR SCREEN (`verify`, staff only): which door it stands at, and the changing code it shows.
+      // The door screen's caption in full screen: the gym it stands at.
+      doorTitle: function() { return this.door ? appInstance.displayValue(this.cfg.column, this.door) : ''; },
       doorScreen: function() { return !this.embed && appInstance.scanCanVerify(this.viewName); },
       rotateMinutes: function() { var vf = this.cfg.verify; return vf ? (vf.rotateMinutes || 5) : 0; },
       doors: function() {
@@ -10208,7 +10238,7 @@ function createVueApp() {
       + '<div v-if="doorScreen" class="d-flex align-center mb-3" style="gap:8px" data-testid="scan-door-screen">'
       +   '<v-select v-model="door" :items="doors" :label="a.t(\'scan.door\')" density="compact" variant="outlined" hide-details style="max-width:260px" data-testid="scan-door"></v-select>'
       +   '<v-btn icon="mdi-qrcode" size="small" variant="text" :disabled="!door" :title="a.t(\'rsvp.show_code\')" :aria-label="a.t(\'rsvp.show_code\')" data-testid="scan-door-qr" @click="qrOpen = true"></v-btn>'
-      +   '<qr-dialog v-model="qrOpen" :link="qrLink" :caption="current" mono></qr-dialog>'
+      +   '<qr-dialog v-model="qrOpen" :link="qrLink" :caption="current" mono :kiosk="{ view: viewName, door: door || \'\' }" :title="doorTitle"></qr-dialog>'
       + '</div>'
       // Below it, a member's own way in -- the camera and the box -- which the door screen has no use for.
       + '<template v-if="!doorScreen">'
@@ -10443,32 +10473,82 @@ function createVueApp() {
   // app offers to open a link it finds in a QR. The caption goes under it for anyone who cannot scan: the
   // check-in code (`mono`), or the page's name. With no encoder (offline, /vendor missing) only the
   // caption shows. Drawn on open, since the link may change while the dialog is closed.
+  //
+  // `kiosk` ({ view, door }) -- a changing code a tablet shows at a door or a room: it may go FULL SCREEN
+  // (no menus behind it, and the browser's own full screen when allowed) and be LOCKED with a PIN chosen
+  // there and then, so a customer cannot close it. The lock is this tablet's (root kioskLock, in its
+  // browser storage, the PIN only as a hash) and outlives a reload: the app reopens straight into the
+  // locked code. The tablet's own pinning (Guided Access, app pinning) is what stops leaving the browser.
   app.component('qr-dialog', {
-    props: { modelValue: Boolean, link: { type: String, default: '' }, caption: { type: String, default: '' }, mono: Boolean },
+    props: { modelValue: Boolean, link: { type: String, default: '' }, caption: { type: String, default: '' }, mono: Boolean,
+             kiosk: { type: Object, default: null }, title: { type: String, default: '' } },
     emits: ['update:modelValue'],
-    data: function() { return { svg: '' }; },
+    data: function() { return { svg: '', full: false, locked: false, choosing: false, pin: '', pinError: '' }; },
     computed: { a: function() { return appInstance; } },
     watch: {
-      modelValue: { immediate: true, handler: function(open) { if (open) this.draw(); } },
-      link: function() { if (this.modelValue) this.draw(); }
+      modelValue: { immediate: true, handler: function(open) {
+        if (open && this.kiosk && appInstance.kioskLockMatches(this.kiosk)) { this.full = true; this.locked = true; }
+        if (open) this.draw();
+      } },
+      link: function() { if (this.modelValue) this.draw(); },
+      full: function() { if (this.modelValue) this.draw(); }
     },
     methods: {
       draw: function() {
         var self = this, link = this.link;
         appInstance._ensureQrEncoder().then(function() {
           var m = appInstance.qrMatrix(link);
-          var px = Math.max(160, Math.min(480, window.innerWidth - 96, window.innerHeight - 260));
+          var px = self.full ? Math.max(200, Math.min(window.innerWidth - 48, window.innerHeight - 220))
+                             : Math.max(160, Math.min(480, window.innerWidth - 96, window.innerHeight - 260));
           self.svg = m ? Print.qrSvg(m, px) : '';
+        });
+      },
+      close: function(v) { if (!v && this.locked) return; this.$emit('update:modelValue', v); if (!v) this.leaveFull(); },
+      goFull: function() {
+        this.full = true;
+        try { var el = document.documentElement; if (el.requestFullscreen && !document.fullscreenElement) el.requestFullscreen().catch(function() {}); } catch (e) {}
+      },
+      leaveFull: function() {
+        if (this.locked) return;
+        this.full = false; this.choosing = false;
+        try { if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(function() {}); } catch (e) {}
+      },
+      lock: function() {
+        var self = this, pin = String(this.pin || '').trim();
+        if (!/^[0-9]{4,}$/.test(pin)) { this.pinError = appInstance.t('kiosk.pin_short'); return; }
+        return appInstance.setKioskLock(this.kiosk, pin).then(function() { self.locked = true; self.choosing = false; self.pin = ''; self.pinError = ''; });
+      },
+      unlock: function() {
+        var self = this;
+        return appInstance.kioskPinOk(String(this.pin || '').trim()).then(function(ok) {
+          self.pin = '';
+          if (!ok) { self.pinError = appInstance.t('kiosk.wrong_pin'); return; }
+          appInstance.clearKioskLock(); self.locked = false; self.pinError = ''; self.choosing = false;
         });
       }
     },
     template: ''
-      + '<v-dialog :model-value="modelValue" @update:model-value="$emit(\'update:modelValue\', $event)" max-width="560">'
-      +   '<v-card class="pa-4 text-center" data-testid="qr-dialog">'
-      +     '<div class="d-flex"><v-spacer></v-spacer><v-btn icon="mdi-close" size="small" variant="text" :title="a.t(\'btn.close\')" :aria-label="a.t(\'btn.close\')" @click="$emit(\'update:modelValue\', false)"></v-btn></div>'
+      + '<v-dialog :model-value="modelValue" @update:model-value="close($event)" :fullscreen="full" :persistent="locked" max-width="560">'
+      +   '<v-card class="pa-4 text-center" :class="full ? \'d-flex flex-column justify-center\' : \'\'" data-testid="qr-dialog" :data-kiosk="full ? (locked ? \'locked\' : \'full\') : undefined">'
+      +     '<div class="d-flex align-center" style="gap:4px">'
+      +       '<span v-if="full && title" style="font-size:1.4rem;font-weight:600" data-testid="qr-dialog-title">{{ title }}</span><v-spacer></v-spacer>'
+      // Unlocked: full screen, lock (asks for a PIN), close. Locked: only the way back in, behind the PIN.
+      +       '<template v-if="!locked">'
+      +         '<v-btn v-if="kiosk && !full" icon="mdi-fullscreen" size="small" variant="text" :title="a.t(\'kiosk.fullscreen\')" :aria-label="a.t(\'kiosk.fullscreen\')" data-testid="qr-fullscreen" @click="goFull()"></v-btn>'
+      +         '<v-btn v-if="kiosk && full" icon="mdi-lock-outline" size="small" variant="text" :title="a.t(\'kiosk.lock\')" :aria-label="a.t(\'kiosk.lock\')" data-testid="qr-lock" @click="choosing = true; pin = \'\'; pinError = \'\'"></v-btn>'
+      +         '<v-btn v-if="full" icon="mdi-fullscreen-exit" size="small" variant="text" :title="a.t(\'kiosk.exit\')" :aria-label="a.t(\'kiosk.exit\')" data-testid="qr-exit-full" @click="leaveFull()"></v-btn>'
+      +         '<v-btn icon="mdi-close" size="small" variant="text" :title="a.t(\'btn.close\')" :aria-label="a.t(\'btn.close\')" @click="close(false)"></v-btn>'
+      +       '</template>'
+      +       '<v-btn v-else icon="mdi-lock" size="small" variant="text" :title="a.t(\'kiosk.unlock\')" :aria-label="a.t(\'kiosk.unlock\')" data-testid="qr-unlock" @click="choosing = !choosing; pin = \'\'; pinError = \'\'"></v-btn>'
+      +     '</div>'
+      +     '<div v-if="choosing" class="d-flex justify-center align-center flex-wrap my-2" style="gap:8px" data-testid="qr-pin-form">'
+      +       '<v-text-field v-model="pin" type="password" inputmode="numeric" autocomplete="off" :label="a.t(\'kiosk.pin\')" density="compact" variant="outlined" hide-details style="max-width:180px" data-testid="qr-pin" @keydown.enter="locked ? unlock() : lock()"></v-text-field>'
+      +       '<v-btn color="primary" variant="flat" data-testid="qr-pin-go" @click="locked ? unlock() : lock()">{{ locked ? a.t(\'kiosk.unlock\') : a.t(\'kiosk.lock\') }}</v-btn>'
+      +       '<div v-if="pinError" class="text-error text-body-2" style="flex-basis:100%" data-testid="qr-pin-error">{{ pinError }}</div>'
+      +     '</div>'
       // The SVG is built from the module matrix alone -- numbers, no text from anyone -- so v-html is safe.
       +     '<div v-if="svg" v-html="svg" class="d-flex justify-center"></div>'
-      +     '<div class="mt-3" :style="mono ? \'font-family:monospace;font-size:2.5rem;letter-spacing:0.1em;word-break:break-all\' : \'font-size:1.5rem\'" data-testid="qr-dialog-caption">{{ caption }}</div>'
+      +     '<div class="mt-3" :style="mono ? (\'font-family:monospace;letter-spacing:0.1em;word-break:break-all;font-size:\' + (full ? \'4rem\' : \'2.5rem\')) : \'font-size:1.5rem\'" data-testid="qr-dialog-caption">{{ caption }}</div>'
       +   '</v-card>'
       + '</v-dialog>'
   });
@@ -10515,7 +10595,10 @@ function createVueApp() {
     // (rsvp-view's pickToday) it mounts with `mine` empty, which reads as frozen: the code shows,
     // disabled, while they book a class below -- and the booking unfreezes it, so the claim follows the
     // booking rather than needing a second scan.
-    mounted: function() { this.autoClaimNow(); },
+    mounted: function() {
+      this.autoClaimNow();
+      if (this.canStamp && this.rotateMinutes && appInstance.kioskLockMatches({ view: this.viewName, door: '' })) this.qrOpen = true;   // a locked tablet
+    },
     methods: {
       stamp: function() { appInstance.stampRsvpCheckin(this.viewName, this.accepted); },
       autoStamp: function() { appInstance.stampRsvpCheckin(this.viewName, this.accepted, true); },
@@ -10535,7 +10618,7 @@ function createVueApp() {
       +   '<v-btn icon="mdi-qrcode" size="small" variant="text" :disabled="!rotateMinutes && !typed" :title="a.t(\'rsvp.show_code\')" :aria-label="a.t(\'rsvp.show_code\')" data-testid="rsvp-checkin-qr" @click="qrOpen = true"></v-btn>'
       // A changing code stamps by itself (every 15 s while shown, and as the QR closes): no button to press.
       +   '<v-btn v-if="!rotateMinutes" size="small" variant="text" class="text-none" :disabled="!shown" :title="a.t(\'rsvp.checkin\')" :aria-label="a.t(\'rsvp.checkin\')" data-testid="rsvp-checkin-stamp" @click="stamp()"><v-icon icon="mdi-account-check"></v-icon><span class="d-none d-sm-inline ml-2">{{ a.t(\'rsvp.checkin\') }}</span></v-btn>'
-      +   '<qr-dialog v-model="qrOpen" :link="qrLink" :caption="shown" mono></qr-dialog>'
+      +   '<qr-dialog v-model="qrOpen" :link="qrLink" :caption="shown" mono :kiosk="canStamp ? { view: viewName, door: \'\' } : null" :title="a.tOr(\'view.\' + viewName, viewName)"></qr-dialog>'
       + '</template>'
       + '<v-text-field v-else-if="!hideClaim || (armed && !autoClaim)" :model-value="armed || myCode" @change="e => claim(e.target.value)" :disabled="frozen" :label="a.t(\'rsvp.checkin_code\')" density="compact" variant="outlined" hide-details autocomplete="off" :autofocus="!!armed" style="max-width:200px" data-testid="rsvp-checkin-claim">'
       // A code from a link is ARMED, not written: one press saves it, because a link is something anyone

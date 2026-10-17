@@ -248,3 +248,50 @@ test('blockedBy: on a day inside my own pause, the door scan and the class check
   const err = await page.evaluate(() => { VIEWS.door.scan.blockedBy = { table: 'leaves', from: 'nope' }; const e = validateSchema().join(' | '); return e; });
   expect(err).toContain('`from` "nope" is not a column of "leaves"');
 });
+
+test('door screen kiosk: full screen, locked with a PIN, survives a reload, opens only with the PIN', async ({ page }) => {
+  const schema = JSON.parse(JSON.stringify(SCHEMA));
+  const visits = schema.tables.visits;
+  visits.columns.push({ name: 'door_code', type: 'text' }, { name: 'verified', type: 'text' });
+  visits.ownerWritable = ['seen_on', 'door_code'];
+  schema.views[0].scan.verify = { claim: 'door_code', set: { verified: 'yes' }, rotateMinutes: 5 };
+  await setup(page, schema);
+  await page.request.post('/api/putRow', { data: { tableId: 'ref_doors', tab: 'active', data: { id: 'd2', door: 'Back', code: 'BACK-1' } }, headers: ADMIN });
+  await boot(page, 'org@x');
+  await page.evaluate(() => appInstance.selectTab('door'));
+  await page.locator('[data-testid="scan-door"]').click();
+  await page.locator('.v-overlay .v-list-item', { hasText: 'Back' }).click();
+  await page.locator('[data-testid="scan-door-qr"]').click();
+  const dlg = page.locator('[data-testid="qr-dialog"]');
+  await page.locator('[data-testid="qr-fullscreen"]').click();
+  await expect(dlg).toHaveAttribute('data-kiosk', 'full');
+  await expect(page.locator('[data-testid="qr-dialog-title"]')).toHaveText('Back');
+  // Lock: too short a PIN is refused, four digits lock it.
+  await page.locator('[data-testid="qr-lock"]').click();
+  await page.locator('[data-testid="qr-pin"] input').fill('12');
+  await page.locator('[data-testid="qr-pin-go"]').click();
+  await expect(page.locator('[data-testid="qr-pin-error"]')).toBeVisible();
+  await page.locator('[data-testid="qr-pin"] input').fill('2468');
+  await page.locator('[data-testid="qr-pin-go"]').click();
+  await expect(dlg).toHaveAttribute('data-kiosk', 'locked');
+  await page.keyboard.press('Escape');
+  await expect(dlg).toHaveAttribute('data-kiosk', 'locked');            // Escape does not close it
+  expect(JSON.stringify(await page.evaluate(() => localStorage.getItem('kiosk_lock')))).not.toContain('2468');   // only a hash
+  // A reload reopens the locked code, at the same door.
+  await page.reload();
+  await page.waitForFunction(() => window.appInstance && !appInstance.loading && appInstance.usersLoaded, { timeout: 30000 });
+  await expect(dlg).toHaveAttribute('data-kiosk', 'locked');
+  await expect(page.locator('[data-testid="qr-dialog-title"]')).toHaveText('Back');
+  // The wrong PIN keeps it locked; the right one unlocks, and it can then be left.
+  await page.locator('[data-testid="qr-unlock"]').click();
+  await page.locator('[data-testid="qr-pin"] input').fill('1111');
+  await page.locator('[data-testid="qr-pin-go"]').click();
+  await expect(page.locator('[data-testid="qr-pin-error"]')).toBeVisible();
+  await expect(dlg).toHaveAttribute('data-kiosk', 'locked');
+  await page.locator('[data-testid="qr-pin"] input').fill('2468');
+  await page.locator('[data-testid="qr-pin-go"]').click();
+  await expect(dlg).toHaveAttribute('data-kiosk', 'full');
+  await page.locator('[data-testid="qr-exit-full"]').click();
+  await expect(dlg).not.toHaveAttribute('data-kiosk', /./);
+  expect(await page.evaluate(() => localStorage.getItem('kiosk_lock'))).toBeNull();
+});

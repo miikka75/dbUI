@@ -2301,6 +2301,13 @@ shown by a **screen at the door** and changes every `rotateMinutes` (default 5):
   `set` columns nor `column` may be, or a member could confirm themselves. `validateSchema` refuses both,
   and `once` (every code is fresh). Count only confirmed rows where it matters (`when: { "verified": "yes" }`).
 - What it costs: nothing is confirmed while no door screen is showing the code.
+- **A tablet at the door** (or a room, for an rsvp `checkin` with `rotateMinutes`): sign it in as an **editor**
+  granted only what the screen confirms — `rw` on the log (visits; bookings for class check-in) and `r` on
+  the catalogue it picks from. In the QR, **Full screen** hides the app behind it (and the browser's own
+  bars, where allowed); **Lock** takes a PIN of 4+ digits, after which the code can only be left with that
+  PIN. The lock is the tablet's — kept in its browser, the PIN as a hash — and survives a reload: the app
+  reopens straight into the locked code. Leaving the browser is the tablet's to prevent: iPad Guided
+  Access, Android app pinning, or a kiosk browser. A forgotten PIN: clear the site's data on the tablet.
 
 ### The code names a catalogue row
 

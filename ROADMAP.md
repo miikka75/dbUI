@@ -1378,6 +1378,12 @@ functions). **Large**: three access layers, and the first signed-out mode of the
   sign-in proved the mailbox, or auth.users records the confirmation). Before, only Google being the one
   provider kept an unverified sign-up under the admin's address from being the admin.
 
+#### 27. The code screen as a kiosk — full screen, PIN lock *(landed)*
+
+The changing door / class code can go full screen and be locked with a PIN chosen on the tablet; the lock
+lives in that browser (the PIN hashed) and survives a reload. The app cannot stop someone leaving the
+browser — that is Guided Access / app pinning on the tablet (SCHEMA.md, scan `verify`). **Small.**
+
 #### Not proposed
 
 - **Opening the gate.** It needs the gate controller's own API and a server to call it from; the
