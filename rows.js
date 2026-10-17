@@ -100,16 +100,7 @@
   // date column works without a separate operator. Returns NaN when either side is blank or missing:
   // every comparison against NaN is false, so an unset value matches NO ordered filter in either
   // direction (fail-closed, matching `within`) instead of silently sorting as zero.
-  // An operand is a value, another column of the row ({ col }), or a day relative to today: "@today",
-  // "@today-6", "@today+7" -> YYYY-MM-DD, recomputed each call, so `{ gte: "@today-6" }` is a rolling
-  // last 7 days. A datetime compares against it as text, which puts any moment of a day on that day.
-  function _operand(item, x) {
-    if (typeof x === 'string' && x.charAt(0) === '@') {
-      var m = /^@today(?:([+-])(\d+))?$/.exec(x);
-      if (m) { var d = new Date(); d.setHours(12, 0, 0, 0); d.setDate(d.getDate() + (m[1] === '-' ? -1 : 1) * (m[2] ? +m[2] : 0)); return fmtDate(d); }
-    }
-    return (x && typeof x === 'object' && !Array.isArray(x) && typeof x.col === 'string') ? _get(item, x.col) : x;
-  }
+  function _operand(item, x) { return (x && typeof x === 'object' && !Array.isArray(x) && typeof x.col === 'string') ? _get(item, x.col) : x; }
   function _cmp(a, b) {
     if (a == null || a === '' || b == null || b === '') return NaN;
     var na = Number(a), nb = Number(b);
@@ -444,10 +435,7 @@
         srcRows.forEach(function(r) { rows.push(Object.assign({}, r, { _source: src })); });
       }
     });
-    rows = filterRows(rows, cfg.filter);
-    // `limit`: the view IS its first N rows in its default order (the latest 10, with defaultSortDesc).
-    if (cfg.limit > 0) rows = sortByCol(rows, cfg.defaultSort, cfg, !cfg.defaultSortDesc).slice(0, cfg.limit);
-    return rows;
+    return filterRows(rows, cfg.filter);
   }
 
   // The key set an aggregate should produce, taken from the CATALOGUE the group column references
@@ -573,8 +561,10 @@
     // during one -- the pipeline is synchronous and pure over it -- so nothing here can go stale, and
     // nothing has to be invalidated. Built lazily: a view with no lookup def pays nothing.
     var idx = Object.create(null);
-    rows.forEach(function(r) {
-      defs.forEach(function(d) {
+    // Column by column, each over every row: a column that reads OTHER rows (streakAt, an occurrence rank)
+    // then sees the columns before it already filled in on all of them, not only on the rows before its own.
+    defs.forEach(function(d) {
+      rows.forEach(function(r) {
         // Per-source compute (union views only): apply this def only to rows from `d.source`, which
         // buildRows tags as _source. Two defs writing the SAME output column — one per source table,
         // one of them scaled -1 — is how a single aggregate sums a signed quantity across tables

@@ -66,6 +66,7 @@
     'default', 'defaultFrom', 'stamped',                         // what a new row starts with, and who may rewrite it
     'syncFrom',                                                  // mirror columns
     'computed',                                                  // derived on read, never stored
+    'scale',                                                     // multiplies a computed column's number (-1 subtracts it in a total)
     'enabledWhen'                                                // which options a picker lets you choose
   ];
 

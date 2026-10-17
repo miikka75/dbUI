@@ -1267,7 +1267,8 @@ What the screen needs is to SHOW less, so three general pieces, each useful on i
 - **`@today`, `@today-N`, `@today+N` as comparison operands** — `{ "done_on": { "gte": "@today-6" } }` is
   the last 7 days, `{ "due_on": { "lt": "@today" } }` is overdue. Rolling, unlike `within`'s periods.
 - **`defaultSortDesc`** — the default sort, newest first.
-- **`limit`** — the view holds the first N rows of its default order: the latest 10 workouts.
+- ~~**`limit`**~~ and ~~the `@today-N` operands~~ — built for the log, then replaced by `preview` and
+  `within: { calendar }` before merging, and removed: nothing used them.
 
 And `defaultFrom: "@today"`, so a new log row is dated today and stays inside a date-filtered view.
 **Small.**

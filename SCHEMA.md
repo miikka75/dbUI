@@ -338,7 +338,6 @@ Named, reusable. Views are flat — hierarchy lives in `nav` (no `views.views` n
 | `requires` | object | A **member-only** view: `{ table, from, to, where }`, the shape rsvp's `requires` has. Shown (in the menu and embedded) only while the person has one of their own rows covering today — an active membership — and gone again when it lapses; their rows are kept. Admins and editors always see it |
 | `filters` | string[] | **A page** (`markdown`): multi-selects above it, one per column (a list or a ref), that narrow every view embedded on it — only the rows that HAVE the column, so a trainer pick leaves visits alone. Kept per viewer in their browser. (A calendar's own `filters` live in `calendar`) |
 | `preview` | number | **Embedded** (`{{view:x}}`): show the first N rows of the view's order, with **Show all (M)** under them to expand and **Show fewer** to fold back. All rows stay in the view — totals and the top-level screen see them all; only the embed's display is folded |
-| `limit` | number | Keep only the first N rows of the default order (needs `defaultSort`): with `defaultSortDesc`, the latest N. The view IS those rows, so a stats view over it counts them only |
 | `hideEmpty` | boolean | Hide empty columns. **Table** layout drops a column empty across *all* rows; **card / board** layouts drop it per row, so each card shows only the fields it has (edit mode still shows every field, or the one you needed to fill in would be the one missing). Override per column with `{ "name": col, "hideEmpty": false }` |
 | `icon` | string | MDI icon for the sidebar |
 | `printable` | `"view"` \| `"cards"` \| `["view","cards"]` | Opt-in print buttons. `"view"` = view toolbar print only; `"cards"` = per-card buttons only; `["view","cards"]` = both. **Off by default** — omit to hide all print buttons. Note: per-card buttons only render in `card`/`list`/`gallery` layout, so `"cards"` on a `table` layout shows nothing. Applies to views and tables |
@@ -648,7 +647,8 @@ Shapes:
   the run of consecutive periods (`weekly` Monday-start, `daily`, `monthly`) this row's date ends, over the rows
   of the same `by` value (optionally narrowed by `where`); with `levels`, how many of those thresholds it has
   reached. It is the streak WHEN the row happened, so a later break never takes a bonus back. Coins per class
-  that grow with the streak: a `lvl` from `streakAt`, then `delta` = `{ "add": [1, { "col": "lvl" }] }`.
+  that grow with the streak, said once on the table: a `streak_level` from `streakAt`, then `coins` =
+  `{ "add": [1, { "col": "streak_level" }] }`; a cost counts against the total with `"scale": -1` on its column.
 - **A fixed amount** (`value`): `{ "value": 100 }` puts the same number on every row — a rate an aggregate
   sums, such as coins per class attended (`"source"` limits it to one table of a union).
 - **Age of a row** (`daysSince`): whole days from a date column to today, as a **number** (negative for a
@@ -681,7 +681,6 @@ row when **every** field matches. Each field accepts a scalar (equality) or an o
 | `{ "f": { "empty": true } }` | `row.f` is falsy (blank) |
 | `{ "f": { "ne": v } }` | `row.f !== v` |
 | `{ "f": { "gte": { "col": "g" } } }` | compare to ANOTHER column of the same row (any of `ne`/`lt`/`gt`/`lte`/`gte`): `{ "balance": { "gte": { "col": "cost" } } }` |
-| `{ "f": { "gte": "@today-6" } }` | compare to a day relative to today: `@today`, `@today-N`, `@today+N` (any ordered operator or `ne`), recomputed each render. `{ "done_on": { "gte": "@today-6" } }` = the last 7 days, rolling; `{ "due_on": { "lt": "@today" } }` = overdue. A datetime compares on its day |
 | `{ "f": { "lt": v } }` / `gt` / `lte` / `gte` | ordered comparison. **Numeric** when both sides parse as numbers (`9 < 10`, not `"9" > "10"`), otherwise a string compare — which orders `YYYY-MM-DD` dates correctly, so no separate date operator is needed. Combinable in one object for a range: `{ "gte": 10, "lte": 20 }`. A **blank or missing value is incomparable** and matches *no* ordered filter in either direction (fail-closed — otherwise `Number('') === 0` would quietly pull undated rows into an "overdue" view) |
 | `{ "$or": [...] }` / `{ "$and": [...] }` | logical groups (membership via `$or` of equalities) |
 | `{ "f": { "matchList": "L" } }` / `notMatchList` | value in / not in named list |

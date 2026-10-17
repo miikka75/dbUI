@@ -290,6 +290,10 @@
             "syncFrom": {
               "type": "string",
               "description": "Mirror this column's value from another table."
+            },
+            "scale": {
+              "type": "number",
+              "description": "Multiplies a computed column's number: -1 makes a cost count against a total."
             }
           }
         }
@@ -609,11 +613,6 @@
           "type": "integer",
           "minimum": 1,
           "description": "Embedded, show the first N rows with a Show all / Show fewer toggle."
-        },
-        "limit": {
-          "type": "integer",
-          "minimum": 1,
-          "description": "Keep only the first N rows of the default order (needs `defaultSort`)."
         },
         "feedSubscribers": {
           "type": "object",

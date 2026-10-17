@@ -261,6 +261,34 @@
               "field": "gym"
             }
           }
+        },
+        {
+          "name": "streak_level",
+          "computed": {
+            "streakAt": "class_start",
+            "interval": "weekly",
+            "by": "owner",
+            "levels": [
+              1,
+              3,
+              8,
+              26
+            ],
+            "where": {
+              "attendance": "attended"
+            }
+          }
+        },
+        {
+          "name": "coins",
+          "computed": {
+            "add": [
+              1,
+              {
+                "col": "streak_level"
+              }
+            ]
+          }
         }
       ],
       "ownerWritable": [
@@ -644,6 +672,19 @@
           "name": "updated_at",
           "type": "text",
           "hidden": true
+        },
+        {
+          "name": "coins",
+          "computed": {
+            "lookup": {
+              "table": "ref_rewards",
+              "match": "reward",
+              "on": "reward",
+              "field": "cost",
+              "default": 0
+            }
+          },
+          "scale": -1
         }
       ],
       "ownerWritable": [
@@ -1570,23 +1611,6 @@
       ]
     },
     {
-      "name": "attendance_check",
-      "kind": "data",
-      "icon": "mdi-clipboard-check-outline",
-      "sources": [
-        "classes"
-      ],
-      "layout": "card",
-      "defaultSort": "starts_at",
-      "columns": [
-        "starts_at",
-        "class_type",
-        "room",
-        "instructor",
-        "capacity"
-      ]
-    },
-    {
       "name": "my_level",
       "kind": "stats",
       "icon": "mdi-medal",
@@ -1656,49 +1680,6 @@
         "reward_claims"
       ],
       "mode": "union",
-      "compute": [
-        {
-          "name": "lvl",
-          "source": "bookings",
-          "computed": {
-            "streakAt": "class_start",
-            "interval": "weekly",
-            "by": "owner",
-            "levels": [
-              1,
-              3,
-              8,
-              26
-            ]
-          }
-        },
-        {
-          "name": "delta",
-          "source": "bookings",
-          "computed": {
-            "add": [
-              1,
-              {
-                "col": "lvl"
-              }
-            ]
-          }
-        },
-        {
-          "name": "delta",
-          "source": "reward_claims",
-          "scale": -1,
-          "computed": {
-            "lookup": {
-              "table": "ref_rewards",
-              "match": "reward",
-              "on": "reward",
-              "field": "cost",
-              "default": 0
-            }
-          }
-        }
-      ],
       "filter": {
         "$or": [
           {
@@ -1726,7 +1707,7 @@
           {
             "label": "text.loyalty_coins",
             "agg": "sum",
-            "column": "delta"
+            "column": "coins"
           }
         ]
       }
@@ -1871,51 +1852,8 @@
           "owner"
         ]
       },
-      "compute": [
-        {
-          "name": "lvl",
-          "source": "bookings",
-          "computed": {
-            "streakAt": "class_start",
-            "interval": "weekly",
-            "by": "owner",
-            "levels": [
-              1,
-              3,
-              8,
-              26
-            ]
-          }
-        },
-        {
-          "name": "delta",
-          "source": "bookings",
-          "computed": {
-            "add": [
-              1,
-              {
-                "col": "lvl"
-              }
-            ]
-          }
-        },
-        {
-          "name": "delta",
-          "source": "reward_claims",
-          "scale": -1,
-          "computed": {
-            "lookup": {
-              "table": "ref_rewards",
-              "match": "reward",
-              "on": "reward",
-              "field": "cost",
-              "default": 0
-            }
-          }
-        }
-      ],
       "aggregate": {
-        "sum": "delta",
+        "sum": "coins",
         "into": "coins"
       },
       "columns": [
@@ -1959,51 +1897,8 @@
           "owner"
         ]
       },
-      "compute": [
-        {
-          "name": "lvl",
-          "source": "bookings",
-          "computed": {
-            "streakAt": "class_start",
-            "interval": "weekly",
-            "by": "owner",
-            "levels": [
-              1,
-              3,
-              8,
-              26
-            ]
-          }
-        },
-        {
-          "name": "delta",
-          "source": "bookings",
-          "computed": {
-            "add": [
-              1,
-              {
-                "col": "lvl"
-              }
-            ]
-          }
-        },
-        {
-          "name": "delta",
-          "source": "reward_claims",
-          "scale": -1,
-          "computed": {
-            "lookup": {
-              "table": "ref_rewards",
-              "match": "reward",
-              "on": "reward",
-              "field": "cost",
-              "default": 0
-            }
-          }
-        }
-      ],
       "aggregate": {
-        "sum": "delta",
+        "sum": "coins",
         "into": "coins"
       },
       "columns": [
@@ -2360,9 +2255,6 @@
           },
           {
             "view": "visit_scan"
-          },
-          {
-            "view": "attendance_check"
           },
           {
             "view": "membership_board"

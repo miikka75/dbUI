@@ -821,12 +821,6 @@ function validateSchema() {
       })(f);
     });
     if (view.preview !== undefined && !(typeof view.preview === 'number' && view.preview > 0 && Math.floor(view.preview) === view.preview)) errors.push('view "' + v + '": `preview` must be a whole number above 0');
-    // `limit` keeps the first N rows of the default order, so without a defaultSort it would keep an
-    // arbitrary N.
-    if (view.limit !== undefined) {
-      if (!(typeof view.limit === 'number' && view.limit > 0 && Math.floor(view.limit) === view.limit)) errors.push('view "' + v + '": `limit` must be a whole number above 0');
-      else if (!view.defaultSort) errors.push('view "' + v + '": `limit` keeps the first rows of `defaultSort`, so it needs one');
-    }
     // `blockedBy` on an rsvp or a scan: periods of the caller's own rows in another table. A table or a
     // column that does not exist would block nothing, which looks exactly like "not paused".
     [['blockedBy', view.rsvp && view.rsvp.blockedBy], ['blockedBy', view.scan && view.scan.blockedBy], ['requires', view.rsvp && view.rsvp.requires], ['requires', view.scan && view.scan.requires], ['requires', view.requires]].forEach(function(pair) {

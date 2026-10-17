@@ -1,5 +1,5 @@
-// A log that shows the recent past: a rolling date filter (`@today-6`), newest first (`defaultSortDesc`),
-// the latest N (`limit`), and a new row dated today (`defaultFrom: "@today"`) so it stays in view.
+// A log newest first (`defaultSortDesc`), a new row dated today (`defaultFrom: "@today"`), and the views that
+// follow a calendar's period or fold to their first rows.
 const { test, expect } = require('./server-fixture');
 
 const ymd = (n) => { const d = new Date(); d.setDate(d.getDate() + n); return [d.getFullYear(), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0')].join('-'); };
@@ -7,15 +7,14 @@ const SCHEMA = {
   defaultLanguage: 'en',
   tables: { logs: { ownerWritable: ['done_on', 'what'], columns: [{ name: 'owner', type: 'owner' }, { name: 'done_on', type: 'date', defaultFrom: '@today' }, { name: 'what', type: 'text' }] } },
   views: [
-    { name: 'recent', kind: 'data', sources: ['logs'], mode: 'union', layout: 'table', columns: ['done_on', 'what'], defaultSort: 'done_on', defaultSortDesc: true, filter: { done_on: { gte: '@today-6' } } },
-    { name: 'latest', kind: 'data', sources: ['logs'], mode: 'union', layout: 'table', columns: ['done_on', 'what'], defaultSort: 'done_on', defaultSortDesc: true, limit: 2 },
+    { name: 'recent', kind: 'data', sources: ['logs'], mode: 'union', layout: 'table', columns: ['done_on', 'what'], defaultSort: 'done_on', defaultSortDesc: true },
     { name: 'page', kind: 'page', markdown: '{{view:recent}}' }
   ],
-  nav: { items: [{ view: 'page' }, { view: 'recent' }, { view: 'latest' }] }
+  nav: { items: [{ view: 'page' }, { view: 'recent' }] }
 };
 const ADMIN = { 'X-User': 'org@x' };
 
-test('a recent log: the last 7 days newest first, the latest N, and a new row dated today', async ({ page }) => {
+test('a log newest first, and a new row dated today', async ({ page }) => {
   await page.request.post('/api/resetData');
   await page.request.post('/api/setUserRole', { data: { uid: 'org@x', role: 'admin', user: 'org@x', tables: 'all' } });
   await page.request.post('/api/saveSchema', { data: { schema: SCHEMA }, headers: ADMIN });
@@ -26,14 +25,11 @@ test('a recent log: the last 7 days newest first, the latest N, and a new row da
   await page.goto('/');
   await page.waitForFunction(() => window.appInstance && !appInstance.loading, { timeout: 30000 });
   await page.evaluate(() => appInstance.selectTab('page'));
-  await expect(page.locator('main')).toContainText('w-3');
+  await expect(page.locator('main')).toContainText('w-10');
   const text = await page.locator('main').innerText();
-  expect(text).not.toContain('w-10');
-  expect(text.indexOf('w0')).toBeLessThan(text.indexOf('w-3'));            // newest first
-  await page.evaluate(() => appInstance.selectTab('latest'));
-  await expect.poll(() => page.evaluate(() => appInstance.sortedData.map((r) => r.what))).toEqual(['w0', 'w-3']);
+  expect(text.indexOf('w0')).toBeLessThan(text.indexOf('w-3'));            // newest first, in the embed
   await page.evaluate(() => appInstance.selectTab('recent'));
-  await expect.poll(() => page.evaluate(() => appInstance.sortedData.map((r) => r.what))).toEqual(['w0', 'w-3']);
+  await expect.poll(() => page.evaluate(() => appInstance.sortedData.map((r) => r.what))).toEqual(['w0', 'w-3', 'w-10']);
   await page.evaluate(() => appInstance.addRow());
   await expect.poll(async () => ((await (await page.request.post('/api/getTableData', { data: { tableId: 'logs', tab: 'active' }, headers: ADMIN })).json()).rows || []).map((r) => r.done_on).filter((d) => d === ymd(0)).length).toBe(2);
 });

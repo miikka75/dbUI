@@ -532,28 +532,6 @@ describe('rows.js — count, reference paths and table derivation hooks', () => 
   });
 });
 
-describe('rows.js — days relative to today, and a view limited to its first N rows', () => {
-  const day = (n) => { const d = new Date(); d.setHours(12, 0, 0, 0); d.setDate(d.getDate() + n); return Rows._fmtDateForTest ? Rows._fmtDateForTest(d) : [d.getFullYear(), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0')].join('-'); };
-  it('@today, @today-N and @today+N are operands of the ordered comparisons', () => {
-    const last7 = { done_on: { gte: '@today-6' } };
-    assert.equal(Rows.condMatches({ done_on: day(0) }, last7), true);
-    assert.equal(Rows.condMatches({ done_on: day(-6) }, last7), true);
-    assert.equal(Rows.condMatches({ done_on: day(-7) }, last7), false);
-    assert.equal(Rows.condMatches({ done_on: '' }, last7), false);
-    assert.equal(Rows.condMatches({ due_on: day(-1) }, { due_on: { lt: '@today' } }), true);
-    assert.equal(Rows.condMatches({ due_on: day(3) }, { due_on: { lte: '@today+3' } }), true);
-    assert.equal(Rows.condMatches({ at: day(0) + 'T08:00:00.000Z' }, { at: { gte: '@today' } }), true);
-    assert.equal(Rows.condMatches({ s: '@todayish' }, { s: { gte: '@todayish' } }), true);   // not a token: literal
-  });
-  it('limit keeps the first N of the default order, newest first with defaultSortDesc', () => {
-    const cache = { log: [{ id: 'a', d: '2026-01-03' }, { id: 'b', d: '2026-01-01' }, { id: 'c', d: '2026-01-02' }] };
-    const ids = (cfg) => Rows.buildRows(Object.assign({ sources: ['log'], mode: 'union' }, cfg), cache).map((r) => r.id);
-    assert.deepEqual(ids({ defaultSort: 'd', defaultSortDesc: true, limit: 2 }), ['a', 'c']);
-    assert.deepEqual(ids({ defaultSort: 'd', limit: 1 }), ['b']);
-    assert.deepEqual(ids({}).length, 3);
-  });
-});
-
 describe('rows.js — computed `value`', () => {
   it('puts the same amount on every row of its source', () => {
     const rows = [{ _source: 'bookings' }, { _source: 'claims' }, { _source: 'bookings' }];
