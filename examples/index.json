@@ -5,13 +5,13 @@
       "code": "en",
       "name": "English",
       "file": "app-lang-en.json",
-      "hash": "7c0fdf43d0142add"
+      "hash": "ab22af1a2b101bec"
     },
     {
       "code": "fi",
       "name": "Suomi",
       "file": "app-lang-fi.json",
-      "hash": "b3160c143941e7ae"
+      "hash": "0c99474c66db3c3e"
     }
   ],
   "bundles": [
@@ -161,20 +161,20 @@
       "views": 38,
       "schema": {
         "file": "gym-schema.json",
-        "hash": "b7c04daf831e96d9"
+        "hash": "0fcbfea10bf30afb"
       },
       "languages": [
         {
           "code": "en",
           "name": "English",
           "file": "gym-lang-en.json",
-          "hash": "56e2fd6f52e3a8e9"
+          "hash": "52fc69df2dca00d1"
         },
         {
           "code": "fi",
           "name": "Suomi",
           "file": "gym-lang-fi.json",
-          "hash": "bcfbfb7c3fc1343e"
+          "hash": "698632868f87f65c"
         }
       ],
       "data": {
@@ -183,10 +183,10 @@
       },
       "about": {
         "file": "gym-about.json",
-        "hash": "55a2cc3ca86e0e46"
+        "hash": "accb579b3e68ef7d"
       },
       "notes": {
-        "1": "First release: book group classes (with a valid membership; the door code needs one too), with places left, a full class refused, and booking from home closing 30 minutes before the start (after that, at the gym); check in to classes by scanning the room code, and log gym visits by scanning the door code; My calendar with your classes, workouts, visits, pauses and PT sessions, where the workout log and gym visits (the latest 5, with Show all), the totals (hours, exercises, visits, km), steps and your top 3 exercises follow the week, month or year the calendar shows; subscribe to your booked classes and workouts in your phone's calendar; coins earned by attending classes (1 per class, plus 1 per streak level reached), spent in a reward shop; buying a membership or a single visit, and pausing it (the pause shows on My calendar across its days, and while it lasts classes cannot be booked or checked in to and the door code is refused); requesting a personal trainer; trainers linked to accounts see their classes and PT clients on their own My calendar; news and a library of workouts and multi-week programmes. Approving a sign-up request makes the person a member in one press. The front desk gets the door code screen, class check-in (the changing code, walk-ins, and ticking people off by hand), membership, PT and reward boards, and statistics (visits, members, attendance by class and by trainer, visits by gym) filtered by gym, class and trainer."
+        "1": "First release: anyone can open the app and see the timetable, gyms, prices and news without an account; signing in makes you a member-to-be at once, and the member pages open when a membership is active (your history stays through a lapse); book group classes (with a valid membership; the door code needs one too), with places left, a full class refused, and booking from home closing 30 minutes before the start (after that, at the gym); check in to classes by scanning the room code, and log gym visits by scanning the door code; My calendar with your classes, workouts, visits, pauses and PT sessions, where the workout log and gym visits (the latest 5, with Show all), the totals (hours, exercises, visits, km), steps and your top 3 exercises follow the week, month or year the calendar shows; subscribe to your booked classes and workouts in your phone's calendar; coins earned by attending classes (1 per class, plus 1 per streak level reached), spent in a reward shop; buying a membership or a single visit, and pausing it (the pause shows on My calendar across its days, and while it lasts classes cannot be booked or checked in to and the door code is refused); requesting a personal trainer; trainers linked to accounts see their classes and PT clients on their own My calendar; news and a library of workouts and multi-week programmes. Approving a sign-up request makes the person a member in one press. The front desk gets the door code screen, class check-in (the changing code, walk-ins, and ticking people off by hand), membership, PT and reward boards, and statistics (visits, members, attendance by class and by trainer, visits by gym) filtered by gym, class and trainer."
       }
     }
   ]

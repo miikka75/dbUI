@@ -263,6 +263,7 @@
       </v-tabs>
       <v-spacer v-else></v-spacer>
       <v-select v-if="languages.length > 1" v-model="currentLang" name="current-lang" :items="langItems" density="compact" variant="plain" hide-details style="max-width:120px" class="mr-2" @update:model-value="switchLanguage"></v-select>
+      <v-btn v-if="isVisitor" variant="text" prepend-icon="mdi-login" class="mr-2" data-testid="visitor-sign-in" @click="signIn()">{{ t('auth.sign_in') }}</v-btn>
       <user-avatar v-if="usersLoaded && !isUnregisteredUser" :email="currentUserEmail" :name="myProfile.name" :size="32" :title="myProfile.name || currentUserEmail" class="mr-2"></user-avatar>
       <!-- Undo/redo hold the slot refresh used to. There is no refresh button any more: every backend
            subscribes to its tables, and for a dropped subscription a browser reload refetches strictly
@@ -303,7 +304,7 @@
       <v-container fluid class="pa-4">
         <!-- Access notice: signed-in user matches no _meta/users record -> all reads are denied by
              rules. Hardcoded English (translations aren't loaded for an unregistered user). -->
-        <v-alert v-if="isUnregisteredUser" type="warning" variant="tonal" density="compact" class="mb-3" icon="mdi-account-alert">
+        <v-alert v-if="isUnregisteredUser && !isVisitor" type="warning" variant="tonal" density="compact" class="mb-3" icon="mdi-account-alert">
           <div>Your account (<strong>{{ currentUserEmail }}</strong>) is not registered for this database, so no data can load.</div>
           <div v-if="!accessRequested" class="d-flex align-center flex-wrap mt-2" style="gap:8px">
             <v-text-field v-model="accessRequestName" :label="t('access.your_name')" :rules="[v => !!(v && v.trim()) || '']" density="compact" hide-details variant="outlined" style="max-width:240px"></v-text-field>

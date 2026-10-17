@@ -66,6 +66,7 @@
       "btn.decrease": "Vähennä",
       "btn.increase": "Lisää",
       "settings.linked_list": "Linkitetty listaan",
+      "auth.sign_in": "Kirjaudu",
       "btn.undo": "Kumoa",
       "cal.add_on_day": "Lisää päivälle",
       "cal.err_date_col": "Valitse paivamaaran sisaltava sarake",

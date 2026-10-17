@@ -162,6 +162,13 @@ function _startSupabase(config) {
       appInstance.currentUserEmail = user.email;
       appInstance.needsReauth = false;   // clear any transient prompt raised before the redirect resolved
       if (!_sbAuthInited) { _sbAuthInited = true; init(); }   // boot once
+    } else if (!_sbAuthInited) {
+      // Signed out. A database with public tables lets a visitor in (anon may read its schema then);
+      // any other asks them to sign in, exactly as before.
+      StorageSupabase.get('_meta', 'schema').then(function(sd) {
+        if (!sd) throw new Error('no public schema');
+        _sbAuthInited = true; appInstance.currentUserEmail = ''; appInstance.visitorMode = true; init();
+      }).catch(function() { appInstance.needsReauth = true; appInstance.loading = false; });
     } else {
       appInstance.needsReauth = true; appInstance.loading = false;
     }

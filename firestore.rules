@@ -77,10 +77,21 @@ service cloud.firestore {
     // member's email/role/grants; per-user access now lives in /_users). Write by admin (or bootstrap).
     // Editors no longer write here: per-list storage moved to /_lists (its own rule below), so the old
     // editor branch on the legacy lists doc only allowed clobbering lists outside their table grants.
+    // PUBLIC tables (`public: true`, mirrored to _meta/ownerTables.public): readable with no account. Once
+    // any table is public, the schema and the translations are too -- a visitor cannot draw a table without
+    // them -- and the lists those tables name. Nothing else: not the config, the users, a page body.
+    function pubMirror() {
+      return exists(/databases/$(database)/documents/_meta/ownerTables)
+        ? get(/databases/$(database)/documents/_meta/ownerTables).data.get('public', { 'tables': [], 'lists': [] })
+        : { 'tables': [], 'lists': [] };
+    }
+    function publicMode() { return pubMirror().tables.size() > 0; }
+    function publicColl(coll) { return coll.matches('.*__active$') && (coll.split('__')[0] in pubMirror().tables); }
     match /_meta/{doc} {
       allow read: if request.auth != null && isRegistered() && (
         (doc != 'lists' && doc != 'users') || noUsers() || role() == 'admin'
       );
+      allow read: if (doc == 'schema' || doc == 'languages' || doc.matches('lang_.*')) && publicMode();
       allow create, update: if request.auth != null && (noUsers() || role() == 'admin');
       // The bootstrap probe is exists(_meta/users): deleting that doc while /_users docs exist would
       // flip noUsers() true and hand EVERY signed-in Google account full admin. Nobody deletes it —
@@ -94,6 +105,18 @@ service cloud.firestore {
     match /_users/{email} {
       allow read: if request.auth != null && (noUsers() || myEmail() == email || role() == 'admin');
       allow write: if request.auth != null && (noUsers() || role() == 'admin');
+      // OPEN SIGN-UP: a signed-in account with no record writes its OWN, and only the exact grant the
+      // schema hands a new person (_meta/ownerTables.signup) -- never more, never someone else's.
+      allow create: if request.auth != null && myEmail() == email && signupOk(email);
+    }
+    function signupOk(email) {
+      let nu = get(/databases/$(database)/documents/_meta/ownerTables).data.get('signup', null);
+      return nu != null
+        && request.resource.data.keys().hasOnly(['role', 'user', 'tables', 'rwTables'])
+        && request.resource.data.role == nu.role
+        && request.resource.data.tables == nu.tables
+        && request.resource.data.get('rwTables', null) == nu.get('rwTables', null)
+        && request.resource.data.user == email;
     }
 
     // Membership requests: a signed-in but unregistered user may create/read/withdraw ONLY their own
@@ -176,6 +199,7 @@ service cloud.firestore {
       allow read: if request.auth != null && isRegistered() && (
         noUsers() || role() == 'admin' || listAllowed()
       );
+      allow read: if listName in pubMirror().lists;   // a list a public table's columns name
       // Editing a list is admin-only, EXCEPT the lists the schema opens (userWritableLists): those are
       // free-form vocabularies any registered user maintains as they work. A table grant is deliberately
       // not consulted — a list belongs to every table whose columns reference it, so keying on the grant
@@ -539,6 +563,7 @@ service cloud.firestore {
         resource.data.get('owner', '') == myEmail() ||
         resource.data.get('rosterPublic', false) == true
       );
+      allow read: if publicColl(collection);   // a public table: anyone, signed in or not
       // stampedOk() sits OUTSIDE the branch alternation deliberately: it binds the grant-holder as well
       // as the owner, which is the one thing ownerWritable cannot say. Admins stay exempt, as they are
       // from every other bound here, so a wrong stamp can still be corrected.

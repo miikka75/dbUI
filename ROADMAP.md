@@ -1344,7 +1344,7 @@ layers), and dropping the gym's curated members list for the owner column.
 - **Removing a user** also unlinks them from user-linked lists, and the feed pass revokes the feed of
   anyone no longer registered.
 
-#### 25. Visitors, open sign-up, and member-only pages *(proposed)*
+#### 25. Visitors, open sign-up, and member-only pages *(landed)*
 
 Joining today takes three steps: create an account, request access, and wait for an admin to approve —
 only then can someone buy a membership. A gym wants a visitor to see the schedule and prices without an

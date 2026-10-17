@@ -196,6 +196,18 @@ every level and each node takes children of its own.
   load). The rotation matrix and the Lookup editor read the same rows; grouping them differently is the
   drift the declaration exists to end, and each screen looks correct on its own.
 
+### `public` — readable with no account
+
+`"public": true` on a table makes it readable by anyone who opens the app, signed in or not — a schedule,
+a price list, news. Read-only; writes still need a grant. Once any table is public, a signed-out visitor
+is let in instead of being asked to sign in: they see the views whose tables are public (and pages,
+whose embeds of anything else draw nothing), with a **Sign in** button. A booking control says to sign in.
+
+What becomes readable with no account, in both rules layers: the public tables, the lists their columns
+name, the schema and the translations. Not the config (which can hold a shared feed link), the users,
+page bodies, or any other table. `validateSchema` refuses a public table with an owner column (people's
+own rows) or with a `ref` to a table that is not public (a visitor would see its keys).
+
 ### `archiveAfter` — file finished rows away on their own
 ```json
 "chore_log": {
@@ -323,6 +335,7 @@ Named, reusable. Views are flat — hierarchy lives in `nav` (no `views.views` n
 | `collapsed` | boolean | Cards start collapsed (accordion) |
 | `defaultSort` | string | Default sort column |
 | `defaultSortDesc` | boolean | Sort `defaultSort` descending — newest first, for a log |
+| `requires` | object | A **member-only** view: `{ table, from, to, where }`, the shape rsvp's `requires` has. Shown (in the menu and embedded) only while the person has one of their own rows covering today — an active membership — and gone again when it lapses; their rows are kept. Admins and editors always see it |
 | `filters` | string[] | **A page** (`markdown`): multi-selects above it, one per column (a list or a ref), that narrow every view embedded on it — only the rows that HAVE the column, so a trainer pick leaves visits alone. Kept per viewer in their browser. (A calendar's own `filters` live in `calendar`) |
 | `preview` | number | **Embedded** (`{{view:x}}`): show the first N rows of the view's order, with **Show all (M)** under them to expand and **Show fewer** to fold back. All rows stay in the view — totals and the top-level screen see them all; only the embed's display is folded |
 | `limit` | number | Keep only the first N rows of the default order (needs `defaultSort`): with `defaultSortDesc`, the latest N. The view IS those rows, so a stats view over it counts them only |
@@ -2968,6 +2981,11 @@ from the authenticated session — never asked for.
 ```json
 "newUser": { "role": "viewer", "tables": { "classes": "r", "news": "r" } }
 ```
+
+With `"open": true`, nobody presses Approve: a signed-in account with no record registers **itself** with
+exactly this grant. Both rules layers compare the record it writes with the mirrored grant, field by
+field, so nobody signs up for more or for someone else; `open` needs `tables` to be named. Pair it with
+public tables and member-only views (`requires` on a view) for an app anyone can join.
 
 `newUser` is what one press of Approve hands a new person — a gym member: a viewer who reads the
 schedule and books through self-service. `tables` takes a list of names or a map of table → `r` / `rw`;

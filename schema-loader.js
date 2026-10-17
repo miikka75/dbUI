@@ -829,7 +829,7 @@ function validateSchema() {
     }
     // `blockedBy` on an rsvp or a scan: periods of the caller's own rows in another table. A table or a
     // column that does not exist would block nothing, which looks exactly like "not paused".
-    [['blockedBy', view.rsvp && view.rsvp.blockedBy], ['blockedBy', view.scan && view.scan.blockedBy], ['requires', view.rsvp && view.rsvp.requires], ['requires', view.scan && view.scan.requires]].forEach(function(pair) {
+    [['blockedBy', view.rsvp && view.rsvp.blockedBy], ['blockedBy', view.scan && view.scan.blockedBy], ['requires', view.rsvp && view.rsvp.requires], ['requires', view.scan && view.scan.requires], ['requires', view.requires]].forEach(function(pair) {
       var bb = pair[1];
       if (bb === undefined || bb === null) return;
       var bat = 'view "' + v + '" `' + pair[0] + '`: ';
@@ -905,6 +905,8 @@ function validateRefs(schema) {
     else {
       if (nu.role !== undefined && ['admin', 'editor', 'viewer'].indexOf(nu.role) < 0) errs.push('`newUser.role` is "' + nu.role + '" — use "viewer" or "editor" (an admin is made by hand)');
       if (nu.role === 'admin') errs.push('`newUser.role` cannot be "admin": approving a request must not hand out full control');
+      if (nu.open !== undefined && typeof nu.open !== 'boolean') errs.push('`newUser.open` is true (anyone who signs in registers themselves) or false');
+      if (nu.open === true && (nu.tables === undefined || (Array.isArray(nu.tables) ? !nu.tables.length : (nu.tables && typeof nu.tables === 'object' && !Object.keys(nu.tables).length)))) errs.push('`newUser.open` needs `newUser.tables` to name what a self-registered person reads');
       var nut = nu.tables;
       var nuNames = Array.isArray(nut) ? nut : (nut && typeof nut === 'object') ? Object.keys(nut) : (nut === undefined ? [] : null);
       if (nuNames === null) errs.push('`newUser.tables` must be a list of table names or a map of table -> "r" / "rw"');
@@ -912,6 +914,16 @@ function validateRefs(schema) {
       if (nut && typeof nut === 'object' && !Array.isArray(nut)) Object.keys(nut).forEach(function(t) { if (['r', 'rw'].indexOf(nut[t]) < 0) errs.push('`newUser.tables.' + t + '` is "' + nut[t] + '" — use "r" (read) or "rw" (read and write)'); });
     }
   }
+  // A PUBLIC table is read by people with no account: its `ref`s must point at public tables too, or a
+  // visitor sees raw keys where names should be.
+  Object.keys(tables).forEach(function(t) {
+    var td = tables[t]; if (!td || td.public === undefined) return;
+    if (typeof td.public !== 'boolean') { errs.push('table "' + t + '": `public` is true or false'); return; }
+    if (!td.public) return;
+    var defs = Columns.columnDefs(td);
+    Object.keys(defs).forEach(function(c) { var d = defs[c]; if (d && typeof d === 'object' && d.type === 'ref' && d.table && tables[d.table] && tables[d.table].public !== true) errs.push('table "' + t + '" is public, but its column "' + c + '" refers to "' + d.table + '", which is not — a visitor would see its keys, not its names'); });
+    if (Columns.ownerColOf(td)) errs.push('table "' + t + '" is public but has an owner column — people\'s own rows are not for anyone to read');
+  });
   // A user-linked LOOKUP needs a dimension whose values accounts are linked to, and that dimension is
   // derived from the columns drawing on it. With none, `listSources` is a declaration with no picker
   // behind it: the Lookup editor offers nothing, so nobody can be linked and every `@me` resolves to

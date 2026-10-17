@@ -63,7 +63,8 @@ backend = {
     return Promise.resolve({ valid: true, name: 'Firebase' });
   },
   getFolderConfig: function() {
-    return StorageFirestore.getMeta('config').then(function(d) { return d || null; });
+    // A visitor may not read the config (it can hold a shared feed's link): they get none, not an error.
+    return StorageFirestore.getMeta('config').then(function(d) { return d || null; }, function(e) { if (!_myEmail()) return null; throw e; });
   },
   setFolderConfig: function(config) {
     return StorageFirestore.setMeta('config', config);
@@ -359,7 +360,9 @@ backend = {
       // still asks, because self-service needs none; a refused schema read means nothing to ask for.
       return StorageFirestore.getMeta('schema').catch(function () { return null; }).then(function (sd) {
         var schemaTables = (BackendHelpers.unwrapSchemaDoc(sd) || {}).tables || {};
-        var names = ListAccess.accessibleListNames(schemaTables, tabs, Object.keys(ListAccess.listOwnershipMap(schemaTables)), true);
+        // A public table's lists are everyone's, a visitor's included.
+        var pubT = Object.keys(schemaTables).filter(function(t) { return schemaTables[t] && schemaTables[t].public === true; });
+        var names = ListAccess.accessibleListNames(schemaTables, tabs.concat(pubT), Object.keys(ListAccess.listOwnershipMap(schemaTables)), true);
         if (!names.length) return {};
         return Promise.all(names.map(function(name) {
           return _db.collection('_lists').doc(name).get()
@@ -578,8 +581,15 @@ function _startFirebase(config) {
   }
   _auth.onAuthStateChanged(function(user) {
     if (typeof window !== 'undefined' && window.bootMark) window.bootMark('authReady'); // auth RTT resolved
-    if (user) { appInstance.currentUserEmail = user.email; init(); }
-    else { appInstance.needsReauth = true; appInstance.loading = false; }
+    // Signed in after browsing as a visitor: start again as the account rather than booting twice.
+    if (user && appInstance.visitorMode) { location.reload(); return; }
+    if (user) { appInstance.currentUserEmail = user.email; init(); return; }
+    // Signed out. A database with public tables lets a visitor in (its schema is then readable with no
+    // account); any other asks them to sign in, exactly as before.
+    _db.collection('_meta').doc('schema').get().then(function(d) {
+      if (!d.exists) throw new Error('no public schema');
+      appInstance.currentUserEmail = ''; appInstance.visitorMode = true; init();
+    }).catch(function() { appInstance.needsReauth = true; appInstance.loading = false; });
   });
 }
 
@@ -653,6 +663,17 @@ var backend_users = {
   },
   // --- Membership requests (self-service; admin approves) ---
   // An unregistered user submits a request for access; only they can write their own request doc.
+  // OPEN SIGN-UP: write my own record with exactly the schema's newUser grant; signupOk checks it.
+  selfRegister: function() {
+    var email = _myEmail();
+    if (!email) return Promise.reject(new Error('not signed in'));
+    return _db.collection('_meta').doc('schema').get().then(function(d) {
+      var nu = BackendHelpers.signupOf(BackendHelpers.unwrapSchemaDoc(d.exists ? d.data() : null) || {});
+      if (!nu) throw new Error('sign-up is closed');
+      backend._myTablesPromise = null;
+      return _db.collection('_users').doc(email).set(BackendHelpers.userGrantDoc(email, nu.role, email, nu.tables));
+    });
+  },
   requestAccess: function(name, note) {
     var email = _myEmail();
     if (!email) return Promise.reject(new Error('not signed in'));

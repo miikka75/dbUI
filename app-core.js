@@ -66,6 +66,14 @@ function getColumnRef(table, col) { return Columns.columnRef(SCHEMA, table, col)
 function getColumnOrder(col) { return appInstance ? appInstance.columnValueOrder(col) : null; }
 function colIsMirror(tables, col, tableName) { return Columns.isMirror(tables, tableName, col); }
 function getTableMirrorSource(tables, tableName) { return Columns.tableMirrorSource(tables, tableName); }
+// The local dev identity: `?user=` (empty included) or test_user; '' is a signed-out visitor, nothing set the
+// default dev user. One function, so the app and dev-client.js's X-User header cannot disagree.
+function localDevUser() {
+  var p = new URLSearchParams(location.search);
+  if (p.has('user')) return p.get('user');
+  var t = localStorage.getItem('test_user');
+  return t !== null ? t : 'local@dev';
+}
 function getOwnerCol(table) { return Columns.tableOwnerCol(SCHEMA, table); } // table's type:'owner' column name, or null
 function getDefaultCols(table) { return Columns.tableDefaultCols(SCHEMA, table); } // [{name, from}] for `defaultFrom` columns
 // Owner-write bounds for one table, from the SAME generator the two rules layers read (so the UI can
@@ -360,6 +368,8 @@ function createVueApp() {
       clockNow: Date.now(),
       // The period each mounted calendar shows ({ name: {from, toExclusive} }), for `within: { calendar }`.
       calPeriods: {},
+      // Booted signed-out into a database with public tables (see the backends' auth handlers).
+      visitorMode: false,
       // A page's `filters` picks, { page: { column: [values] } }, kept per viewer in their browser.
       pagePicks: {},
       // Settings -> Users: what the admin narrowed the list to (a search, roles, linked lists).
@@ -692,6 +702,8 @@ function createVueApp() {
       },
       // True once users exist and are loaded but the signed-in user matches no record -> Firestore
       // will deny every read. Surface a clear notice instead of a misleading empty-but-full nav.
+      // Signed out, browsing a database's public tables.
+      isVisitor: function() { return this.usersLoaded && !this.currentUserEmail; },
       isUnregisteredUser: function() {
         if (this.selfUnregistered) return true;
         return this.usersLoaded && this.userList.length > 0 && !this.currentUserEntry;
@@ -1144,7 +1156,7 @@ function createVueApp() {
         return Leftovers.corpus([doc, VIEWS, this.pageCache, cfg], [doc.tables || {}], [doc.views || [], VIEWS]);
       },
       staticTranslationKeys: function() {
-        return ['app.title', 'btn.add', 'btn.show_active', 'btn.show_archived', 'btn.show_all', 'btn.show_fewer', 'btn.decrease', 'btn.increase', 'settings.linked_list', 'btn.more',
+        return ['app.title', 'btn.add', 'btn.show_active', 'btn.show_archived', 'btn.show_all', 'btn.show_fewer', 'btn.decrease', 'btn.increase', 'settings.linked_list', 'auth.sign_in', 'btn.more',
          'btn.edit', 'btn.copy', 'btn.show', 'btn.hide', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'cal.feed_url', 'feed.subscribe', 'feed.link_pending', 'feed.unsubscribe', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.no_blob_store', 'msg.feed_cap_reached', 'settings.feeds', 'settings.feed_regenerate', 'settings.feed_unpublish', 'settings.feed_not_republishing', 'settings.feed_all_personal', 'settings.feed_subscribers', 'settings.feed_revoking', 'settings.feed_over_cap', 'settings.feed_unpublished', 'settings.feed_revoked', 'settings.feed_sweep', 'settings.csp_reports', 'settings.csp_token', 'settings.csp_bad_token', 'settings.csp_read_failed', 'settings.csp_none', 'settings.csp_extensions', 'settings.csp_directive', 'settings.csp_blocked', 'settings.csp_count', 'settings.csp_last_seen', 'btn.refresh', 'settings.csp_rotate', 'msg.feed_swept', 'cal.err_no_source', 'cal.err_table', 'cal.err_date_col', 'cal.err_not_date', 'cal.err_title_col', 'settings.add_calendar', 'settings.cal_title', 'settings.cal_table', 'settings.cal_date_col', 'settings.cal_title_cols', 'settings.cal_add_source', 'btn.delete', 'btn.confirm_delete', 'cal.err_not_rotation', 'settings.cal_rotations', 'msg.name_taken', 'cal.err_name', 'lang.add_language', 'btn.cancel', 'timeline.empty', 'col.switch_list',
          'img.replace', 'img.upload', 'img.remove', 'img.url', 'img.view', 'img.open_original',
          'btn.close', 'btn.previous', 'btn.next',
@@ -1406,6 +1418,9 @@ function createVueApp() {
       // and the export list would come to disagree about what someone may see.
       canAccessNavId: function(id) {
         var self = this;
+        // `requires` on a view: a member-only page, shown while the person has a covering row today (an
+        // active membership). Staff are not members: an admin or editor always sees it.
+        if (VIEWS[id] && VIEWS[id].requires && !this.viewRequiresMet(VIEWS[id])) return false;
         var allowedTables = this.userAllowedTables;   // null = unrestricted
         if (!allowedTables) return true;
         if (VIEWS[id]) {
@@ -1707,7 +1722,7 @@ function createVueApp() {
             if (typeof backend_users === 'undefined') { resolve(); return; }
             if (!self.currentUserEmail) {
               var p = new URLSearchParams(location.search);
-              self.currentUserEmail = p.get('user') || localStorage.getItem('test_user') || 'local@dev';
+              self.currentUserEmail = localDevUser();
             }
             backend_users.getUsers().then(function(u) {
               var list = [];
@@ -1749,6 +1764,12 @@ function createVueApp() {
 
       // Navigation
       // Mobile bottom-nav "More": open the drawer AND expand every group so all sub-items are visible at once.
+      // A visitor's Sign in: the provider's sign-in, or -- on the dev server -- back to the default dev user.
+      signIn: function() {
+        if (typeof triggerOAuth === 'function' && this.mode !== 'local') { triggerOAuth(); return; }
+        try { localStorage.removeItem('test_user'); } catch (e) {}
+        var u = new URL(location.href); u.searchParams.delete('user'); location.href = u.toString();
+      },
       openMoreDrawer: function() { this.openedGroups = this.allGroupIds.slice(); this.drawerOpen = true; },
       // A selection is a history entry, so Back/Forward and a reload keep the user's place. `quiet`
       // selects without one: boot and Back/Forward, where the browser already has the entry.
@@ -3025,10 +3046,22 @@ function createVueApp() {
       // must cover the day, an active membership). Staff are not members: `exempt` skips both for them.
       barredOn: function(cfg, day, exempt) {
         if (!cfg || exempt) return '';
+        if (!this.currentUserEmail) return this.t('msg.sign_in_respond');   // a visitor: sign in first
         var msg = function(p) { return p.message ? this.tOr(p.message, p.message) : this.t('rsvp.closed'); }.bind(this);
         if (cfg.blockedBy && this.blockedOn(cfg.blockedBy, day)) return msg(cfg.blockedBy);
         if (cfg.requires && !this.blockedOn(cfg.requires, day)) return msg(cfg.requires);
         return '';
+      },
+      viewRequiresMet: function(v) {
+        if (this.isAdmin || this.currentUserRole === 'editor') return true;
+        return !!this.currentUserEmail && this.blockedOn(v.requires, fmtDate(new Date(this.clockNow)));
+      },
+      // Tables the views' `requires` read: loaded before the first screen is picked, so a member reloading
+      // on a member-only page lands back on it instead of being sent to the first screen.
+      requiresTables: function() {
+        var out = [];
+        Object.keys(VIEWS).forEach(function(n) { var r = VIEWS[n] && VIEWS[n].requires; if (r && r.table && out.indexOf(r.table) < 0) out.push(r.table); });
+        return out;
       },
       rsvpBlocked: function(name, ev) { return !!this.rsvpBarred(name, ev); },
       rsvpBarred: function(name, ev) { return this.barredOn((VIEWS[name] || {}).rsvp, Calendar.toDateStr(ev.date), this.rsvpOrganizer(name)); },
@@ -4809,6 +4842,7 @@ function createVueApp() {
       canReachTable: function(table) {
         var allowed = this.userAllowedTables;
         if (!allowed) return true;                 // admin / unrestricted
+        if (typeof SCHEMA !== 'undefined' && SCHEMA[table] && SCHEMA[table].public === true) return true;   // public: anyone, a visitor included
         return allowed.indexOf(table) >= 0 || this.canSelfServe(table);
       },
       // Resolve a column's `defaultFrom` token to the value stamped on a new row. Unknown tokens stamp
@@ -6194,9 +6228,13 @@ function createVueApp() {
         }
         if (!self.currentUserEmail) {
           var p = new URLSearchParams(location.search);
-          self.currentUserEmail = p.get('user') || localStorage.getItem('test_user') || 'local@dev';
+          self.currentUserEmail = localDevUser();
         }
-        var done = function() { self.usersLoaded = true; self.loading = false; self.loadMyProfile(); self.loadSharedProfiles(); self._overlayUserLists(); self._autoArchive(); self._autoSelectTab(); };
+        var done = function() {
+          self.usersLoaded = true; self.loading = false; self.loadMyProfile(); self.loadSharedProfiles(); self._overlayUserLists(); self._autoArchive();
+          var req = self.requiresTables().filter(function(t) { return self.canReachTable(t); });
+          Promise.resolve(req.length ? self._ensureCached(req) : null).catch(function() {}).then(function() { self._autoSelectTab(); });
+        };
         // Legacy backends without getMyAccess: keep the full-map path (rules-free local/Drive).
         if (typeof backend_users.getMyAccess !== 'function') {
           backend_users.getUsers().then(function(u) {
@@ -6212,6 +6250,12 @@ function createVueApp() {
           a = a || { registered: false };
           self.selfUnregistered = false;
           if (a.bootstrap) return self._bootstrapAdmin(done);
+          // OPEN SIGN-UP: a signed-in account with no record registers itself with the schema's newUser grant
+          // (the rules accept exactly that), then resolves its access again. Once only, so a refusal cannot loop.
+          if (a.registered === false && self.currentUserEmail && !self._signupTried && BackendHelpers.signupOf(self.schemaData || {}) && backend_users.selfRegister) {
+            self._signupTried = true;
+            return backend_users.selfRegister().then(function() { self.loadUsers(); }, function() { self.selfUnregistered = true; self.userList = []; done(); });
+          }
           if (a.registered === false) { self.selfUnregistered = true; self.userList = []; return done(); }
           var email = (self.currentUserEmail || '').toLowerCase();
           if (a.role === 'admin' || a.tables === 'all') {
@@ -8497,7 +8541,11 @@ function createVueApp() {
       denied: function() {
         if (!appInstance) return false;
         var v = this.spec ? this.spec.config : (this.type === 'view' ? VIEWS[this.name] : null);
-        return !appInstance.canAccessPage(v);
+        if (!appInstance.canAccessPage(v)) return true;
+        // A named view or table this person cannot open (no access to what it reads, or a member-only view
+        // without the membership) draws nothing, rather than empty tiles and headers.
+        if (!this.spec && (this.type === 'view' || this.type === 'table') && !appInstance.canAccessNavId(this.name)) return true;
+        return false;
       },
       isCal: function() { return this.type === 'view' && !!(appInstance && appInstance.isCalendarName(this.name)); },
       isRot: function() { return this.type === 'view' && !!(appInstance && appInstance.isRotationName(this.name)); },

@@ -66,6 +66,7 @@
       "btn.decrease": "Decrease",
       "btn.increase": "Increase",
       "settings.linked_list": "Linked to list",
+      "auth.sign_in": "Sign in",
       "btn.undo": "Undo",
       "cal.add_on_day": "Add on this day",
       "cal.err_date_col": "Pick the column holding the date",

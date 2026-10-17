@@ -53,6 +53,7 @@
       "additionalProperties": false,
       "properties": {
         "role": { "enum": ["viewer", "editor"] },
+        "open": { "type": "boolean", "description": "Anyone who signs in registers themselves with this grant, no approval." },
         "tables": { "oneOf": [{ "type": "array", "items": { "type": "string" } }, { "type": "object", "additionalProperties": { "enum": ["r", "rw"] } }] }
       }
     },

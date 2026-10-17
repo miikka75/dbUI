@@ -47,12 +47,14 @@
       "ref_plans": "r",
       "ref_exercises": "r",
       "ref_rewards": "r"
-    }
+    },
+    "open": true
   },
   "tables": {
     "ref_gyms": {
       "isLookup": true,
       "hierarchy": false,
+      "public": true,
       "columns": [
         {
           "name": "gym",
@@ -75,6 +77,7 @@
     "ref_class_types": {
       "isLookup": true,
       "hierarchy": false,
+      "public": true,
       "columns": [
         {
           "name": "class_type",
@@ -101,6 +104,7 @@
     "ref_plans": {
       "isLookup": true,
       "hierarchy": false,
+      "public": true,
       "columns": [
         {
           "name": "plan",
@@ -137,6 +141,7 @@
     "classes": {
       "archivable": true,
       "defaultSort": "starts_at",
+      "public": true,
       "columns": [
         {
           "name": "starts_at",
@@ -507,6 +512,7 @@
     "news": {
       "archivable": true,
       "defaultSort": "published_on",
+      "public": true,
       "columns": [
         {
           "name": "published_on",
@@ -748,7 +754,7 @@
       "kind": "page",
       "icon": "mdi-home",
       "fab": "scan",
-      "markdown": "# {{t:text.home_heading}}\n\n{{view:my_level}}\n\n## {{t:text.home_month}}\n\n{{view:my_pulse}}\n\n## {{t:text.home_news}}\n\n{{view:news_feed}}\n"
+      "markdown": "# {{t:text.home_heading}}\n\n{{view:my_level?}}\n\n{{view:my_pulse?}}\n\n## {{t:text.home_news}}\n\n{{view:news_feed}}\n"
     },
     {
       "name": "visit_scan",
@@ -1438,7 +1444,22 @@
         "goal",
         "pt_status",
         "trainer_notes"
-      ]
+      ],
+      "requires": {
+        "table": "memberships",
+        "from": "start_on",
+        "to": "valid_until",
+        "where": {
+          "$or": [
+            {
+              "membership_status": "active"
+            },
+            {
+              "membership_status": "paused"
+            }
+          ]
+        }
+      }
     },
     {
       "name": "pt_board",
@@ -1515,7 +1536,22 @@
         "weeks",
         "equipment",
         "video"
-      ]
+      ],
+      "requires": {
+        "table": "memberships",
+        "from": "start_on",
+        "to": "valid_until",
+        "where": {
+          "$or": [
+            {
+              "membership_status": "active"
+            },
+            {
+              "membership_status": "paused"
+            }
+          ]
+        }
+      }
     },
     {
       "name": "gyms",
@@ -1724,7 +1760,22 @@
       "name": "doc_loyalty",
       "kind": "page",
       "icon": "mdi-star-circle",
-      "markdown": "## {{t:text.loyalty_coins}}\n\n{{view:my_coins}}\n\n## {{t:text.loyalty_shop}}\n\n{{view:reward_claim_form}}\n\n## {{t:text.loyalty_mine}}\n\n{{view:reward_mine@both}}\n"
+      "markdown": "## {{t:text.loyalty_coins}}\n\n{{view:my_coins}}\n\n## {{t:text.loyalty_shop}}\n\n{{view:reward_claim_form}}\n\n## {{t:text.loyalty_mine}}\n\n{{view:reward_mine@both}}\n",
+      "requires": {
+        "table": "memberships",
+        "from": "start_on",
+        "to": "valid_until",
+        "where": {
+          "$or": [
+            {
+              "membership_status": "active"
+            },
+            {
+              "membership_status": "paused"
+            }
+          ]
+        }
+      }
     },
     {
       "name": "reward_board",
@@ -2079,7 +2130,22 @@
         "label": "text.add_workout",
         "icon": "mdi-plus"
       },
-      "markdown": "{{view:my_calendar}}\n\n## {{t:text.training_totals}}\n\n{{view:my_period_totals}}\n\n## {{t:text.training_top}}\n\n{{view:my_top_exercises}}\n\n## {{t:text.training_steps}}\n\n{{view:my_steps_week}}\n\n## {{t:text.training_log}}\n\n{{view:my_workouts}}\n\n## {{t:text.training_visits}}\n\n{{view:my_visits}}\n"
+      "markdown": "{{view:my_calendar}}\n\n## {{t:text.training_totals}}\n\n{{view:my_period_totals}}\n\n## {{t:text.training_top}}\n\n{{view:my_top_exercises}}\n\n## {{t:text.training_steps}}\n\n{{view:my_steps_week}}\n\n## {{t:text.training_log}}\n\n{{view:my_workouts}}\n\n## {{t:text.training_visits}}\n\n{{view:my_visits}}\n",
+      "requires": {
+        "table": "memberships",
+        "from": "start_on",
+        "to": "valid_until",
+        "where": {
+          "$or": [
+            {
+              "membership_status": "active"
+            },
+            {
+              "membership_status": "paused"
+            }
+          ]
+        }
+      }
     },
     {
       "name": "doc_stats",

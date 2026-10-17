@@ -164,7 +164,9 @@
           // still asks, because self-service needs none; a refused schema read means nothing to ask for.
           return S.getMeta('schema').catch(function () { return null; }).then(function (sd) {
             var schemaTables = (H.unwrapSchemaDoc(sd) || {}).tables || {};
-            var names = LA.accessibleListNames(schemaTables, tabs, Object.keys(LA.listOwnershipMap(schemaTables)), true);
+            // A public table's lists are everyone's, a visitor's included.
+            var pubT = Object.keys(schemaTables).filter(function (t) { return schemaTables[t] && schemaTables[t].public === true; });
+            var names = LA.accessibleListNames(schemaTables, tabs.concat(pubT), Object.keys(LA.listOwnershipMap(schemaTables)), true);
             if (!names.length) return {};
             return Promise.all(names.map(function (name) {
               return S.get('_lists', name)
@@ -364,6 +366,16 @@
         ]);
       },
       // --- Membership requests (self-service; admin approves) ---
+      // OPEN SIGN-UP: write my own record with exactly the schema's newUser grant; the policy checks it.
+      selfRegister: function () {
+        var email = P.myEmail();
+        if (!email) return Promise.reject(new Error('not signed in'));
+        return S.getMeta('schema').then(function (sd) {
+          var nu = H.signupOf(H.unwrapSchemaDoc(sd) || {});
+          if (!nu) throw new Error('sign-up is closed');
+          return S._replace('_users', email, H.userGrantDoc(email, nu.role, email, nu.tables));
+        });
+      },
       requestAccess: function (name, note) {
         var email = P.myEmail();
         if (!email) return Promise.reject(new Error('not signed in'));

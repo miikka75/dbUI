@@ -613,5 +613,38 @@ await ok('capacity + walk-ins: a booking into the place the walk-ins left succee
   assertSucceeds(bookC2(viewer, 'viewer@x.com', 'w1', 1)));
 await ok('capacity + walk-ins: a booking the walk-ins leave no room for is refused',
   assertFails(bookC2(editor, 'editor@x.com', 'w2', 2)));
+
+// --- Public tables and open sign-up: a visitor reads the public tables, the lists they name, the schema
+// and the translations -- nothing else; a signed-in stranger may write their own /_users record, exactly
+// the mirrored grant. ---
+await testEnv.withSecurityRulesDisabled(async (ctx) => {
+  const db = ctx.firestore();
+  const m = (await getDoc(doc(db, '_meta/ownerTables'))).data();
+  m.public = { tables: ['gclasses'], lists: ['coaches'] };
+  m.signup = { role: 'viewer', tables: { gclasses: 'r' }, rwTables: [] };
+  await setDoc(doc(db, '_meta/ownerTables'), m);
+  await setDoc(doc(db, '_meta/schema'), { tables: {} });
+  await setDoc(doc(db, '_meta/config'), { feeds: { secret: 'link' } });
+  await setDoc(doc(db, '_lists/coaches'), { name: 'coaches', items: ['Kim'], tables: ['gclasses'] });
+  await setDoc(doc(db, '_lists/hidden'), { name: 'hidden', items: ['x'], tables: ['nope'] });
+  await setDoc(doc(db, 'secrets__active/s1'), { id: 's1', note: 'hush' });
+});
+const visitor = testEnv.unauthenticatedContext().firestore();
+await ok('public: a visitor reads a public table', assertSucceeds(getDoc(doc(visitor, 'gclasses__active/c1'))));
+await ok('public: a visitor reads the schema', assertSucceeds(getDoc(doc(visitor, '_meta/schema'))));
+await ok('public: a visitor reads a list a public table names', assertSucceeds(getDoc(doc(visitor, '_lists/coaches'))));
+await ok('public: a visitor may not read the config', assertFails(getDoc(doc(visitor, '_meta/config'))));
+await ok('public: a visitor may not read another list', assertFails(getDoc(doc(visitor, '_lists/hidden'))));
+await ok('public: a visitor may not read a table that is not public', assertFails(getDoc(doc(visitor, 'secrets__active/s1'))));
+await ok('public: a visitor may not write a public table', assertFails(setDoc(doc(visitor, 'gclasses__active/c9'), { id: 'c9' })));
+const newbie = testEnv.authenticatedContext('newbie-uid', { email: 'newbie@x.com' }).firestore();
+await ok('signup: a stranger may not take more than the grant',
+  assertFails(setDoc(doc(newbie, '_users/newbie@x.com'), { role: 'admin', user: 'newbie@x.com', tables: 'all' })));
+await ok('signup: a stranger may not sign up someone else',
+  assertFails(setDoc(doc(newbie, '_users/victim@x.com'), { role: 'viewer', user: 'victim@x.com', tables: { gclasses: 'r' }, rwTables: [] })));
+await ok('signup: a stranger writes their own record with exactly the grant',
+  assertSucceeds(setDoc(doc(newbie, '_users/newbie@x.com'), { role: 'viewer', user: 'newbie@x.com', tables: { gclasses: 'r' }, rwTables: [] })));
+await ok('signup: and may not then raise it',
+  assertFails(setDoc(doc(newbie, '_users/newbie@x.com'), { role: 'admin', user: 'newbie@x.com', tables: 'all' })));
 await testEnv.cleanup();
 console.log(`\nFIRESTORE RULES OK — ${passed} checks passed`);

@@ -76,6 +76,7 @@ that answers the admin call for non-admins leaks the whole membership list.
 | `setUserRole(key, role, email, tables)` | admin | Build the record with `BackendHelpers.userGrantDoc(...)` — it also denormalizes `rwTables`, which the rules layers need. |
 | `removeUser(key)` | admin | |
 | `requestAccess(name, note)` | any signed-in caller | Writes exactly `{email, name, note, ts}` for their OWN address. Inert until an admin approves it. |
+| `selfRegister()` | a signed-in caller with no record | OPEN SIGN-UP: writes their OWN `/_users` record with exactly the schema's `newUser` grant (`newUser.open: true`). Both rules layers compare it with `_meta/ownerTables.signup`, field by field. |
 | `getAccessRequests()` | admin | `{email: {email, name, note, ts}}` |
 | `removeAccessRequest(email)` | admin | Approve or deny both end here. |
 | `getMyProfile()` | the caller | `{name, shared, picture}` |

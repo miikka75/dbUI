@@ -28,6 +28,8 @@ alter table public.kv force row level security;
 
 -- Base grants: RLS (below) is the real gate. anon (unauthenticated) gets nothing.
 revoke all on public.kv from anon, authenticated;
+-- A visitor may select, and the kv_select_public policy decides what: the public tables, nothing else.
+grant select on public.kv to anon;
 grant select, insert, update, delete on public.kv to authenticated;
 
 -- ---------- Helper functions (SECURITY DEFINER so they read kv WITHOUT triggering RLS recursion) ------
@@ -319,6 +321,39 @@ $$;
 
 -- ---------- Row predicates (keep the policies below readable) ----------------------------------------
 -- READ gate. `val` is the existing row's value.
+-- PUBLIC tables (`public: true`, mirrored to _meta/ownerTables.public): readable with no account. Once any
+-- table is public, the schema and the translations are too (a visitor cannot draw a table without them),
+-- and the lists those tables name. Nothing else. Mirrors publicMode/publicColl in firestore.rules.
+create or replace function public.app_public_read(store text, key text)
+returns boolean language sql stable security definer set search_path = public as $$
+  with pub as (
+    select coalesce(value -> 'public', '{}'::jsonb) as p from public.kv where store = '_meta' and key = 'ownerTables'
+  )
+  select coalesce((select
+    case
+      when jsonb_array_length(coalesce(p -> 'tables', '[]'::jsonb)) = 0 then false
+      when app_public_read.store = '_meta' then app_public_read.key in ('schema', 'languages') or app_public_read.key like 'lang\_%'
+      when app_public_read.store = '_lists' then coalesce(p -> 'lists', '[]'::jsonb) ? app_public_read.key
+      when app_public_read.store like '%\_\_active' then coalesce(p -> 'tables', '[]'::jsonb) ? split_part(app_public_read.store, '__', 1)
+      else false
+    end from pub), false)
+$$;
+
+-- OPEN SIGN-UP: the record a signed-in account with none may write for itself is exactly the mirrored grant
+-- (_meta/ownerTables.signup), for its own email. Mirrors signupOk in firestore.rules.
+create or replace function public.app_signup_ok(k text, val jsonb)
+returns boolean language sql stable security definer set search_path = public as $$
+  select coalesce((select
+      (value -> 'signup') is not null and jsonb_typeof(value -> 'signup') = 'object'
+      and k = public.app_email()
+      and (val - 'role' - 'user' - 'tables' - 'rwTables') = '{}'::jsonb
+      and (val ->> 'role') = (value -> 'signup' ->> 'role')
+      and (val -> 'tables') = (value -> 'signup' -> 'tables')
+      and (val -> 'rwTables') is not distinct from (value -> 'signup' -> 'rwTables')
+      and lower(val ->> 'user') = k
+    from public.kv where store = '_meta' and key = 'ownerTables'), false)
+$$;
+
 create or replace function public.app_can_read(store text, key text, val jsonb)
 returns boolean language sql stable security definer set search_path = public as $$
   select case
@@ -442,6 +477,7 @@ returns boolean language sql stable security definer set search_path = public as
     when public.app_email() is null then false
     when store = '_meta' then public.app_no_users() or public.app_role() = 'admin'
     when store = '_users' then public.app_no_users() or public.app_role() = 'admin'
+      or public.app_signup_ok(key, val)   -- open sign-up: my own record, exactly the mirrored grant
     -- Shape gates mirror firestore.rules exactly, including WHO they bind: validProfile/validLink apply
     -- to the admin write too, validRequest only to the SELF-create (an admin editing a request is
     -- trusted there and here).
@@ -568,7 +604,13 @@ drop policy if exists kv_delete on public.kv;
 
 create policy kv_select on public.kv
   for select to authenticated
-  using (public.app_can_read(store, key, value));
+  using (public.app_can_read(store, key, value) or public.app_public_read(store, key));
+
+-- A visitor with no account: the public tables, and what drawing them needs (app_public_read) -- nothing else.
+drop policy if exists kv_select_public on public.kv;
+create policy kv_select_public on public.kv
+  for select to anon
+  using (public.app_public_read(store, key));
 
 create policy kv_insert on public.kv
   for insert to authenticated

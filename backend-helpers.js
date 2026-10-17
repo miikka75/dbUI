@@ -342,7 +342,31 @@
     // response) already reads this one, and Firestore allows ten document reads per write: a separate
     // _meta/capacity was the read that ran out. See THE ACCESS-CALL BUDGET in firestore.rules.
     ownerTablesMirror: function(schema) {
-      return { tables: H.ownerTablesOf(schema), capacity: H.capacityOf(schema) };
+      return { tables: H.ownerTablesOf(schema), capacity: H.capacityOf(schema), public: H.publicOf(schema), signup: H.signupOf(schema) };
+    },
+    // PUBLIC tables (`"public": true`): readable with no account, read-only -- a schedule, a price list.
+    // Mirrored with the lists their columns name, which a visitor needs to read those rows. Both rules
+    // layers also open the schema and the translations once this lists any table, since a visitor's app
+    // cannot draw a public table without them; nothing else becomes readable.
+    publicOf: function(schema) {
+      var tables = (schema && schema.tables) || {}, out = { tables: [], lists: [] };
+      Object.keys(tables).forEach(function(t) {
+        if (!tables[t] || tables[t].public !== true) return;
+        out.tables.push(t);
+        var defs = Cols().columnDefs(tables[t]);
+        Object.keys(defs).forEach(function(c) { var d = defs[c], l = d && typeof d === 'object' && typeof d.list === 'string' && d.list; if (l && out.lists.indexOf(l) < 0) out.lists.push(l); });
+      });
+      return out;
+    },
+    // OPEN SIGN-UP (`newUser.open: true`): the exact grant document a signed-in account with no record may
+    // write for itself -- role, tables, rwTables, as userGrantDoc builds them -- or null when sign-up is
+    // closed. Both rules layers compare the self-written record against this, field by field.
+    signupOf: function(schema) {
+      var nu = schema && schema.newUser;
+      if (!nu || nu.open !== true) return null;
+      var d = H.userGrantDoc('', nu.role || 'viewer', '', nu.tables || []);
+      delete d.user;
+      return d;
     },
 
     // CAPACITY: a response table declaring `capacity: { link, status, column, count, holds? }` caps how
