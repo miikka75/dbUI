@@ -8,7 +8,7 @@ per-row Row-Level-Security (RLS) policy.
 
 | File | Role |
 |------|------|
-| `backend-supabase.js` | Backend + `backend_users` + Google auth. Classic script (globals `backend` / `backend_users` / `triggerOAuth`), mirroring `backend-firebase.js`. |
+| `backend-supabase.js` | Backend + `backend_users` + sign-in (Google, and an emailed link/code). Classic script (globals `backend` / `backend_users` / `triggerOAuth` / `authEmailStart` / `authEmailVerify`), mirroring `backend-firebase.js`. |
 | `storage-supabase.js` | Storage adapter over the `kv` table (`createSupabaseStorage(sb)`, mirrors `storage-firestore.js`). Also `module.exports` for the Node test. |
 | `supabase-schema.sql` | Postgres `kv` table + RLS mirroring `firestore.rules`. Run once in Supabase. |
 | `.github/workflows/deploy-pages.yml` | Deploy the static site to GitHub Pages on push to `main`. |

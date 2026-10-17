@@ -7,7 +7,7 @@ and write what, and `storage.rules` does the same for uploaded images and publis
 
 | File | Role |
 |------|------|
-| `backend-firebase.js` | Backend + `backend_users` + Google auth. Classic script (globals `backend` / `backend_users`). |
+| `backend-firebase.js` | Backend + `backend_users` + sign-in (Google, and an emailed link). Classic script (globals `backend` / `backend_users` / `triggerOAuth` / `authEmailStart` / `authEmailVerify`). |
 | `storage-firestore.js` | Storage adapter over Firestore collections. |
 | `firestore.rules` | Who may read and write each collection. The production access model. |
 | `storage.rules` | Image uploads: registration gate, per-user path scoping, size and content-type caps. Calendar feeds (`feeds/<id>.ics`): written and listed by full-access members only (an admin, or a grant of every table). |
