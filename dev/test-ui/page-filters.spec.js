@@ -72,3 +72,26 @@ test('Settings users: search, role and linked-list filters narrow the list', asy
   await page.evaluate(() => { appInstance.userFilter.lists = ['coaches']; });
   await expect(count).toHaveText('1 / 5');
 });
+
+test('Approve grants the schema\'s newUser access: a viewer with the tables it names', async ({ page }) => {
+  await setup(page);
+  const schema = JSON.parse(JSON.stringify(SCHEMA));
+  schema.newUser = { role: 'viewer', tables: { visits: 'r' } };
+  await page.request.post('/api/saveSchema', { data: { schema }, headers: ADMIN });
+  await boot(page);
+  const mine = await page.evaluate(async () => {
+    localStorage.setItem('test_user', 'newbie@x');
+    await backend_users.requestAccess('New Bie', '');
+    localStorage.setItem('test_user', 'org@x');
+    await appInstance.approveRequest({ email: 'newbie@x', name: 'New Bie' });
+    localStorage.setItem('test_user', 'newbie@x');
+    const m = await backend_users.getMyAccess();
+    localStorage.setItem('test_user', 'org@x');
+    return m;
+  });
+  expect(mine.role).toBe('viewer');
+  expect(JSON.stringify(mine.tables)).toContain('visits');
+  const err = await page.evaluate(() => validateRefs({ tables: { visits: { columns: [] } }, views: [], newUser: { role: 'admin', tables: ['nope'] } }).join(' | '));
+  expect(err).toContain('cannot be "admin"');
+  expect(err).toContain('missing table "nope"');
+});

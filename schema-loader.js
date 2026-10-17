@@ -896,6 +896,21 @@ function validateRefs(schema) {
       });
     }
   }
+  // `newUser`: what approving an access request grants. A role the app does not know, or a table that does
+  // not exist, would register someone with access nobody meant.
+  if (schema.newUser !== undefined) {
+    var nu = schema.newUser;
+    if (!nu || typeof nu !== 'object' || Array.isArray(nu)) errs.push('`newUser` must be an object like { "role": "viewer", "tables": { "classes": "r" } }');
+    else {
+      if (nu.role !== undefined && ['admin', 'editor', 'viewer'].indexOf(nu.role) < 0) errs.push('`newUser.role` is "' + nu.role + '" — use "viewer" or "editor" (an admin is made by hand)');
+      if (nu.role === 'admin') errs.push('`newUser.role` cannot be "admin": approving a request must not hand out full control');
+      var nut = nu.tables;
+      var nuNames = Array.isArray(nut) ? nut : (nut && typeof nut === 'object') ? Object.keys(nut) : (nut === undefined ? [] : null);
+      if (nuNames === null) errs.push('`newUser.tables` must be a list of table names or a map of table -> "r" / "rw"');
+      else nuNames.forEach(function(t) { if (!hasTable(t)) errs.push('`newUser.tables` -> missing table "' + t + '"'); });
+      if (nut && typeof nut === 'object' && !Array.isArray(nut)) Object.keys(nut).forEach(function(t) { if (['r', 'rw'].indexOf(nut[t]) < 0) errs.push('`newUser.tables.' + t + '` is "' + nut[t] + '" — use "r" (read) or "rw" (read and write)'); });
+    }
+  }
   // A user-linked LOOKUP needs a dimension whose values accounts are linked to, and that dimension is
   // derived from the columns drawing on it. With none, `listSources` is a declaration with no picker
   // behind it: the Lookup editor offers nothing, so nobody can be linked and every `@me` resolves to

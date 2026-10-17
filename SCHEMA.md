@@ -2944,10 +2944,19 @@ stance as an empty profile name.
 ### Membership requests (self-service, admin-approved)
 An unregistered (but signed-in) user submits a request from the "not registered" banner: a **required**
 display name → writes `_access_requests/<email>` (rules: self create/read/delete; admin read/write).
-An admin sees a **Pending requests** table in Settings → Users and **Approves** (registers as `editor`
-with no tables yet — grant access via the chips; the request name is **seeded into the user's profile**
+An admin sees a **Pending requests** table in Settings → Users and **Approves** (registers the user with
+the schema's `newUser` access, or — with none declared — as an `editor` with no tables, to be given access
+via the chips; the request name is **seeded into the user's profile**
 so `@me` works immediately, still not shared) or **Denies** (deletes the request). The email is taken
 from the authenticated session — never asked for.
+
+```json
+"newUser": { "role": "viewer", "tables": { "classes": "r", "news": "r" } }
+```
+
+`newUser` is what one press of Approve hands a new person — a gym member: a viewer who reads the
+schedule and books through self-service. `tables` takes a list of names or a map of table → `r` / `rw`;
+the role is `viewer` or `editor`, never `admin`. `validateSchema` names an unknown role or table.
 
 ## nav (structure + layout)
 ```json

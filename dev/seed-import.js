@@ -46,8 +46,9 @@ const DATA = path.join(EXAMPLES, BUNDLE + '-data.json');
 // opposite of the feature.
 const CHORES_MEMBER = { chore_log: 'rw', reward_claim: 'rw', home_shopping: 'rw',
                         ref_duties: 'r', ref_chores: 'r', ref_rewards: 'r' };
-const GYM_MEMBER = { classes: 'r', news: 'r', coach_library: 'r',
-                     ref_gyms: 'r', ref_class_types: 'r', ref_plans: 'r', ref_exercises: 'r', ref_rewards: 'r' };
+// A member's access is the gym schema's own `newUser` grant -- what approving a request gives -- so a
+// seeded member and an approved one read exactly the same tables.
+const GYM_MEMBER = require('../examples/gym-schema.json').newUser.tables;
 const SEED = {
   demo: {
     users: [

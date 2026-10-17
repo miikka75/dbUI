@@ -1328,6 +1328,13 @@ The gym's Attendance view loses its booked count and roll (now in Class check-in
 
 **Medium.**
 
+#### 23. Approve grants the right access — `newUser` *(landed)*
+
+Approving an access request made an editor with no tables, which for a gym member is wrong twice. The
+schema now says what a new person gets (`newUser`: role and tables) and Approve grants exactly that. Not
+proposed here: approving automatically (open registration needs a self-grant rule in all three
+layers), and dropping the gym's curated members list for the owner column.
+
 #### Not proposed
 
 - **Opening the gate.** It needs the gate controller's own API and a server to call it from; the

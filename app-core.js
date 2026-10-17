@@ -6264,9 +6264,12 @@ function createVueApp() {
       },
       // Approve: register the user (editor, no tables yet -> admin grants access via the chip UI), seed
       // their profile display name from the request (so @me identity works right away), then clear it.
+      // Approving grants the schema's `newUser` access (a gym member: a viewer who reads the schedule), or,
+      // with none declared, an editor with no tables -- whom an admin then gives access by hand.
       approveRequest: function(req) {
         var self = this, email = (req.email || '').toLowerCase(), name = (req.name || '').trim();
-        return backend_users.setUserRole(email, 'editor', email, []).then(function() {
+        var nu = (this.schemaData && this.schemaData.newUser) || {};
+        return backend_users.setUserRole(email, nu.role || 'editor', email, nu.tables || []).then(function() {
           return (name && backend_users.setProfileName) ? backend_users.setProfileName(email, name) : null;
         }).then(function() {
           return backend_users.removeAccessRequest(email);

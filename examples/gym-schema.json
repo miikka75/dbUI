@@ -37,6 +37,19 @@
     "members": "userlink",
     "trainers": "userlink"
   },
+  "newUser": {
+    "role": "viewer",
+    "tables": {
+      "classes": "r",
+      "news": "r",
+      "coach_library": "r",
+      "ref_gyms": "r",
+      "ref_class_types": "r",
+      "ref_plans": "r",
+      "ref_exercises": "r",
+      "ref_rewards": "r"
+    }
+  },
   "tables": {
     "ref_gyms": {
       "isLookup": true,

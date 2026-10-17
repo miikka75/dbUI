@@ -161,7 +161,7 @@
       "views": 38,
       "schema": {
         "file": "gym-schema.json",
-        "hash": "cb494970fa374ae6"
+        "hash": "ed232e4698f29ae8"
       },
       "languages": [
         {
@@ -183,10 +183,10 @@
       },
       "about": {
         "file": "gym-about.json",
-        "hash": "179f0803caeef2f1"
+        "hash": "fe88fed66d5450a0"
       },
       "notes": {
-        "1": "First release: book group classes, with places left, a full class refused, and booking from home closing 30 minutes before the start (after that, at the gym); check in to classes by scanning the room code, and log gym visits by scanning the door code; My calendar with your classes, workouts, visits, pauses and PT sessions, where the workout log and gym visits (the latest 5, with Show all), the totals (hours, exercises, visits, km), steps and your top 3 exercises follow the week, month or year the calendar shows; subscribe to your booked classes and workouts in your phone's calendar; coins earned by attending classes (1 per class, plus 1 per streak level reached), spent in a reward shop; buying a membership or a single visit, and pausing it (the pause shows on My calendar across its days, and while it lasts classes cannot be booked or checked in to and the door code is refused); requesting a personal trainer; trainers linked to accounts see their classes and PT clients on their own My calendar; news and a library of workouts and multi-week programmes. The front desk gets the door code screen, class check-in (the changing code, walk-ins, and ticking people off by hand), membership, PT and reward boards, and statistics (visits, members, attendance by class and by trainer, visits by gym) filtered by gym, class and trainer."
+        "1": "First release: book group classes, with places left, a full class refused, and booking from home closing 30 minutes before the start (after that, at the gym); check in to classes by scanning the room code, and log gym visits by scanning the door code; My calendar with your classes, workouts, visits, pauses and PT sessions, where the workout log and gym visits (the latest 5, with Show all), the totals (hours, exercises, visits, km), steps and your top 3 exercises follow the week, month or year the calendar shows; subscribe to your booked classes and workouts in your phone's calendar; coins earned by attending classes (1 per class, plus 1 per streak level reached), spent in a reward shop; buying a membership or a single visit, and pausing it (the pause shows on My calendar across its days, and while it lasts classes cannot be booked or checked in to and the door code is refused); requesting a personal trainer; trainers linked to accounts see their classes and PT clients on their own My calendar; news and a library of workouts and multi-week programmes. Approving a sign-up request makes the person a member in one press. The front desk gets the door code screen, class check-in (the changing code, walk-ins, and ticking people off by hand), membership, PT and reward boards, and statistics (visits, members, attendance by class and by trainer, visits by gym) filtered by gym, class and trainer."
       }
     }
   ]

@@ -47,6 +47,15 @@
       "description": "Seed values for named lists, by list name. Values referenced by a view filter are auto-seeded and become non-deletable.",
       "additionalProperties": { "type": "array" }
     },
+    "newUser": {
+      "type": "object",
+      "description": "What approving an access request grants: a role (viewer or editor) and table access, as a list of names or a map of table -> \"r\" / \"rw\". Without it, Approve makes an editor with no tables.",
+      "additionalProperties": false,
+      "properties": {
+        "role": { "enum": ["viewer", "editor"] },
+        "tables": { "oneOf": [{ "type": "array", "items": { "type": "string" } }, { "type": "object", "additionalProperties": { "enum": ["r", "rw"] } }] }
+      }
+    },
     "listSources": {
       "type": "object",
       "description": "Where a list's values come from, and what a link to an account means. \"users\": the values ARE the opted-in display names, maintained automatically. \"userlink\": the values stay curated and an admin maps each to an account, which drives `@me` and the avatar. \"userlink-name\": the same link, but the cell displays the linked account's profile name instead of the value \u2014 for a list of roles, where the reader wants to know who holds one.",
