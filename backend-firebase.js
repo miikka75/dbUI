@@ -579,6 +579,13 @@ function _startFirebase(config) {
       else { _db.enablePersistence().catch(function() {}); }
     } catch (e) { try { _db.enablePersistence().catch(function() {}); } catch (e2) {} }
   }
+  // Arrived from an emailed sign-in link: finish it here (the auth listener below then boots the account),
+  // or -- opened in another browser, with no address remembered -- ask for the address first.
+  if (_auth.isSignInWithEmailLink && _auth.isSignInWithEmailLink(location.href)) {
+    var linkEmail = ''; try { linkEmail = localStorage.getItem(EMAIL_FOR_LINK) || ''; } catch (e) {}
+    if (linkEmail) authEmailVerify(linkEmail).catch(function(e) { appInstance.authError = (e && e.message) || String(e); appInstance.signInOpen = true; });
+    else { appInstance.authLinkPending = true; appInstance.signInOpen = true; }
+  }
   _auth.onAuthStateChanged(function(user) {
     if (typeof window !== 'undefined' && window.bootMark) window.bootMark('authReady'); // auth RTT resolved
     // Signed in after browsing as a visitor: start again as the account rather than booting twice.
@@ -590,6 +597,23 @@ function _startFirebase(config) {
       if (!d.exists) throw new Error('no public schema');
       appInstance.currentUserEmail = ''; appInstance.visitorMode = true; init();
     }).catch(function() { appInstance.needsReauth = true; appInstance.loading = false; });
+  });
+}
+
+// Email sign-in: Firebase emails a sign-in LINK (no code), which proves the mailbox -- the token then says
+// email_verified, which is what the rules require. The address is kept to finish the sign-in when the link
+// opens in this browser; opened elsewhere, the dialog asks for it again.
+var EMAIL_FOR_LINK = 'dbui_email_for_link';
+function authEmailStart(email) {
+  try { localStorage.setItem(EMAIL_FOR_LINK, email); } catch (e) {}
+  return _auth.sendSignInLinkToEmail(email, { url: location.origin + location.pathname, handleCodeInApp: true })
+    .then(function() { return { code: false }; });
+}
+// Finish a link sign-in (`code` is unused: Firebase has none). Called on load, or from the dialog.
+function authEmailVerify(email) {
+  return _auth.signInWithEmailLink(email, location.href).then(function() {
+    try { localStorage.removeItem(EMAIL_FOR_LINK); } catch (e) {}
+    history.replaceState(null, '', location.origin + location.pathname);
   });
 }
 

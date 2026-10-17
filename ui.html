@@ -1,10 +1,26 @@
 <div id="vue-app" v-cloak>
   <v-app :theme="theme">
     <!-- Reauth Dialog -->
-    <v-dialog v-model="needsReauth" persistent max-width="340">
-      <v-card>
-        <v-card-text class="text-center pa-6">
-          <v-btn color="primary" prepend-icon="mdi-google" @click="triggerOAuth(); needsReauth = false; loading = true">Sign in to continue</v-btn>
+    <!-- Sign in: Google, or an emailed code / link where the backend offers it. The same dialog asks before
+         boot (needsReauth: no translations are loaded yet, so English, as the old dialog was) and from a visitor's Sign in. -->
+    <v-dialog :model-value="needsReauth || signInOpen" :persistent="needsReauth" max-width="380" @update:model-value="signInOpen = $event">
+      <v-card data-testid="sign-in-dialog">
+        <v-card-text class="pa-6">
+          <v-btn v-if="!authLinkPending" block color="primary" variant="flat" prepend-icon="mdi-google" data-testid="sign-in-google" @click="triggerOAuth(); needsReauth = false; signInOpen = false; loading = true">{{ (needsReauth ? 'Sign in with Google' : t('auth.with_google')) }}</v-btn>
+          <template v-if="hasEmailSignIn()">
+            <div v-if="!authLinkPending" class="text-center text-medium-emphasis my-3">{{ (needsReauth ? 'or' : t('auth.or')) }}</div>
+            <v-text-field v-model="authEmail" type="email" autocomplete="email" :label="(needsReauth ? 'Email' : t('auth.email'))" density="compact" variant="outlined" hide-details data-testid="sign-in-email"></v-text-field>
+            <v-btn v-if="authLinkPending" block color="primary" variant="flat" class="mt-2" :disabled="!authEmailValid" :loading="authBusy" data-testid="sign-in-finish" @click="verifySignInCode()">{{ (needsReauth ? 'Sign in' : t('auth.sign_in')) }}</v-btn>
+            <v-btn v-else block variant="outlined" class="mt-2" prepend-icon="mdi-email-outline" :disabled="!authEmailValid" :loading="authBusy && !authSent" data-testid="sign-in-send" @click="sendSignInEmail()">{{ (needsReauth ? 'Email me a sign-in link' : t('auth.send_email')) }}</v-btn>
+            <template v-if="authSent">
+              <div class="text-body-2 mt-3" data-testid="sign-in-sent">{{ authCodeAllowed ? (needsReauth ? 'Check your email: open the link, or type the code from it here.' : t('auth.check_email_code')) : (needsReauth ? 'Check your email and open the link.' : t('auth.check_email')) }}</div>
+              <template v-if="authCodeAllowed">
+                <v-text-field v-model="authCode" inputmode="numeric" autocomplete="one-time-code" :label="(needsReauth ? 'Code' : t('auth.code'))" density="compact" variant="outlined" hide-details class="mt-2" data-testid="sign-in-code" @keydown.enter="authCode.trim() && verifySignInCode()"></v-text-field>
+                <v-btn block color="primary" variant="flat" class="mt-2" :disabled="!authCode.trim()" :loading="authBusy" data-testid="sign-in-verify" @click="verifySignInCode()">{{ (needsReauth ? 'Sign in' : t('auth.sign_in')) }}</v-btn>
+              </template>
+            </template>
+            <div v-if="authError" class="text-error text-body-2 mt-2" data-testid="sign-in-error">{{ authError }}</div>
+          </template>
         </v-card-text>
       </v-card>
     </v-dialog>

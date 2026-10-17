@@ -165,9 +165,9 @@ await testEnv.withSecurityRulesDisabled(async (ctx) => {
 
 const fsDb = {};
 let uid = 0;
-for (const email of Object.keys(ACTORS)) fsDb[email] = testEnv.authenticatedContext('u' + (uid++), { email }).firestore();
+for (const email of Object.keys(ACTORS)) fsDb[email] = testEnv.authenticatedContext('u' + (uid++), { email, email_verified: true }).firestore();
 fsDb[''] = testEnv.unauthenticatedContext().firestore();                                    // a visitor
-fsDb['stranger@x.com'] = testEnv.authenticatedContext('u-stranger', { email: 'stranger@x.com' }).firestore();   // signed in, no record
+fsDb['stranger@x.com'] = testEnv.authenticatedContext('u-stranger', { email: 'stranger@x.com', email_verified: true }).firestore();   // signed in, no record
 
 async function firestoreVerdict(email, store, key, op, payload) {
   const db = fsDb[email];

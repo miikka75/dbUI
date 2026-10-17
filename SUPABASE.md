@@ -33,6 +33,12 @@ global `window.supabase`), exactly like the Firebase compat SDK — no ES module
    - **Authorized redirect URI**: `https://<project-ref>.supabase.co/auth/v1/callback` (shown on the
      Supabase provider page).
    - Paste the client ID + secret into Supabase.
+   **Email sign-in (optional, no password):** **Authentication → Providers → Email** is on by default. The app
+   sends one email with a sign-in link; to let people type a 6-digit code as well, add `{{ .Token }}` to
+   **Authentication → Email Templates → Magic Link**. Supabase's built-in mailer sends only a few emails an
+   hour — for real use set **Project Settings → Authentication → SMTP** to a sending service (Resend,
+   Brevo, …). Leave **Confirm email** on: an unconfirmed address counts for nothing in the policies
+   (`app_email_verified`), whatever is enabled here.
 3. **Authentication → URL Configuration → Redirect URLs**: add your site URL, e.g.
    `https://dbui.ddns.net/` (and `http://localhost:*` for local dev). It must match what the app
    sends as `redirectTo` — `location.origin + location.pathname`, so the *deployed* origin, not the

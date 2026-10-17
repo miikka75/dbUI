@@ -79,3 +79,28 @@ test('nobody signs themselves up for more than newUser', async ({ page }) => {
   const users = await (await page.request.post('/api/getUsers', { data: {}, headers: ADMIN })).json();
   expect(users['greedy@x']).toBeUndefined();
 });
+
+test('the sign-in dialog: Google, or an emailed code -- sent, then typed in', async ({ page, browser }) => {
+  await setup(page);
+  const ctx = await browser.newContext();
+  const p = await ctx.newPage();
+  await p.addInitScript(() => {
+    localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); localStorage.setItem('test_user', '');
+    window.__auth = [];
+    window.authEmailStart = (email) => { window.__auth.push(['start', email]); return Promise.resolve({ code: true }); };
+    window.authEmailVerify = (email, code) => { window.__auth.push(['verify', email, code]); return Promise.resolve(); };
+  });
+  await p.goto('/');
+  await p.waitForFunction(() => window.appInstance && !appInstance.loading && appInstance.usersLoaded, { timeout: 30000 });
+  await p.evaluate(() => { appInstance.signInOpen = true; });
+  const dlg = p.locator('[data-testid="sign-in-dialog"]');
+  await expect(dlg.locator('[data-testid="sign-in-google"]')).toBeVisible();
+  await expect(dlg.locator('[data-testid="sign-in-send"]')).toBeDisabled();
+  await dlg.locator('[data-testid="sign-in-email"] input').fill('ann@example.com');
+  await dlg.locator('[data-testid="sign-in-send"]').click();
+  await expect(dlg.locator('[data-testid="sign-in-sent"]')).toBeVisible();
+  await dlg.locator('[data-testid="sign-in-code"] input').fill('123456');
+  await dlg.locator('[data-testid="sign-in-verify"]').click();
+  await expect.poll(() => p.evaluate(() => window.__auth)).toEqual([['start', 'ann@example.com'], ['verify', 'ann@example.com', '123456']]);
+  await ctx.close();
+});

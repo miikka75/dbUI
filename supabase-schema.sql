@@ -35,9 +35,28 @@ grant select, insert, update, delete on public.kv to authenticated;
 -- ---------- Helper functions (SECURITY DEFINER so they read kv WITHOUT triggering RLS recursion) ------
 -- Each mirrors a function in firestore.rules. STABLE + definer-owned; search_path pinned for safety.
 
+-- The caller's email counts only once VERIFIED. Every policy keys on it, so an unverified address (email +
+-- password with confirmation off, say) must count for nothing, or anyone could sign up under the admin's
+-- address. Verified = the provider said so (user_metadata.email_verified), or the sign-in itself proved
+-- the mailbox (an emailed code or link, or OAuth), or auth.users records the confirmation. Without an
+-- auth schema (the dev server's PGlite) the caller is the dev server's trusted header, as before.
+create or replace function public.app_email_verified()
+returns boolean language plpgsql stable security definer set search_path = public as $$
+declare j jsonb := auth.jwt(); ok boolean;
+begin
+  if coalesce(j ->> 'email', '') = '' then return false; end if;
+  if coalesce(j -> 'user_metadata' ->> 'email_verified', '') = 'true' then return true; end if;
+  if exists (select 1 from jsonb_array_elements(case when jsonb_typeof(j -> 'amr') = 'array' then j -> 'amr' else '[]'::jsonb end) a
+             where a ->> 'method' in ('otp', 'magiclink', 'oauth')) then return true; end if;
+  if to_regclass('auth.users') is null then return true; end if;
+  execute 'select email_confirmed_at is not null from auth.users where id::text = $1' into ok using (j ->> 'sub');
+  return coalesce(ok, false);
+end
+$$;
+
 create or replace function public.app_email()
 returns text language sql stable as $$
-  select lower(nullif(auth.jwt() ->> 'email', ''))
+  select case when public.app_email_verified() then lower(nullif(auth.jwt() ->> 'email', '')) end
 $$;
 
 -- Bootstrap: no members configured yet -> the first signed-in Google account acts as admin. Matches

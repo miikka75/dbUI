@@ -19,6 +19,11 @@ service cloud.firestore {
     // document rather than adding a key: saveSchema already writes all of them in a single
     // Promise.all, so the write side costs nothing, and one get() replaces five.
     function noUsers() { return !exists(/databases/$(database)/documents/_meta/users); }
+    // Signed in = a token whose email the provider VERIFIED. Every grant keys on the email, so an
+    // unverified one (email + password sign-up with verification off, say) must count for nothing --
+    // otherwise anyone could create an account under the admin's address and be the admin. Google and
+    // email-link sign-in always verify; such a caller is treated exactly like a signed-out visitor.
+    function signedIn() { return request.auth != null && request.auth.token.get('email_verified', false) == true; }
     function myEmail() { return request.auth.token.email.lower(); }
     // Per-user access lives in /_users/<lowercased-email>. Fall back to the legacy _meta/users map
     // (privileged get() — bypasses read rules) for users not yet migrated, so there is no lockout
@@ -88,26 +93,26 @@ service cloud.firestore {
     function publicMode() { return pubMirror().tables.size() > 0; }
     function publicColl(coll) { return coll.matches('.*__active$') && (coll.split('__')[0] in pubMirror().tables); }
     match /_meta/{doc} {
-      allow read: if request.auth != null && isRegistered() && (
+      allow read: if signedIn() && isRegistered() && (
         (doc != 'lists' && doc != 'users') || noUsers() || role() == 'admin'
       );
       allow read: if (doc == 'schema' || doc == 'languages' || doc.matches('lang_.*')) && publicMode();
-      allow create, update: if request.auth != null && (noUsers() || role() == 'admin');
+      allow create, update: if signedIn() && (noUsers() || role() == 'admin');
       // The bootstrap probe is exists(_meta/users): deleting that doc while /_users docs exist would
       // flip noUsers() true and hand EVERY signed-in Google account full admin. Nobody deletes it —
       // an admin resetting the registry overwrites it with {} instead (exists() stays true).
-      allow delete: if request.auth != null && doc != 'users' && (noUsers() || role() == 'admin');
+      allow delete: if signedIn() && doc != 'users' && (noUsers() || role() == 'admin');
     }
 
     // Per-user access docs: a user reads only their OWN doc; admins read/list/write all. Replaces the
     // single _meta/users map for reads so a restricted user can learn their own access without seeing
     // everyone else's email/role/grants.
     match /_users/{email} {
-      allow read: if request.auth != null && (noUsers() || myEmail() == email || role() == 'admin');
-      allow write: if request.auth != null && (noUsers() || role() == 'admin');
+      allow read: if signedIn() && (noUsers() || myEmail() == email || role() == 'admin');
+      allow write: if signedIn() && (noUsers() || role() == 'admin');
       // OPEN SIGN-UP: a signed-in account with no record writes its OWN, and only the exact grant the
       // schema hands a new person (_meta/ownerTables.signup) -- never more, never someone else's.
-      allow create: if request.auth != null && myEmail() == email && signupOk(email);
+      allow create: if signedIn() && myEmail() == email && signupOk(email);
     }
     function signupOk(email) {
       let nu = get(/databases/$(database)/documents/_meta/ownerTables).data.get('signup', null);
@@ -133,9 +138,9 @@ service cloud.firestore {
           && (!('note' in request.resource.data) || (request.resource.data.note is string && request.resource.data.note.size() <= 500))
           && (!('ts' in request.resource.data) || request.resource.data.ts is number);
       }
-      allow read, delete: if request.auth != null && myEmail() == email;
-      allow create:       if request.auth != null && myEmail() == email && validRequest();
-      allow read, write:  if request.auth != null && !noUsers() && role() == 'admin';
+      allow read, delete: if signedIn() && myEmail() == email;
+      allow create:       if signedIn() && myEmail() == email && validRequest();
+      allow read, write:  if signedIn() && !noUsers() && role() == 'admin';
     }
 
     // Opt-in display-name profiles. A user reads/writes ONLY their own doc; a profile with
@@ -157,9 +162,9 @@ service cloud.firestore {
           && (!('picture' in request.resource.data) || (request.resource.data.picture is string && request.resource.data.picture.size() <= 350000
               && request.resource.data.picture.matches('^(data:image/(png|jpeg|webp);base64,[A-Za-z0-9+/=]*)?$')));
       }
-      allow read:           if request.auth != null && (resource.data.shared == true || myEmail() == email || (!noUsers() && role() == 'admin'));
-      allow create, update: if request.auth != null && (myEmail() == email || (!noUsers() && role() == 'admin')) && validProfile();
-      allow delete:         if request.auth != null && (myEmail() == email || (!noUsers() && role() == 'admin'));
+      allow read:           if signedIn() && (resource.data.shared == true || myEmail() == email || (!noUsers() && role() == 'admin'));
+      allow create, update: if signedIn() && (myEmail() == email || (!noUsers() && role() == 'admin')) && validProfile();
+      allow delete:         if signedIn() && (myEmail() == email || (!noUsers() && role() == 'admin'));
     }
 
     // Per-list storage: each list is its own doc carrying its owning `tables`. READ is gated on access to
@@ -196,7 +201,7 @@ service cloud.firestore {
       return (listName in m) && request.resource.data.tables == m[listName];
     }
     match /_lists/{listName} {
-      allow read: if request.auth != null && isRegistered() && (
+      allow read: if signedIn() && isRegistered() && (
         noUsers() || role() == 'admin' || listAllowed()
       );
       allow read: if listName in pubMirror().lists;   // a list a public table's columns name
@@ -207,17 +212,17 @@ service cloud.firestore {
       // The ownership LABEL is still pinned either way: to the schema mirror on create (where the label
       // is an unverified claim) and to its stored value on update, so nobody mints or re-points a list
       // under a label of their choosing and hijacks another list's read audience.
-      allow create: if request.auth != null && isRegistered() && (
+      allow create: if signedIn() && isRegistered() && (
         noUsers() || role() == 'admin' || (listUserWritable(listName) && listLabelPinned(listName))
       );
-      allow update: if request.auth != null && isRegistered() && (
+      allow update: if signedIn() && isRegistered() && (
         noUsers() || role() == 'admin' ||
         (listUserWritable(listName) && request.resource.data.tables == resource.data.tables)
       );
       // Deleting a list is pruning, which only the full-view holder can judge (saveLists prunes only
       // when _myTables() is null). Stated as its own rule rather than riding `write`, where the
       // re-stamp pin referenced a null request.resource and denied editors by evaluation error.
-      allow delete: if request.auth != null && isRegistered() && (noUsers() || role() == 'admin');
+      allow delete: if signedIn() && isRegistered() && (noUsers() || role() == 'admin');
     }
 
     // User-linked lists (Option C): each doc links a list VALUE to a registered user's email so a cell can
@@ -238,9 +243,9 @@ service cloud.firestore {
           && request.resource.data.email is string && request.resource.data.email.size() <= 320
           && request.resource.data.shared is bool;
       }
-      allow read:           if request.auth != null && (resource.data.shared == true || resource.data.email == myEmail() || (!noUsers() && role() == 'admin'));
-      allow create, update: if request.auth != null && (noUsers() || role() == 'admin') && validLink();
-      allow delete:         if request.auth != null && (noUsers() || role() == 'admin');
+      allow read:           if signedIn() && (resource.data.shared == true || resource.data.email == myEmail() || (!noUsers() && role() == 'admin'));
+      allow create, update: if signedIn() && (noUsers() || role() == 'admin') && validLink();
+      allow delete:         if signedIn() && (noUsers() || role() == 'admin');
     }
 
     // Doc-view bodies (savePage/loadPage -> putRow('_pages', …) -> _pages__active). Content PAGES, not
@@ -271,10 +276,10 @@ service cloud.firestore {
         || (u.tables is map && u.tables.keys().hasAny(pa[doc]));
     }
     match /_pages__active/{doc} {
-      allow read:  if request.auth != null && isRegistered() && (
+      allow read:  if signedIn() && isRegistered() && (
         noUsers() || role() == 'admin' || pageAllowed(doc)
       );
-      allow write: if request.auth != null && (noUsers() || role() == 'admin' || role() == 'editor');
+      allow write: if signedIn() && (noUsers() || role() == 'admin' || role() == 'editor');
     }
 
     // Stored image assets: a view background or an image cell's bytes, kept as a raster data: URI in the
@@ -290,14 +295,14 @@ service cloud.firestore {
     // supabase-schema.sql's app_valid_shape — rules-parity.test.js compares the two size-cap multisets.
     // 900000 < Firestore's 1048576-byte document limit, leaving room for the rest of the document.
     match /_assets__active/{doc} {
-      allow read:  if request.auth != null && isRegistered();
+      allow read:  if signedIn() && isRegistered();
       // create/update (not `write`): a delete carries no request.resource, so a shape test on it would
       // ERROR rather than pass. Split like the _meta block does, so each verb tests only what exists.
-      allow create, update: if request.auth != null && (noUsers() || role() == 'admin' || role() == 'editor')
+      allow create, update: if signedIn() && (noUsers() || role() == 'admin' || role() == 'editor')
                    && request.resource.data.keys().hasOnly(['id', 'src'])
                    && request.resource.data.src is string
                    && request.resource.data.src.size() <= 900000;
-      allow delete: if request.auth != null && (noUsers() || role() == 'admin' || role() == 'editor');
+      allow delete: if signedIn() && (noUsers() || role() == 'admin' || role() == 'editor');
     }
 
     // Data tables (never _meta or _lists). Read needs table access. Writes split into create/update/delete
@@ -310,7 +315,7 @@ service cloud.firestore {
     // blocks, so naming only _meta/_lists here left _users/_profiles/_access_requests reachable through
     // this rule. Exclude the whole underscore namespace (fail-safe: a future system collection is denied
     // here by default and must get its own block — _pages__active has one above).
-    function base(coll) { return request.auth != null && isRegistered() && !coll.matches('^_.*'); }
+    function base(coll) { return signedIn() && isRegistered() && !coll.matches('^_.*'); }
     // Self-service is bounded to tables that DECLARE an owner column -- mirrored to _meta/ownerTables by
     // saveSchema (BackendHelpers.ownerTablesOf). Without this, owner-create was allowed on ANY table, so a
     // registered member could inject owner-stamped junk rows into tables never meant for self-service.

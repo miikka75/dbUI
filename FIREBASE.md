@@ -18,7 +18,9 @@ and write what, and `storage.rules` does the same for uploaded images and publis
 ## Project setup
 
 1. Create project at [console.firebase.google.com](https://console.firebase.google.com)
-2. Enable Firestore Database + Google Auth provider
+2. Enable Firestore Database + Google Auth provider. For sign-in without Google, also enable
+   **Email/Password → Email link (passwordless sign-in)**: the app emails a sign-in link. The rules count a
+   caller only with a verified email (`signedIn()`), so email + password without verification grants nothing.
 3. Add your domain to Authentication → Authorized domains — **every origin the app is served from**,
    e.g. `127.0.0.1` for local dev and `dbui.ddns.net` for the deployed site. Sign-in fails with
    `auth/unauthorized-domain` from an origin that is not listed, so a change of hosting domain has to

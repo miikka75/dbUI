@@ -27,9 +27,9 @@ await testEnv.withSecurityRulesDisabled(async (ctx) => {
   });
 });
 
-const viewer = testEnv.authenticatedContext('viewer-uid', { email: 'viewer@x.com' }).firestore();
-const editor = testEnv.authenticatedContext('editor-uid', { email: 'editor@x.com' }).firestore();
-const admin = testEnv.authenticatedContext('admin-uid', { email: 'admin@x.com' }).firestore();
+const viewer = testEnv.authenticatedContext('viewer-uid', { email: 'viewer@x.com', email_verified: true }).firestore();
+const editor = testEnv.authenticatedContext('editor-uid', { email: 'editor@x.com', email_verified: true }).firestore();
+const admin = testEnv.authenticatedContext('admin-uid', { email: 'admin@x.com', email_verified: true }).firestore();
 
 let passed = 0;
 const ok = async (label, p) => { await p; console.log('  ✓', label); passed++; };
@@ -168,7 +168,7 @@ await ok('owner CANNOT delete an owner-stamped row in a non-self-service table',
   assertFails(deleteDoc(doc(viewer, 'tasks__active/stray'))));
 
 // --- _access_requests shape validation (self-create only; these render in the admin approval UI). ---
-const stranger = testEnv.authenticatedContext('s-uid', { email: 'stranger@x.com' }).firestore();
+const stranger = testEnv.authenticatedContext('s-uid', { email: 'stranger@x.com', email_verified: true }).firestore();
 await ok('well-formed access request is allowed',
   assertSucceeds(setDoc(doc(stranger, '_access_requests/stranger@x.com'), { email: 'stranger@x.com', name: 'Sam', note: 'hi', ts: Date.now() })));
 await ok('oversized request note is denied',
@@ -235,8 +235,8 @@ await testEnv.withSecurityRulesDisabled(async (ctx) => {
   await setDoc(doc(db, 'refdata__active/ref1'), { id: 'ref1', label: 'points' });
   await setDoc(doc(db, 'tasks__active/t1'), { id: 't1', title: 'a task' });
 });
-const mixed = testEnv.authenticatedContext('mixed-uid', { email: 'mixed@x.com' }).firestore();
-const premig = testEnv.authenticatedContext('premig-uid', { email: 'premigration@x.com' }).firestore();
+const mixed = testEnv.authenticatedContext('mixed-uid', { email: 'mixed@x.com', email_verified: true }).firestore();
+const premig = testEnv.authenticatedContext('premig-uid', { email: 'premigration@x.com', email_verified: true }).firestore();
 
 await ok("map grant: 'r' table is READABLE",
   assertSucceeds(getDoc(doc(mixed, 'refdata__active/ref1'))));
@@ -297,7 +297,7 @@ await testEnv.withSecurityRulesDisabled(async (ctx) => {
   });
   await setDoc(doc(db, 'chore_log__active/sib'), { id: 'sib', owner: 'other@x.com', chore: 'dishes' });
 });
-const kid = testEnv.authenticatedContext('kid-uid', { email: 'kid@x.com' }).firestore();
+const kid = testEnv.authenticatedContext('kid-uid', { email: 'kid@x.com', email_verified: true }).firestore();
 await ok("read-only grant on an owner table: CAN read a sibling's row (shared leaderboard)",
   assertSucceeds(getDoc(doc(kid, 'chore_log__active/sib'))));
 await ok('read-only grant on an owner table: CAN create my own owner-stamped row',
@@ -478,7 +478,7 @@ await testEnv.withSecurityRulesDisabled(async (ctx) => {
   await setDoc(doc(db, '_users/keeper@x.com'),
     { role: 'editor', user: 'keeper@x.com', tables: { claims: 'rw' }, rwTables: ['claims'] });
 });
-const keeper = testEnv.authenticatedContext('keeper-uid', { email: 'keeper@x.com' }).firestore();
+const keeper = testEnv.authenticatedContext('keeper-uid', { email: 'keeper@x.com', email_verified: true }).firestore();
 
 await ok('owner CAN create their own row with no _status',
   assertSucceeds(setDoc(doc(viewer, 'claims__active/st_new'),
@@ -637,7 +637,7 @@ await ok('public: a visitor may not read the config', assertFails(getDoc(doc(vis
 await ok('public: a visitor may not read another list', assertFails(getDoc(doc(visitor, '_lists/hidden'))));
 await ok('public: a visitor may not read a table that is not public', assertFails(getDoc(doc(visitor, 'secrets__active/s1'))));
 await ok('public: a visitor may not write a public table', assertFails(setDoc(doc(visitor, 'gclasses__active/c9'), { id: 'c9' })));
-const newbie = testEnv.authenticatedContext('newbie-uid', { email: 'newbie@x.com' }).firestore();
+const newbie = testEnv.authenticatedContext('newbie-uid', { email: 'newbie@x.com', email_verified: true }).firestore();
 await ok('signup: a stranger may not take more than the grant',
   assertFails(setDoc(doc(newbie, '_users/newbie@x.com'), { role: 'admin', user: 'newbie@x.com', tables: 'all' })));
 await ok('signup: a stranger may not sign up someone else',
@@ -646,5 +646,18 @@ await ok('signup: a stranger writes their own record with exactly the grant',
   assertSucceeds(setDoc(doc(newbie, '_users/newbie@x.com'), { role: 'viewer', user: 'newbie@x.com', tables: { gclasses: 'r' }, rwTables: [] })));
 await ok('signup: and may not then raise it',
   assertFails(setDoc(doc(newbie, '_users/newbie@x.com'), { role: 'admin', user: 'newbie@x.com', tables: 'all' })));
+
+// --- An UNVERIFIED email counts for nothing: a token claiming the admin's address (email + password with
+// verification off, say) is a visitor, not the admin. ---
+const impostor = testEnv.authenticatedContext('imp-uid', { email: 'admin@x.com', email_verified: false }).firestore();
+const unflagged = testEnv.authenticatedContext('unf-uid', { email: 'admin@x.com' }).firestore();
+await ok('unverified: the admin address without verification cannot read a granted table',
+  assertFails(getDoc(doc(impostor, 'tasks__active/t1'))));
+await ok('unverified: nor write one', assertFails(setDoc(doc(impostor, 'tasks__active/imp'), { id: 'imp', title: 'x' })));
+await ok('unverified: nor read the users registry', assertFails(getDoc(doc(impostor, '_meta/users'))));
+await ok('unverified: a token with no verification flag at all is treated the same',
+  assertFails(getDoc(doc(unflagged, 'tasks__active/t1'))));
+await ok('unverified: but reads a public table like any visitor',
+  assertSucceeds(getDoc(doc(impostor, 'gclasses__active/c1'))));
 await testEnv.cleanup();
 console.log(`\nFIRESTORE RULES OK — ${passed} checks passed`);

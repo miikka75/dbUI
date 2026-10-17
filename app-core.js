@@ -370,6 +370,8 @@ function createVueApp() {
       calPeriods: {},
       // Booted signed-out into a database with public tables (see the backends' auth handlers).
       visitorMode: false,
+      // The sign-in dialog: Google, or an emailed code / link (when the backend offers email sign-in).
+      signInOpen: false, authEmail: '', authCode: '', authSent: false, authCodeAllowed: false, authBusy: false, authError: '', authLinkPending: false,
       // A page's `filters` picks, { page: { column: [values] } }, kept per viewer in their browser.
       pagePicks: {},
       // Settings -> Users: what the admin narrowed the list to (a search, roles, linked lists).
@@ -704,6 +706,7 @@ function createVueApp() {
       // will deny every read. Surface a clear notice instead of a misleading empty-but-full nav.
       // Signed out, browsing a database's public tables.
       isVisitor: function() { return this.usersLoaded && !this.currentUserEmail; },
+      authEmailValid: function() { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(this.authEmail || '').trim()); },
       isUnregisteredUser: function() {
         if (this.selfUnregistered) return true;
         return this.usersLoaded && this.userList.length > 0 && !this.currentUserEntry;
@@ -1156,7 +1159,7 @@ function createVueApp() {
         return Leftovers.corpus([doc, VIEWS, this.pageCache, cfg], [doc.tables || {}], [doc.views || [], VIEWS]);
       },
       staticTranslationKeys: function() {
-        return ['app.title', 'btn.add', 'btn.show_active', 'btn.show_archived', 'btn.show_all', 'btn.show_fewer', 'btn.decrease', 'btn.increase', 'settings.linked_list', 'auth.sign_in', 'btn.more',
+        return ['app.title', 'btn.add', 'btn.show_active', 'btn.show_archived', 'btn.show_all', 'btn.show_fewer', 'btn.decrease', 'btn.increase', 'settings.linked_list', 'auth.sign_in', 'auth.with_google', 'auth.or', 'auth.email', 'auth.send_email', 'auth.check_email', 'auth.check_email_code', 'auth.code', 'btn.more',
          'btn.edit', 'btn.copy', 'btn.show', 'btn.hide', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'cal.feed_url', 'feed.subscribe', 'feed.link_pending', 'feed.unsubscribe', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.no_blob_store', 'msg.feed_cap_reached', 'settings.feeds', 'settings.feed_regenerate', 'settings.feed_unpublish', 'settings.feed_not_republishing', 'settings.feed_all_personal', 'settings.feed_subscribers', 'settings.feed_revoking', 'settings.feed_over_cap', 'settings.feed_unpublished', 'settings.feed_revoked', 'settings.feed_sweep', 'settings.csp_reports', 'settings.csp_token', 'settings.csp_bad_token', 'settings.csp_read_failed', 'settings.csp_none', 'settings.csp_extensions', 'settings.csp_directive', 'settings.csp_blocked', 'settings.csp_count', 'settings.csp_last_seen', 'btn.refresh', 'settings.csp_rotate', 'msg.feed_swept', 'cal.err_no_source', 'cal.err_table', 'cal.err_date_col', 'cal.err_not_date', 'cal.err_title_col', 'settings.add_calendar', 'settings.cal_title', 'settings.cal_table', 'settings.cal_date_col', 'settings.cal_title_cols', 'settings.cal_add_source', 'btn.delete', 'btn.confirm_delete', 'cal.err_not_rotation', 'settings.cal_rotations', 'msg.name_taken', 'cal.err_name', 'lang.add_language', 'btn.cancel', 'timeline.empty', 'col.switch_list',
          'img.replace', 'img.upload', 'img.remove', 'img.url', 'img.view', 'img.open_original',
          'btn.close', 'btn.previous', 'btn.next',
@@ -1766,9 +1769,24 @@ function createVueApp() {
       // Mobile bottom-nav "More": open the drawer AND expand every group so all sub-items are visible at once.
       // A visitor's Sign in: the provider's sign-in, or -- on the dev server -- back to the default dev user.
       signIn: function() {
-        if (typeof triggerOAuth === 'function' && this.mode !== 'local') { triggerOAuth(); return; }
+        if (typeof triggerOAuth === 'function' && this.mode !== 'local') { if (this.hasEmailSignIn()) this.signInOpen = true; else triggerOAuth(); return; }
         try { localStorage.removeItem('test_user'); } catch (e) {}
         var u = new URL(location.href); u.searchParams.delete('user'); location.href = u.toString();
+      },
+      // Email sign-in, through the backend's authEmailStart / authEmailVerify (Supabase: a code and a link in
+      // one email; Firebase: a link). Errors are the provider's own words.
+      // Whether the backend offers email sign-in. A method, not a computed: the backend script defines it on
+      // window after Vue has started, and a computed would keep its first answer.
+      hasEmailSignIn: function() { return typeof window.authEmailStart === 'function'; },
+      sendSignInEmail: function() {
+        var self = this; this.authBusy = true; this.authError = '';
+        return Promise.resolve(window.authEmailStart(this.authEmail.trim())).then(function(r) { self.authSent = true; self.authCodeAllowed = !!(r && r.code); })
+          .catch(function(e) { self.authError = (e && e.message) || String(e); }).then(function() { self.authBusy = false; });
+      },
+      verifySignInCode: function() {
+        var self = this; this.authBusy = true; this.authError = '';
+        return Promise.resolve(window.authEmailVerify(this.authEmail.trim(), this.authCode))
+          .catch(function(e) { self.authError = (e && e.message) || String(e); }).then(function() { self.authBusy = false; });
       },
       openMoreDrawer: function() { this.openedGroups = this.allGroupIds.slice(); this.drawerOpen = true; },
       // A selection is a history entry, so Back/Forward and a reload keep the user's place. `quiet`

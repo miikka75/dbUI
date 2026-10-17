@@ -1369,6 +1369,15 @@ Not in this: taking payment. Buying still files an order the front desk activate
 provider (a Stripe Checkout link, or a Supabase Edge Function — the Firebase free plan allows no
 functions). **Large**: three access layers, and the first signed-out mode of the app.
 
+#### 26. Sign in without Google, and only verified emails count *(landed)*
+
+- **Email sign-in**: the sign-in dialog offers an emailed code or link beside Google — Supabase sends one
+  email with both, Firebase a link. Needs a sending service for real volume (SUPABASE.md).
+- **Only a verified email is an identity**, in all three layers: Firestore and Storage rules
+  (`signedIn()` requires `email_verified`), and Postgres (`app_email_verified`: the provider says so, the
+  sign-in proved the mailbox, or auth.users records the confirmation). Before, only Google being the one
+  provider kept an unverified sign-up under the admin's address from being the admin.
+
 #### Not proposed
 
 - **Opening the gate.** It needs the gate controller's own API and a server to call it from; the
