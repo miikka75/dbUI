@@ -43,7 +43,7 @@ function _normalizeSchema(parsed) {
 // colName/isEmbed/isViewEmbed/isText (view column-entry shape predicates) are globals from columns.js.
 // Shared list-value seeding: ensure filter-referenced values exist in listsCache. Returns true if anything was added.
 // THE walk over every list-backed filter VALUE a schema declares — view filters, inline-embed filters,
-// and legacy shorthand conditional columns — calling cb(listName, value). Two consumers used to
+// legacy shorthand conditional columns, and columns' `listFilter` — calling cb(listName, value). Two consumers used to
 // duplicate this traversal with different payloads: _seedListValues (adds them to the list) and
 // app-core's lockedListValues (marks them undeletable + mints their translation key). SCHEMA.md pairs
 // the two ("auto-seeded and non-deletable"), so they must see exactly the same values.
@@ -64,6 +64,20 @@ function forEachFilterListValue(cb) {
       var vals = Array.isArray(cond) ? cond : [cond];
       vals.forEach(function(val) { if (typeof val === 'string' && !isFilterToken(val)) cb(ln, val); });
     });
+  }
+  // A column's `listFilter` pins values too, and of the LOOKUP its `list` names -- the condition is over
+  // that table's columns, so the values are recorded under it directly rather than resolved through a
+  // column name, which here would find whichever table happens to have a column called the same.
+  // Renaming a pinned value in the Lookup tab would otherwise make the picker silently offer nothing.
+  for (var lt in SCHEMA) {
+    var lcols = (SCHEMA[lt] && SCHEMA[lt].columns) || {};
+    for (var lc in lcols) {
+      var ld = lcols[lc];
+      if (!ld || typeof ld !== 'object' || !ld.listFilter || !ld.list || !SCHEMA[ld.list] || !SCHEMA[ld.list].isLookup) continue;
+      forEachCondCol(ld.listFilter, function(col, cond) {
+        (Array.isArray(cond) ? cond : [cond]).forEach(function(val) { if (typeof val === 'string' && !isFilterToken(val)) cb(ld.list, val); });
+      });
+    }
   }
   for (var vn in VIEWS) {
     var view = VIEWS[vn];
@@ -130,7 +144,7 @@ function validateSchema() {
   // pure function over the tables map so the unit suite runs the SAME one (dev/test/schema-vocabulary
   // .test.js) rather than a copy. `schema.schema.json` states the same vocabulary for the author's
   // editor, and schema-meta.test.js holds the two together.
-  errors = errors.concat(Columns.vocabularyErrors(SCHEMA));
+  errors = errors.concat(Columns.vocabularyErrors(SCHEMA), Columns.pickerErrors(SCHEMA), Columns.enabledWhenErrors(SCHEMA));
   // A table NAME is a storage identifier, not a label. Every partition store is `<table>__<part>`
   // (BackendHelpers.storeName), and all three access layers invert that by TRUNCATION at the first
   // `__`: `collection.split('__')[0]` in firestore.rules, `split_part(coll, '__', 1)` in the Postgres
@@ -173,6 +187,30 @@ function validateSchema() {
       if (!vals.length || vals.some(function(v) { return v === null || typeof v === 'object'; })) errors.push('table "' + ot + '": `ownerWritableWhile.' + k + '` must be a value or a non-empty list of values');
     });
     if (!Array.isArray(SCHEMA[ot].ownerWritable)) errors.push('table "' + ot + '": `ownerWritableWhile` has no effect without `ownerWritable` (nothing bounds an owner-scoped write to begin with)');
+  }
+  // `capacity` on a response table. Every part of it is read by a rules layer that cannot say why a write
+  // was refused, so a config that does not resolve is named here instead of half-enforced there.
+  var capEvents = {};
+  for (var ct in SCHEMA) {
+    var cap = SCHEMA[ct] && SCHEMA[ct].capacity;
+    if (cap === undefined) continue;
+    var cat = 'table "' + ct + '" capacity: ', ccols2 = SCHEMA[ct].columns || {};
+    if (!cap || typeof cap !== 'object' || Array.isArray(cap)) { errors.push(cat + 'must be an object like { "link": "class", "status": "booking", "column": "capacity", "count": "booked" }'); continue; }
+    if (!Columns.ownerColOf(SCHEMA[ct])) errors.push(cat + 'the table has no owner column — capacity caps self-service responses');
+    var lk = ccols2[cap.link];
+    if (!lk || typeof lk !== 'object' || lk.type !== 'ref' || !SCHEMA[lk.table]) { errors.push(cat + '`link` "' + cap.link + '" must be a ref column naming the events table'); continue; }
+    if (lk.valueCol && lk.valueCol !== 'id') errors.push(cat + '`link` "' + cap.link + '" must refer to the event by id (valueCol "id"), which is what the count is kept against');
+    if (!ccols2[cap.status]) errors.push(cat + '`status` "' + cap.status + '" is not a column of the table');
+    var ecols = SCHEMA[lk.table].columns || {};
+    ['column', 'count'].forEach(function(k) {
+      var d = ecols[cap[k]], ty = (typeof d === 'string') ? d : (d && d.type);
+      if (!d) errors.push(cat + '`' + k + '` "' + cap[k] + '" is not a column of "' + lk.table + '"');
+      else if (ty !== 'number') errors.push(cat + '`' + k + '` "' + cap[k] + '" must be a number column');
+    });
+    if (cap.reserved !== undefined) { var rd = ecols[cap.reserved], rty = (typeof rd === 'string') ? rd : (rd && rd.type); if (rty !== 'number') errors.push(cat + '`reserved` "' + cap.reserved + '" must be a number column of "' + lk.table + '"'); }
+    if (cap.holds !== undefined && (!Array.isArray(cap.holds) || !cap.holds.length)) errors.push(cat + '`holds` must be a non-empty list of statuses (omit it to let any status take a place)');
+    if (capEvents[lk.table]) errors.push(cat + '"' + lk.table + '" is already capped by "' + capEvents[lk.table] + '" — one count per event row');
+    capEvents[lk.table] = ct;
   }
   // `valueCol` on a LIST-backed column says which dimension of a lookup its options come from. It is a
   // legal key everywhere (Columns.COLUMN_KEYS), so a wrong one is not a vocabulary error -- and it fails
@@ -487,8 +525,18 @@ function validateSchema() {
     if (view.calendar) {
       var cvv = view.calendar;
       if (cvv.source && cvv.sources) errors.push('calendar "' + v + '": use `source` OR `sources`, not both');
-      if (cvv.defaultView && ['month', 'week', 'list'].indexOf(cvv.defaultView) < 0) errors.push('calendar "' + v + '" defaultView must be month/week/list');
+      if (cvv.defaultView && ['month', 'week', 'year', 'list'].indexOf(cvv.defaultView) < 0) errors.push('calendar "' + v + '" defaultView must be month/week/year/list');
       var csrcs = cvv.sources || [{ table: cvv.source, dateColumn: cvv.dateColumn, titleColumns: cvv.titleColumns }];
+      // `filters`: columns the reader narrows the events by. Each must be a column of some source, with options
+      // to pick from -- a list or a ref -- or the selector would offer nothing, or narrow nothing.
+      if (cvv.filters !== undefined) {
+        if (!Array.isArray(cvv.filters)) errors.push('calendar "' + v + '": `filters` must be a list of column names');
+        else cvv.filters.forEach(function(fc) {
+          var has = csrcs.some(function(cs) { return cs && SCHEMA[cs.table] && (SCHEMA[cs.table].columns || {})[fc]; });
+          if (!has) errors.push('calendar "' + v + '": filter "' + fc + '" is not a column of any of its sources');
+          else if (!Columns.colIsList(SCHEMA, fc) && !Columns.colIsRef(SCHEMA, fc)) errors.push('calendar "' + v + '": filter "' + fc + '" has no options to pick — use a list or ref column');
+        });
+      }
       // `addTo` names which source a day-add creates in (needed once there are several). A name that is
       // not one of them silently leaves the button off, so say so.
       if (cvv.addTo && !csrcs.some(function(s) { return s && s.table === cvv.addTo; })) {
@@ -497,12 +545,22 @@ function validateSchema() {
       csrcs.forEach(function(s) {
         if (!s || !s.table) { errors.push('calendar "' + v + '": each source needs a table'); return; }
         if (!SCHEMA[s.table]) { errors.push('calendar "' + v + '" references non-existent table "' + s.table + '"'); return; }
+        if (s.feed !== undefined && typeof s.feed !== 'boolean') errors.push('calendar "' + v + '" source "' + s.table + '": `feed` is true or false (false leaves it out of a published file)');
+        if (s.durationColumn !== undefined && String(s.durationColumn).indexOf('.') < 0 && !(SCHEMA[s.table].columns || {})[s.durationColumn]) errors.push('calendar "' + v + '" source "' + s.table + '": `durationColumn` "' + s.durationColumn + '" is not a column of it');
+        if (s.endColumn !== undefined && !(SCHEMA[s.table].columns || {})[s.endColumn]) errors.push('calendar "' + v + '" source "' + s.table + '": `endColumn` "' + s.endColumn + '" is not a column of it');
+        // `respond`: book an event from the calendar, through an rsvp view over THIS source's table -- any other
+        // view would put a booking control on events it does not know, which would never show a choice.
+        if (s.respond !== undefined) {
+          var rv = VIEWS[s.respond];
+          if (!rv || !rv.rsvp) errors.push('calendar "' + v + '" source "' + s.table + '": `respond` must name an rsvp view (got "' + s.respond + '")');
+          else if (rv.rsvp.events !== s.table) errors.push('calendar "' + v + '" source "' + s.table + '": `respond` view "' + s.respond + '" books events of "' + rv.rsvp.events + '", not this source');
+        }
         var ccols = SCHEMA[s.table].columns || {};
         if (!s.dateColumn) { errors.push('calendar "' + v + '" source "' + s.table + '" needs a dateColumn'); }
         else {
           var dd = ccols[s.dateColumn], dt = (typeof dd === 'string') ? dd : (dd && dd.type);
           if (!dd) errors.push('calendar "' + v + '" dateColumn "' + s.dateColumn + '" not found in "' + s.table + '"');
-          else if (dt !== 'date') errors.push('calendar "' + v + '" dateColumn "' + s.dateColumn + '" in "' + s.table + '" must be a date column');
+          else if (dt !== 'date' && dt !== 'datetime') errors.push('calendar "' + v + '" dateColumn "' + s.dateColumn + '" in "' + s.table + '" must be a date or datetime column');
         }
         (s.titleColumns || []).forEach(function(tc) { if (!ccols[tc]) errors.push('calendar "' + v + '" titleColumns references non-existent column "' + tc + '" in "' + s.table + '"'); });
         // A calendar source's `filter` runs over that ONE table's rows (calEventsFor), so the same proof
@@ -522,6 +580,36 @@ function validateSchema() {
         var rcols = SCHEMA[rvp.responses].columns || {}, hasLink = false;
         for (var rc in rcols) { var rd = rcols[rc]; if (rd && typeof rd === 'object' && rd.type === 'ref' && rd.table === rvp.events) { hasLink = true; break; } }
         if (!hasLink) errors.push('rsvp "' + v + '": responses table "' + rvp.responses + '" needs a `ref` column pointing at the events table "' + rvp.events + '" (it is the response↔event link — replaces linkColumn/eventKey)');
+      }
+      // The status control speaks the column `picker` vocabulary. Not `cards`: a status is a word, with no
+      // catalogue row behind it to show.
+      if (rvp.picker !== undefined && ['dropdown', 'toggle', 'chips'].indexOf(rvp.picker) < 0) errors.push('rsvp "' + v + '": `picker` is "' + rvp.picker + '" — use dropdown, toggle or chips');
+      // `closeBefore`: minutes before the start when booking from anywhere stops. It needs a start TIME to
+      // count back from, so a plain date column would make it close at midnight, which nobody means.
+      if (rvp.closeBefore !== undefined) {
+        var cbd = SCHEMA[rvp.events] && (SCHEMA[rvp.events].columns || {})[rvp.dateColumn];
+        var cbt = (typeof cbd === 'string') ? cbd : (cbd && cbd.type);
+        if (!(typeof rvp.closeBefore === 'number' && rvp.closeBefore >= 0)) errors.push('rsvp "' + v + '": `closeBefore` must be a number of minutes');
+        else if (cbt !== 'datetime') errors.push('rsvp "' + v + '": `closeBefore` needs `dateColumn` to be a datetime column — it counts back from the start time');
+      }
+      // Self check-in: the member's claim must be writable by them, and the verdict must NOT be -- a
+      // verdict column in ownerWritable lets every member mark themselves present, and the arrangement
+      // is worth nothing.
+      var ci = rvp.checkin;
+      if (ci !== undefined && SCHEMA[rvp.responses]) {
+        var ccols = SCHEMA[rvp.responses].columns || {}, ow = SCHEMA[rvp.responses].ownerWritable;
+        var at = 'rsvp "' + v + '" checkin: ';
+        if (!ci || !ci.codeColumn || !ccols[ci.codeColumn]) errors.push(at + '`codeColumn` must be a column of "' + rvp.responses + '" — where a member types the code they were shown');
+        else if (Array.isArray(ow) && ow.indexOf(ci.codeColumn) < 0) errors.push(at + '"' + ci.codeColumn + '" must be in "' + rvp.responses + '".ownerWritable, or a member cannot enter a code');
+        var cset = ci && ci.set;
+        if (!cset || typeof cset !== 'object' || Array.isArray(cset) || !Object.keys(cset).length) errors.push(at + 'needs `set` — what checking in writes, e.g. { "attendance": "attended" }');
+        else Object.keys(cset).forEach(function(c) {
+          if (!ccols[c]) errors.push(at + '`set` column "' + c + '" is not a column of "' + rvp.responses + '"');
+          else if (!Array.isArray(ow)) errors.push(at + '"' + rvp.responses + '" declares no ownerWritable, so a member can write "' + c + '" themselves and mark their own attendance');
+          else if (ow.indexOf(c) >= 0) errors.push(at + '"' + c + '" is in ownerWritable, so a member can mark their own attendance without the code');
+        });
+        if (ci && ci.rotateMinutes !== undefined && !(typeof ci.rotateMinutes === 'number' && ci.rotateMinutes > 0)) errors.push(at + '`rotateMinutes` must be a positive number of minutes');
+        if (ci && ci.link !== undefined && ci.link !== 'arm' && ci.link !== 'submit') errors.push(at + '`link` is "' + ci.link + '" — use "submit" (a code from a link saves itself) or "arm" (the default: it waits for a press)');
       }
     }
     // Board (kanban) view: exactly one writable source + a select lane column (drag writes that column).
@@ -600,7 +688,8 @@ function validateSchema() {
     // already checked by the data-view rules above; what is checked here is only the `stats` object.
     if (view.stats) {
       var st = view.stats;
-      var stAggs = ['count', 'sum', 'avg', 'min', 'max', 'latest'];
+      var stAggs = ['count', 'sum', 'avg', 'min', 'max', 'latest', 'streak', 'distinct'];
+      (Array.isArray(st.tiles) ? st.tiles : []).forEach(function(t, i) { if (t && t.divide !== undefined && !(typeof t.divide === 'number' && t.divide > 0)) errors.push('stats "' + v + '" tile ' + i + ': `divide` must be a number above 0'); });
       if (st.rowTiles && st.tiles) errors.push('stats "' + v + '": use `rowTiles` OR `tiles`, not both');
       else if (!st.rowTiles && !Array.isArray(st.tiles)) errors.push('stats "' + v + '" needs `tiles` (an array) or `rowTiles`');
       // A goal is either a number to measure against or the string "max" (scale to the largest tile).
@@ -685,7 +774,70 @@ function validateSchema() {
         else if (ag !== 'count' && !t.column) errors.push('stats "' + v + '" ' + at + ': `' + ag + '` needs a `column`');
         stCol(t.column, at);
         stGoalOk(t.goal, at, false);
+        // An unknown interval would silently be weekly; a streak of the wrong unit still looks right.
+        if (t.interval !== undefined && ['daily', 'weekly', 'monthly'].indexOf(t.interval) < 0) errors.push('stats "' + v + '" ' + at + ': `interval` is "' + t.interval + '" — use daily, weekly or monthly');
+        if (t.interval !== undefined && ag !== 'streak') errors.push('stats "' + v + '" ' + at + ': `interval` is read only by `agg: "streak"`');
+        // `icons` rungs must ascend for the same reason a goal ladder must: the highest one reached wins.
+        if (t.icons !== undefined) {
+          if (!Array.isArray(t.icons) || !t.icons.length) errors.push('stats "' + v + '" ' + at + ': `icons` must be a list like [{ "at": 1, "icon": "mdi-fire" }]');
+          else { var ip = null; t.icons.forEach(function(r, ri) {
+            if (!r || typeof r.at !== 'number' || !(r.at >= 0) || typeof r.icon !== 'string' || !r.icon) { errors.push('stats "' + v + '" ' + at + ': `icons` step ' + ri + ' must be { "at": <number>, "icon": "mdi-…" }'); return; }
+            if (ip !== null && r.at <= ip) errors.push('stats "' + v + '" ' + at + ': `icons` steps must ascend — ' + r.at + ' comes after ' + ip);
+            ip = r.at; }); }
+        }
       });
+    }
+    // `board.laneWhen`: a condition per lane. A lane naming nothing, or a condition that is not one, would
+    // refuse every move into it or none, with nothing on screen to say which.
+    if (view.board && view.board.laneWhen !== undefined) {
+      var lw = view.board.laneWhen;
+      if (!lw || typeof lw !== 'object' || Array.isArray(lw)) errors.push('board "' + v + '": `laneWhen` must map a lane to a condition, like { "granted": { "balance": { "gte": { "col": "cost" } } } }');
+      else Object.keys(lw).forEach(function(k) { if (!lw[k] || typeof lw[k] !== 'object' || Array.isArray(lw[k])) errors.push('board "' + v + '": `laneWhen.' + k + '` must be a condition object'); });
+    }
+    // A computed lookup reading a view (`lookup.view`) must name one that exists, and not the view itself.
+    (view.columns || []).concat(view.compute || []).forEach(function(cc) {
+      var lk = cc && typeof cc === 'object' && cc.computed && cc.computed.lookup;
+      if (!lk || lk.view === undefined) return;
+      if (!VIEWS[lk.view]) errors.push('view "' + v + '": `lookup.view` names missing view "' + lk.view + '"');
+      else if (lk.view === v) errors.push('view "' + v + '": `lookup.view` cannot read the view it is in');
+    });
+    // A page's `filters`: columns, with options, that the viewer narrows the page's embeds by.
+    if (view.filters !== undefined && !view.calendar) {
+      if (!Array.isArray(view.filters)) errors.push('view "' + v + '": `filters` must be a list of column names');
+      else view.filters.forEach(function(fc) {
+        if (!Columns.colIsList(SCHEMA, fc) && !Columns.colIsRef(SCHEMA, fc)) errors.push('view "' + v + '": filter "' + fc + '" has no options to pick — use a list or ref column');
+      });
+    }
+    // `within: { calendar }` follows a calendar's period; a name that is not a calendar would match nothing.
+    [view.filter, view.groupBy && view.groupBy.filter].forEach(function(f) {
+      (function walk(x) {
+        if (!x || typeof x !== 'object') return;
+        if (Array.isArray(x)) { x.forEach(walk); return; }
+        Object.keys(x).forEach(function(k) {
+          var w = x[k] && x[k].within;
+          if (w && typeof w === 'object' && !(VIEWS[w.calendar] && VIEWS[w.calendar].calendar)) errors.push('view "' + v + '": `within: { calendar }` on "' + k + '" must name a calendar view (got "' + w.calendar + '")');
+          else if (k.charAt(0) === '$') walk(x[k]);
+        });
+      })(f);
+    });
+    if (view.preview !== undefined && !(typeof view.preview === 'number' && view.preview > 0 && Math.floor(view.preview) === view.preview)) errors.push('view "' + v + '": `preview` must be a whole number above 0');
+    // `blockedBy` on an rsvp or a scan: periods of the caller's own rows in another table. A table or a
+    // column that does not exist would block nothing, which looks exactly like "not paused".
+    [['blockedBy', view.rsvp && view.rsvp.blockedBy], ['blockedBy', view.scan && view.scan.blockedBy], ['requires', view.rsvp && view.rsvp.requires], ['requires', view.scan && view.scan.requires], ['requires', view.requires]].forEach(function(pair) {
+      var bb = pair[1];
+      if (bb === undefined || bb === null) return;
+      var bat = 'view "' + v + '" `' + pair[0] + '`: ';
+      if (typeof bb !== 'object' || !SCHEMA[bb.table]) { errors.push(bat + '`table` must name a table (got "' + (bb && bb.table) + '")'); return; }
+      var bcols = SCHEMA[bb.table].columns || {};
+      ['from', 'to'].forEach(function(k) { if (bb[k] !== undefined && !bcols[bb[k]]) errors.push(bat + '`' + k + '` "' + bb[k] + '" is not a column of "' + bb.table + '"'); });
+      if (!bb.from) errors.push(bat + 'needs `from`, the column the period starts on');
+      if (!Columns.ownerColOf(SCHEMA[bb.table])) errors.push(bat + '"' + bb.table + '" has no owner column, so no row is the caller\x27s own');
+    });
+    // A form taking a fresh record each time finds the one being filled in as the caller's latest one not
+    // yet submitted -- so without `submitColumn` it can never find it, and Start would make a row nobody
+    // can then see.
+    if (view.form && view.form.once === false && !view.form.submitColumn) {
+      errors.push('form "' + v + '": `once: false` needs `submitColumn` — it is how the form tells the record being filled in from the ones already sent');
     }
     // A scan view IS a data view over the log it writes — sources, filter and columns are checked by the
     // rules above — plus a resolver config, whose shape (and whose write-layer prerequisites) scan.js
@@ -739,6 +891,33 @@ function validateRefs(schema) {
       });
     }
   }
+  // `newUser`: what approving an access request grants. A role the app does not know, or a table that does
+  // not exist, would register someone with access nobody meant.
+  if (schema.newUser !== undefined) {
+    var nu = schema.newUser;
+    if (!nu || typeof nu !== 'object' || Array.isArray(nu)) errs.push('`newUser` must be an object like { "role": "viewer", "tables": { "classes": "r" } }');
+    else {
+      if (nu.role !== undefined && ['admin', 'editor', 'viewer'].indexOf(nu.role) < 0) errs.push('`newUser.role` is "' + nu.role + '" — use "viewer" or "editor" (an admin is made by hand)');
+      if (nu.role === 'admin') errs.push('`newUser.role` cannot be "admin": approving a request must not hand out full control');
+      if (nu.open !== undefined && typeof nu.open !== 'boolean') errs.push('`newUser.open` is true (anyone who signs in registers themselves) or false');
+      if (nu.open === true && (nu.tables === undefined || (Array.isArray(nu.tables) ? !nu.tables.length : (nu.tables && typeof nu.tables === 'object' && !Object.keys(nu.tables).length)))) errs.push('`newUser.open` needs `newUser.tables` to name what a self-registered person reads');
+      var nut = nu.tables;
+      var nuNames = Array.isArray(nut) ? nut : (nut && typeof nut === 'object') ? Object.keys(nut) : (nut === undefined ? [] : null);
+      if (nuNames === null) errs.push('`newUser.tables` must be a list of table names or a map of table -> "r" / "rw"');
+      else nuNames.forEach(function(t) { if (!hasTable(t)) errs.push('`newUser.tables` -> missing table "' + t + '"'); });
+      if (nut && typeof nut === 'object' && !Array.isArray(nut)) Object.keys(nut).forEach(function(t) { if (['r', 'rw'].indexOf(nut[t]) < 0) errs.push('`newUser.tables.' + t + '` is "' + nut[t] + '" — use "r" (read) or "rw" (read and write)'); });
+    }
+  }
+  // A PUBLIC table is read by people with no account: its `ref`s must point at public tables too, or a
+  // visitor sees raw keys where names should be.
+  Object.keys(tables).forEach(function(t) {
+    var td = tables[t]; if (!td || td.public === undefined) return;
+    if (typeof td.public !== 'boolean') { errs.push('table "' + t + '": `public` is true or false'); return; }
+    if (!td.public) return;
+    var defs = Columns.columnDefs(td);
+    Object.keys(defs).forEach(function(c) { var d = defs[c]; if (d && typeof d === 'object' && d.type === 'ref' && d.table && tables[d.table] && tables[d.table].public !== true) errs.push('table "' + t + '" is public, but its column "' + c + '" refers to "' + d.table + '", which is not — a visitor would see its keys, not its names'); });
+    if (Columns.ownerColOf(td)) errs.push('table "' + t + '" is public but has an owner column — people\'s own rows are not for anyone to read');
+  });
   // A user-linked LOOKUP needs a dimension whose values accounts are linked to, and that dimension is
   // derived from the columns drawing on it. With none, `listSources` is a declaration with no picker
   // behind it: the Lookup editor offers nothing, so nobody can be linked and every `@me` resolves to
@@ -769,6 +948,31 @@ function validateRefs(schema) {
     if (it.table && !hasTable(it.table)) errs.push('Nav -> missing table "' + it.table + '"');
     if (it.items) walk(it.items);
   }); })(schema.nav && schema.nav.items);
+  // `fab` -- the corner button's action, app-wide (nav) or per view. "scan" with nowhere to scan to would
+  // simply show no button, which reads as a bug rather than a missing list.
+  var fabOk = function(val, where) {
+    if (val === undefined) return;
+    if (val && typeof val === 'object' && !Array.isArray(val)) {
+      var fk = ['add', 'open'].filter(function(k) { return val[k] !== undefined; });
+      if (fk.length !== 1) errs.push(where + ' `fab` object names one activity: { "add": "<view>" } or { "open": "<view>" }');
+      else if (!views[val[fk[0]]]) errs.push(where + ' `fab.' + fk[0] + '` names missing view "' + val[fk[0]] + '"');
+      return;
+    }
+    if (['add', 'scan', 'none'].indexOf(val) < 0) errs.push(where + ' `fab` is "' + val + '" — use add, scan, none, or { add | open: "<view>" }');
+    else if (val === 'scan' && !(schema.nav && Array.isArray(schema.nav.scan) && schema.nav.scan.length)) errs.push(where + ' `fab: "scan"` needs `nav.scan` to name where scanned codes go');
+  };
+  fabOk(schema.nav && schema.nav.fab, 'Nav ->');
+  (Array.isArray(schema.views) ? schema.views : []).forEach(function(fv) { if (fv) fabOk(fv.fab, 'View "' + fv.name + '" ->'); });
+  // `nav.scan`: the scan button's destinations. A view that takes no code would swallow every scan sent
+  // to it -- the button would look like it worked and nothing would be logged.
+  if (schema.nav && schema.nav.scan !== undefined) {
+    if (!Array.isArray(schema.nav.scan)) errs.push('Nav -> `scan` must be a list of view names');
+    else schema.nav.scan.forEach(function(n) {
+      var sv = (schema.views || []).filter(function(x) { return x && x.name === n; })[0];
+      if (!sv) errs.push('Nav -> scan names missing view "' + n + '"');
+      else if (!sv.scan && !(sv.rsvp && sv.rsvp.checkin)) errs.push('Nav -> scan view "' + n + '" takes no code: name a scan view, or an rsvp view with `checkin`');
+    });
+  }
   // The rest of the nav's rules need no schema, so they live with the tree they protect (nav.js).
   return errs.concat(Nav.errors(schema.nav));
 }

@@ -38,16 +38,20 @@ const ACTORS = {
 };
 
 const SCHEMA = {
+  // Open sign-up: a signed-in stranger may write their own record, exactly this grant.
+  newUser: { role: 'viewer', tables: { timetable: 'r' }, open: true },
   tables: {
+    // A PUBLIC table: read with no account at all, and its list with it.
+    timetable: { public: true, columns: { id: { type: 'text' }, title: { type: 'text' }, coach: { type: 'text', list: 'coaches' } } },
     tasks:   { columns: { id: { type: 'text' }, title: { type: 'text' } } },
-    notes:   { columns: { id: { type: 'text' }, body: { type: 'text' } } },
+    notes:   { columns: { id: { type: 'text' }, body: { type: 'text' }, tag: { type: 'text', list: 'note_tags' } } },
     shopping: {
       columns: { id: { type: 'text' }, item: { type: 'text' },
                  added_by: { type: 'text', list: 'members', defaultFrom: '@me', stamped: true } }
     },
     signups: {
       ownerWritable: ['status'],
-      columns: { id: { type: 'text' }, owner: { type: 'owner' }, status: { type: 'text' }, organizerNote: { type: 'text' } }
+      columns: { id: { type: 'text' }, owner: { type: 'owner' }, status: { type: 'text', list: 'signup_status' }, organizerNote: { type: 'text' } }
     }
   },
   views: []
@@ -70,6 +74,11 @@ const MATRIX = [
   ['viewer@x.com', 'signups__active', 's1', 'write', { id: 's1', owner: 'viewer@x.com', status: 'y' }, 'allow'],
   ['viewer@x.com', 'signups__active', 's2', 'write', { id: 's2', owner: 'editor@x.com', status: 'y' }, 'deny'],
   ['viewer@x.com', 'signups__active', 's1', 'read',  null,                                            'allow'],
+  // A self-service table's lists reach a member with no grant (they fill those columns in); a list
+  // owned only by a table they lack does not.
+  ['viewer@x.com', '_lists', 'signup_status', 'read', null, 'allow'],
+  ['viewer@x.com', '_lists', 'note_tags',     'read', null, 'deny'],
+  ['editor@x.com', '_lists', 'signup_status', 'read', null, 'allow'],
   // ownerWritable: the column bound holds even on a row they own.
   ['viewer@x.com', 'signups__active', 's1', 'write', { id: 's1', owner: 'viewer@x.com', organizerNote: 'no' }, 'deny'],
   // A stamped column: the one bound that binds a GRANT-HOLDER, so both engines must agree that an `rw`
@@ -97,7 +106,19 @@ const MATRIX = [
   ['viewer@x.com', 'signups__active', 's1', 'write', { id: 's1', owner: 'viewer@x.com', status: 'y', _status: 'archive' }, 'allow'],
   ['viewer@x.com', 'signups__active', 's1', 'write', { id: 's1', owner: 'viewer@x.com', status: 'y', _status: 'deleted' }, 'deny'],
   // An editor holding the table writes it freely -- filing rows away is what the grant is for.
-  ['editor@x.com', 'tasks__active',   'w6', 'write', { id: 'w6', title: 'x', _status: 'archive' },                         'allow']
+  ['editor@x.com', 'tasks__active',   'w6', 'write', { id: 'w6', title: 'x', _status: 'archive' },                         'allow'],
+  // A VISITOR (no account): the public table, its list, the schema -- nothing else, and no writes.
+  ['',             'timetable__active', 't1', 'read',  null,                                          'allow'],
+  ['',             'tasks__active',   'r1', 'read',  null,                                            'deny'],
+  ['',             '_meta',           'schema', 'read', null,                                         'allow'],
+  ['',             '_meta',           'config', 'read', null,                                         'deny'],
+  ['',             '_lists',          'coaches', 'read', null,                                        'allow'],
+  ['',             '_lists',          'note_tags', 'read', null,                                      'deny'],
+  ['',             'timetable__active', 't9', 'write', { id: 't9', title: 'x' },                      'deny'],
+  // OPEN SIGN-UP: a signed-in stranger writes their own record -- only the exact grant, only their own.
+  ['stranger@x.com', '_users', 'stranger@x.com', 'write', { role: 'admin', user: 'stranger@x.com', tables: 'all' },                              'deny'],
+  ['stranger@x.com', '_users', 'victim@x.com',   'write', { role: 'viewer', user: 'victim@x.com', tables: { timetable: 'r' }, rwTables: [] },   'deny'],
+  ['stranger@x.com', '_users', 'stranger@x.com', 'write', { role: 'viewer', user: 'stranger@x.com', tables: { timetable: 'r' }, rwTables: [] }, 'allow']
 ];
 
 // Places the mirror is knowingly stricter than the reference. Empty is the goal; an entry here is a
@@ -124,7 +145,9 @@ await testEnv.withSecurityRulesDisabled(async (ctx) => {
   await setDoc(doc(db, '_meta/users'), users);
   // The schema-derived facts the schema-blind rules read -- the same set saveSchema mirrors.
   await setDoc(doc(db, '_meta/schema'), SCHEMA);
-  await setDoc(doc(db, '_meta/ownerTables'), { tables: BackendHelpers.ownerTablesOf(SCHEMA) });
+  await setDoc(doc(db, '_meta/ownerTables'), BackendHelpers.ownerTablesMirror(SCHEMA));
+  await setDoc(doc(db, '_meta/config'), { feeds: { shared: 'a bearer link' } });
+  await setDoc(doc(db, 'timetable__active/t1'), { id: 't1', title: 'Spin', coach: 'x' });
   await setDoc(doc(db, '_meta/ownerWritable'), BackendHelpers.ownerWritableOf(SCHEMA));
   await setDoc(doc(db, '_meta/stamped'), BackendHelpers.stampedOf(SCHEMA));
   await setDoc(doc(db, '_meta/pageAccess'), BackendHelpers.pageAccessOf(SCHEMA));
@@ -135,11 +158,16 @@ await testEnv.withSecurityRulesDisabled(async (ctx) => {
   await setDoc(doc(db, 'notes__active/r2'), { id: 'r2', body: 'seed' });
   await setDoc(doc(db, 'signups__active/s1'), { id: 's1', owner: 'viewer@x.com', status: 'y' });
   await setDoc(doc(db, 'shopping__active/h1'), { id: 'h1', item: 'Bread', added_by: 'Bob' });
+  for (const [name, tables] of Object.entries(ListAccess.listOwnershipMap(SCHEMA.tables))) {
+    await setDoc(doc(db, '_lists/' + name), { name, items: ['x'], tables });
+  }
 });
 
 const fsDb = {};
 let uid = 0;
-for (const email of Object.keys(ACTORS)) fsDb[email] = testEnv.authenticatedContext('u' + (uid++), { email }).firestore();
+for (const email of Object.keys(ACTORS)) fsDb[email] = testEnv.authenticatedContext('u' + (uid++), { email, email_verified: true }).firestore();
+fsDb[''] = testEnv.unauthenticatedContext().firestore();                                    // a visitor
+fsDb['stranger@x.com'] = testEnv.authenticatedContext('u-stranger', { email: 'stranger@x.com', email_verified: true }).firestore();   // signed in, no record
 
 async function firestoreVerdict(email, store, key, op, payload) {
   const db = fsDb[email];
@@ -161,7 +189,8 @@ const S = await createPgliteStorage();
 S.setCaller('admin@x.com');
 // Bootstrap (no members yet) writes the schema and its mirrors, then the registry closes bootstrap.
 await S.setMeta('schema', SCHEMA);
-await S.setMeta('ownerTables', { tables: BackendHelpers.ownerTablesOf(SCHEMA) });
+await S.setMeta('ownerTables', BackendHelpers.ownerTablesMirror(SCHEMA));
+await S.setMeta('config', { feeds: { shared: 'a bearer link' } });
 await S.setMeta('ownerWritable', BackendHelpers.ownerWritableOf(SCHEMA));
 await S.setMeta('stamped', BackendHelpers.stampedOf(SCHEMA));
 await S.setMeta('pageAccess', BackendHelpers.pageAccessOf(SCHEMA));
@@ -172,9 +201,13 @@ for (const [email, g] of Object.entries(ACTORS)) {
   await S._seed('_users', email, rec);
 }
 await S._seed('tasks__active', 'r1', { id: 'r1', title: 'seed' });
+await S._seed('timetable__active', 't1', { id: 't1', title: 'Spin', coach: 'x' });
 await S._seed('notes__active', 'r2', { id: 'r2', body: 'seed' });
 await S._seed('signups__active', 's1', { id: 's1', owner: 'viewer@x.com', status: 'y' });
 await S._seed('shopping__active', 'h1', { id: 'h1', item: 'Bread', added_by: 'Bob' });
+for (const [name, tables] of Object.entries(ListAccess.listOwnershipMap(SCHEMA.tables))) {
+  await S._seed('_lists', name, { name, items: ['x'], tables });
+}
 
 async function postgresVerdict(email, store, key, op, payload) {
   S.setCaller(email);
@@ -194,7 +227,7 @@ async function postgresVerdict(email, store, key, op, payload) {
 // --- compare ---------------------------------------------------------------------------------------
 let checks = 0;
 const problems = [];
-const label = (a, s, k, o) => `${o} ${s}/${k} as ${a.split('@')[0]}`;
+const label = (a, s, k, o) => `${o} ${s}/${k} as ${a ? a.split('@')[0] : 'visitor'}`;
 
 for (const [actor, store, key, op, payload, expected] of MATRIX) {
   const pg = await postgresVerdict(actor, store, key, op, payload);

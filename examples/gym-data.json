@@ -1,0 +1,1593 @@
+{
+  "lists": {
+    "trainers": [
+      "Laura",
+      "Mikko",
+      "Sanna"
+    ],
+    "booking_status": [
+      "booked"
+    ],
+    "attendance_status": [
+      "pending",
+      "attended",
+      "no_show"
+    ],
+    "order_state": [
+      "draft",
+      "submitted"
+    ],
+    "membership_status": [
+      "pending",
+      "active",
+      "paused",
+      "ended"
+    ],
+    "pt_status": [
+      "requested",
+      "confirmed",
+      "done",
+      "cancelled"
+    ],
+    "coach_category": [
+      "Cardio",
+      "Mobility",
+      "Strength",
+      "Yoga"
+    ],
+    "coach_format": [
+      "Workout",
+      "Programme"
+    ],
+    "claim_status": [
+      "requested",
+      "granted",
+      "denied"
+    ],
+    "visit_check": [
+      "yes"
+    ],
+    "coach_level": [
+      "Beginner",
+      "Intermediate",
+      "Advanced"
+    ],
+    "rooms": [
+      "Cycling studio",
+      "Main hall",
+      "Studio 2"
+    ]
+  },
+  "tables": {
+    "ref_gyms": [
+      {
+        "id": "gym-city-centre",
+        "gym": "City Centre",
+        "address": "Kauppakatu 10",
+        "opening_hours": "24/7 with a key fob",
+        "code": "GYM-CITY"
+      },
+      {
+        "id": "gym-harbour",
+        "gym": "Harbour",
+        "address": "Satamatie 3",
+        "opening_hours": "Mon–Fri 6–22, Sat–Sun 8–20",
+        "code": "GYM-HARBOUR"
+      }
+    ],
+    "ref_class_types": [
+      {
+        "id": "ct-spinning",
+        "class_type": "Spinning",
+        "duration_min": 45,
+        "intensity": 4,
+        "category": "Cardio – engine",
+        "description": "Indoor cycling to music, intervals on your own resistance."
+      },
+      {
+        "id": "ct-body-pump",
+        "class_type": "Body Pump",
+        "duration_min": 55,
+        "intensity": 3,
+        "category": "Strength",
+        "description": "A barbell class for the whole body: light weights, many reps."
+      },
+      {
+        "id": "ct-yoga",
+        "class_type": "Yoga",
+        "duration_min": 60,
+        "intensity": 1,
+        "category": "Mobility",
+        "description": "Flowing yoga for strength and balance. Suits every level."
+      },
+      {
+        "id": "ct-pilates",
+        "class_type": "Pilates",
+        "duration_min": 45,
+        "intensity": 2,
+        "category": "Core",
+        "description": "Slow, controlled moves for the deep core and posture."
+      },
+      {
+        "id": "ct-hiit",
+        "class_type": "HIIT",
+        "duration_min": 30,
+        "intensity": 5,
+        "category": "Cardio – engine",
+        "description": "Short, hard intervals. Places fill quickly."
+      },
+      {
+        "id": "ct-zumba",
+        "class_type": "Zumba",
+        "duration_min": 55,
+        "intensity": 3,
+        "category": "Dance",
+        "description": "Latin rhythms and easy steps."
+      }
+    ],
+    "ref_plans": [
+      {
+        "id": "plan-monthly",
+        "plan": "Monthly",
+        "months": 1,
+        "price_eur": 49,
+        "pause_weeks": ""
+      },
+      {
+        "id": "plan-6-months",
+        "plan": "6 months",
+        "months": 6,
+        "price_eur": 270,
+        "pause_weeks": 1
+      },
+      {
+        "id": "plan-12-months",
+        "plan": "12 months",
+        "months": 12,
+        "price_eur": 480,
+        "pause_weeks": 2
+      },
+      {
+        "id": "plan-student-monthly",
+        "plan": "Student monthly",
+        "months": 1,
+        "price_eur": 35,
+        "pause_weeks": ""
+      },
+      {
+        "id": "plan-single-visit",
+        "plan": "Single visit",
+        "months": "",
+        "price_eur": 15,
+        "pause_weeks": ""
+      }
+    ],
+    "ref_exercises": [
+      {
+        "id": "ex-squat",
+        "exercise": "Squat",
+        "muscle_group": "Legs"
+      },
+      {
+        "id": "ex-bench-press",
+        "exercise": "Bench press",
+        "muscle_group": "Chest"
+      },
+      {
+        "id": "ex-deadlift",
+        "exercise": "Deadlift",
+        "muscle_group": "Back"
+      },
+      {
+        "id": "ex-overhead-press",
+        "exercise": "Overhead press",
+        "muscle_group": "Shoulders"
+      },
+      {
+        "id": "ex-pull-up",
+        "exercise": "Pull-up",
+        "muscle_group": "Back"
+      },
+      {
+        "id": "ex-rowing-machine",
+        "exercise": "Rowing machine",
+        "muscle_group": "Cardio"
+      },
+      {
+        "id": "ex-treadmill",
+        "exercise": "Treadmill",
+        "muscle_group": "Cardio"
+      }
+    ],
+    "ref_rewards": [
+      {
+        "id": "rw-water-bottle",
+        "reward": "Water bottle",
+        "category": "Merch",
+        "cost": 17,
+        "details": "Steel bottle with the club logo"
+      },
+      {
+        "id": "rw-training-t-shirt",
+        "reward": "Training T-shirt",
+        "category": "Merch",
+        "cost": 14,
+        "details": "Technical shirt, sizes S–XL"
+      },
+      {
+        "id": "rw-body-composition-scan",
+        "reward": "Body composition scan",
+        "category": "Services",
+        "cost": 19,
+        "details": "With a trainer, about 20 minutes"
+      },
+      {
+        "id": "rw-day-pass-for-a-friend",
+        "reward": "Day pass for a friend",
+        "category": "Coupons",
+        "cost": 3,
+        "details": "One visit, any gym"
+      }
+    ],
+    "reward_claims": [
+      {
+        "id": "claim-aino-2026-10-08",
+        "owner": "aino@dev",
+        "reward": "Day pass for a friend",
+        "claimed_on": "2026-10-08",
+        "sent": "yes",
+        "claim_status": "granted",
+        "updated_at": "2026-10-08T10:00:00.000Z"
+      }
+    ],
+    "classes": [
+      {
+        "id": "cls-2026-10-05-0700",
+        "starts_at": "2026-10-05T04:00:00.000Z",
+        "class_type": "Spinning",
+        "gym": "City Centre",
+        "room": "Cycling studio",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-05-1730",
+        "starts_at": "2026-10-05T14:30:00.000Z",
+        "class_type": "Body Pump",
+        "gym": "City Centre",
+        "room": "Main hall",
+        "instructor": "Laura",
+        "capacity": 25,
+        "booked": 1
+      },
+      {
+        "id": "cls-2026-10-05-1830",
+        "starts_at": "2026-10-05T15:30:00.000Z",
+        "class_type": "Yoga",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Sanna",
+        "capacity": 15,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-05-1900",
+        "starts_at": "2026-10-05T16:00:00.000Z",
+        "class_type": "HIIT",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-06-0700",
+        "starts_at": "2026-10-06T04:00:00.000Z",
+        "class_type": "Spinning",
+        "gym": "City Centre",
+        "room": "Cycling studio",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 1
+      },
+      {
+        "id": "cls-2026-10-06-1730",
+        "starts_at": "2026-10-06T14:30:00.000Z",
+        "class_type": "Body Pump",
+        "gym": "City Centre",
+        "room": "Main hall",
+        "instructor": "Laura",
+        "capacity": 25,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-06-1830",
+        "starts_at": "2026-10-06T15:30:00.000Z",
+        "class_type": "Yoga",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Sanna",
+        "capacity": 15,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-06-1900",
+        "starts_at": "2026-10-06T16:00:00.000Z",
+        "class_type": "HIIT",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 1
+      },
+      {
+        "id": "cls-2026-10-07-0700",
+        "starts_at": "2026-10-07T04:00:00.000Z",
+        "class_type": "Spinning",
+        "gym": "City Centre",
+        "room": "Cycling studio",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-07-1730",
+        "starts_at": "2026-10-07T14:30:00.000Z",
+        "class_type": "Body Pump",
+        "gym": "City Centre",
+        "room": "Main hall",
+        "instructor": "Laura",
+        "capacity": 25,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-07-1830",
+        "starts_at": "2026-10-07T15:30:00.000Z",
+        "class_type": "Yoga",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Sanna",
+        "capacity": 15,
+        "booked": 1
+      },
+      {
+        "id": "cls-2026-10-07-1900",
+        "starts_at": "2026-10-07T16:00:00.000Z",
+        "class_type": "HIIT",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-08-0700",
+        "starts_at": "2026-10-08T04:00:00.000Z",
+        "class_type": "Spinning",
+        "gym": "City Centre",
+        "room": "Cycling studio",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-08-1730",
+        "starts_at": "2026-10-08T14:30:00.000Z",
+        "class_type": "Body Pump",
+        "gym": "City Centre",
+        "room": "Main hall",
+        "instructor": "Laura",
+        "capacity": 25,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-08-1830",
+        "starts_at": "2026-10-08T15:30:00.000Z",
+        "class_type": "Yoga",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Sanna",
+        "capacity": 15,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-08-1900",
+        "starts_at": "2026-10-08T16:00:00.000Z",
+        "class_type": "HIIT",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 1
+      },
+      {
+        "id": "cls-2026-10-09-0700",
+        "starts_at": "2026-10-09T04:00:00.000Z",
+        "class_type": "Spinning",
+        "gym": "City Centre",
+        "room": "Cycling studio",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-09-1730",
+        "starts_at": "2026-10-09T14:30:00.000Z",
+        "class_type": "Body Pump",
+        "gym": "City Centre",
+        "room": "Main hall",
+        "instructor": "Laura",
+        "capacity": 25,
+        "booked": 1
+      },
+      {
+        "id": "cls-2026-10-09-1830",
+        "starts_at": "2026-10-09T15:30:00.000Z",
+        "class_type": "Yoga",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Sanna",
+        "capacity": 15,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-09-1900",
+        "starts_at": "2026-10-09T16:00:00.000Z",
+        "class_type": "HIIT",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-12-0700",
+        "starts_at": "2026-10-12T04:00:00.000Z",
+        "class_type": "Spinning",
+        "gym": "City Centre",
+        "room": "Cycling studio",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-12-1730",
+        "starts_at": "2026-10-12T14:30:00.000Z",
+        "class_type": "Body Pump",
+        "gym": "City Centre",
+        "room": "Main hall",
+        "instructor": "Laura",
+        "capacity": 25,
+        "booked": 2
+      },
+      {
+        "id": "cls-2026-10-12-1830",
+        "starts_at": "2026-10-12T15:30:00.000Z",
+        "class_type": "Yoga",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Sanna",
+        "capacity": 15,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-12-1900",
+        "starts_at": "2026-10-12T16:00:00.000Z",
+        "class_type": "HIIT",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-13-0700",
+        "starts_at": "2026-10-13T04:00:00.000Z",
+        "class_type": "Spinning",
+        "gym": "City Centre",
+        "room": "Cycling studio",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 1
+      },
+      {
+        "id": "cls-2026-10-13-1730",
+        "starts_at": "2026-10-13T14:30:00.000Z",
+        "class_type": "Body Pump",
+        "gym": "City Centre",
+        "room": "Main hall",
+        "instructor": "Laura",
+        "capacity": 25,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-13-1830",
+        "starts_at": "2026-10-13T15:30:00.000Z",
+        "class_type": "Yoga",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Sanna",
+        "capacity": 15,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-13-1900",
+        "starts_at": "2026-10-13T16:00:00.000Z",
+        "class_type": "HIIT",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-14-0700",
+        "starts_at": "2026-10-14T04:00:00.000Z",
+        "class_type": "Spinning",
+        "gym": "City Centre",
+        "room": "Cycling studio",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-14-1730",
+        "starts_at": "2026-10-14T14:30:00.000Z",
+        "class_type": "Body Pump",
+        "gym": "City Centre",
+        "room": "Main hall",
+        "instructor": "Laura",
+        "capacity": 25,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-14-1830",
+        "starts_at": "2026-10-14T15:30:00.000Z",
+        "class_type": "Yoga",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Sanna",
+        "capacity": 15,
+        "booked": 1
+      },
+      {
+        "id": "cls-2026-10-14-1900",
+        "starts_at": "2026-10-14T16:00:00.000Z",
+        "class_type": "HIIT",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-15-0700",
+        "starts_at": "2026-10-15T04:00:00.000Z",
+        "class_type": "Spinning",
+        "gym": "City Centre",
+        "room": "Cycling studio",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-15-1730",
+        "starts_at": "2026-10-15T14:30:00.000Z",
+        "class_type": "Body Pump",
+        "gym": "City Centre",
+        "room": "Main hall",
+        "instructor": "Laura",
+        "capacity": 25,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-15-1830",
+        "starts_at": "2026-10-15T15:30:00.000Z",
+        "class_type": "Yoga",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Sanna",
+        "capacity": 15,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-15-1900",
+        "starts_at": "2026-10-15T16:00:00.000Z",
+        "class_type": "HIIT",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-16-0700",
+        "starts_at": "2026-10-16T04:00:00.000Z",
+        "class_type": "Spinning",
+        "gym": "City Centre",
+        "room": "Cycling studio",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-16-1730",
+        "starts_at": "2026-10-16T14:30:00.000Z",
+        "class_type": "Body Pump",
+        "gym": "City Centre",
+        "room": "Main hall",
+        "instructor": "Laura",
+        "capacity": 25,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-16-1830",
+        "starts_at": "2026-10-16T15:30:00.000Z",
+        "class_type": "Yoga",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Sanna",
+        "capacity": 15,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-16-1900",
+        "starts_at": "2026-10-16T16:00:00.000Z",
+        "class_type": "HIIT",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-17-1830",
+        "starts_at": "2026-10-17T15:30:00.000Z",
+        "class_type": "Yoga",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Sanna",
+        "capacity": 15,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-18-1830",
+        "starts_at": "2026-10-18T15:30:00.000Z",
+        "class_type": "Yoga",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Sanna",
+        "capacity": 15,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-19-0700",
+        "starts_at": "2026-10-19T04:00:00.000Z",
+        "class_type": "Spinning",
+        "gym": "City Centre",
+        "room": "Cycling studio",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-19-1730",
+        "starts_at": "2026-10-19T14:30:00.000Z",
+        "class_type": "Body Pump",
+        "gym": "City Centre",
+        "room": "Main hall",
+        "instructor": "Laura",
+        "capacity": 25,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-19-1830",
+        "starts_at": "2026-10-19T15:30:00.000Z",
+        "class_type": "Yoga",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Sanna",
+        "capacity": 15,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-19-1900",
+        "starts_at": "2026-10-19T16:00:00.000Z",
+        "class_type": "HIIT",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-20-0700",
+        "starts_at": "2026-10-20T04:00:00.000Z",
+        "class_type": "Spinning",
+        "gym": "City Centre",
+        "room": "Cycling studio",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-20-1730",
+        "starts_at": "2026-10-20T14:30:00.000Z",
+        "class_type": "Body Pump",
+        "gym": "City Centre",
+        "room": "Main hall",
+        "instructor": "Laura",
+        "capacity": 25,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-20-1830",
+        "starts_at": "2026-10-20T15:30:00.000Z",
+        "class_type": "Yoga",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Sanna",
+        "capacity": 15,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-20-1900",
+        "starts_at": "2026-10-20T16:00:00.000Z",
+        "class_type": "HIIT",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-21-0700",
+        "starts_at": "2026-10-21T04:00:00.000Z",
+        "class_type": "Spinning",
+        "gym": "City Centre",
+        "room": "Cycling studio",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-21-1730",
+        "starts_at": "2026-10-21T14:30:00.000Z",
+        "class_type": "Body Pump",
+        "gym": "City Centre",
+        "room": "Main hall",
+        "instructor": "Laura",
+        "capacity": 25,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-21-1830",
+        "starts_at": "2026-10-21T15:30:00.000Z",
+        "class_type": "Yoga",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Sanna",
+        "capacity": 15,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-21-1900",
+        "starts_at": "2026-10-21T16:00:00.000Z",
+        "class_type": "HIIT",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-22-0700",
+        "starts_at": "2026-10-22T04:00:00.000Z",
+        "class_type": "Spinning",
+        "gym": "City Centre",
+        "room": "Cycling studio",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-22-1730",
+        "starts_at": "2026-10-22T14:30:00.000Z",
+        "class_type": "Body Pump",
+        "gym": "City Centre",
+        "room": "Main hall",
+        "instructor": "Laura",
+        "capacity": 25,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-22-1830",
+        "starts_at": "2026-10-22T15:30:00.000Z",
+        "class_type": "Yoga",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Sanna",
+        "capacity": 15,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-22-1900",
+        "starts_at": "2026-10-22T16:00:00.000Z",
+        "class_type": "HIIT",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-23-0700",
+        "starts_at": "2026-10-23T04:00:00.000Z",
+        "class_type": "Spinning",
+        "gym": "City Centre",
+        "room": "Cycling studio",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-23-1730",
+        "starts_at": "2026-10-23T14:30:00.000Z",
+        "class_type": "Body Pump",
+        "gym": "City Centre",
+        "room": "Main hall",
+        "instructor": "Laura",
+        "capacity": 25,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-23-1830",
+        "starts_at": "2026-10-23T15:30:00.000Z",
+        "class_type": "Yoga",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Sanna",
+        "capacity": 15,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-23-1900",
+        "starts_at": "2026-10-23T16:00:00.000Z",
+        "class_type": "HIIT",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-24-1830",
+        "starts_at": "2026-10-24T15:30:00.000Z",
+        "class_type": "Yoga",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Sanna",
+        "capacity": 15,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-25-1830",
+        "starts_at": "2026-10-25T15:30:00.000Z",
+        "class_type": "Yoga",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Sanna",
+        "capacity": 15,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-26-0700",
+        "starts_at": "2026-10-26T04:00:00.000Z",
+        "class_type": "Spinning",
+        "gym": "City Centre",
+        "room": "Cycling studio",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-26-1730",
+        "starts_at": "2026-10-26T14:30:00.000Z",
+        "class_type": "Body Pump",
+        "gym": "City Centre",
+        "room": "Main hall",
+        "instructor": "Laura",
+        "capacity": 25,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-26-1830",
+        "starts_at": "2026-10-26T15:30:00.000Z",
+        "class_type": "Yoga",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Sanna",
+        "capacity": 15,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-26-1900",
+        "starts_at": "2026-10-26T16:00:00.000Z",
+        "class_type": "HIIT",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-27-0700",
+        "starts_at": "2026-10-27T04:00:00.000Z",
+        "class_type": "Spinning",
+        "gym": "City Centre",
+        "room": "Cycling studio",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-27-1730",
+        "starts_at": "2026-10-27T14:30:00.000Z",
+        "class_type": "Body Pump",
+        "gym": "City Centre",
+        "room": "Main hall",
+        "instructor": "Laura",
+        "capacity": 25,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-27-1830",
+        "starts_at": "2026-10-27T15:30:00.000Z",
+        "class_type": "Yoga",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Sanna",
+        "capacity": 15,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-27-1900",
+        "starts_at": "2026-10-27T16:00:00.000Z",
+        "class_type": "HIIT",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-28-0700",
+        "starts_at": "2026-10-28T04:00:00.000Z",
+        "class_type": "Spinning",
+        "gym": "City Centre",
+        "room": "Cycling studio",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-28-1730",
+        "starts_at": "2026-10-28T14:30:00.000Z",
+        "class_type": "Body Pump",
+        "gym": "City Centre",
+        "room": "Main hall",
+        "instructor": "Laura",
+        "capacity": 25,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-28-1830",
+        "starts_at": "2026-10-28T15:30:00.000Z",
+        "class_type": "Yoga",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Sanna",
+        "capacity": 15,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-28-1900",
+        "starts_at": "2026-10-28T16:00:00.000Z",
+        "class_type": "HIIT",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-29-0700",
+        "starts_at": "2026-10-29T04:00:00.000Z",
+        "class_type": "Spinning",
+        "gym": "City Centre",
+        "room": "Cycling studio",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-29-1730",
+        "starts_at": "2026-10-29T14:30:00.000Z",
+        "class_type": "Body Pump",
+        "gym": "City Centre",
+        "room": "Main hall",
+        "instructor": "Laura",
+        "capacity": 25,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-29-1830",
+        "starts_at": "2026-10-29T15:30:00.000Z",
+        "class_type": "Yoga",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Sanna",
+        "capacity": 15,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-29-1900",
+        "starts_at": "2026-10-29T16:00:00.000Z",
+        "class_type": "HIIT",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-30-0700",
+        "starts_at": "2026-10-30T04:00:00.000Z",
+        "class_type": "Spinning",
+        "gym": "City Centre",
+        "room": "Cycling studio",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-30-1730",
+        "starts_at": "2026-10-30T14:30:00.000Z",
+        "class_type": "Body Pump",
+        "gym": "City Centre",
+        "room": "Main hall",
+        "instructor": "Laura",
+        "capacity": 25,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-30-1830",
+        "starts_at": "2026-10-30T15:30:00.000Z",
+        "class_type": "Yoga",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Sanna",
+        "capacity": 15,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-30-1900",
+        "starts_at": "2026-10-30T16:00:00.000Z",
+        "class_type": "HIIT",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-10-31-1830",
+        "starts_at": "2026-10-31T15:30:00.000Z",
+        "class_type": "Yoga",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Sanna",
+        "capacity": 15,
+        "booked": 0
+      },
+      {
+        "id": "cls-2026-11-01-1830",
+        "starts_at": "2026-11-01T15:30:00.000Z",
+        "class_type": "Yoga",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Sanna",
+        "capacity": 15,
+        "booked": 0
+      }
+    ],
+    "bookings": [
+      {
+        "id": "bk-1",
+        "owner": "aino@dev",
+        "class": "cls-2026-10-12-1730",
+        "booking": "booked",
+        "attendance": "pending",
+        "checkin_code": ""
+      },
+      {
+        "id": "bk-2",
+        "owner": "aino@dev",
+        "class": "cls-2026-10-14-1830",
+        "booking": "booked",
+        "attendance": "pending",
+        "checkin_code": ""
+      },
+      {
+        "id": "bk-3",
+        "owner": "eero@dev",
+        "class": "cls-2026-10-12-1730",
+        "booking": "booked",
+        "attendance": "pending",
+        "checkin_code": ""
+      },
+      {
+        "id": "bk-4",
+        "owner": "eero@dev",
+        "class": "cls-2026-10-13-0700",
+        "booking": "booked",
+        "attendance": "pending",
+        "checkin_code": ""
+      },
+      {
+        "id": "bk-aino-2026-10-05-1730",
+        "owner": "aino@dev",
+        "class": "cls-2026-10-05-1730",
+        "booking": "booked",
+        "attendance": "attended",
+        "checkin_code": "K7PQM"
+      },
+      {
+        "id": "bk-aino-2026-10-06-1900",
+        "owner": "aino@dev",
+        "class": "cls-2026-10-06-1900",
+        "booking": "booked",
+        "attendance": "attended",
+        "checkin_code": "K7PQM"
+      },
+      {
+        "id": "bk-aino-2026-10-07-1830",
+        "owner": "aino@dev",
+        "class": "cls-2026-10-07-1830",
+        "booking": "booked",
+        "attendance": "attended",
+        "checkin_code": "K7PQM"
+      },
+      {
+        "id": "bk-aino-2026-10-09-1730",
+        "owner": "aino@dev",
+        "class": "cls-2026-10-09-1730",
+        "booking": "booked",
+        "attendance": "attended",
+        "checkin_code": "K7PQM"
+      },
+      {
+        "id": "bk-eero-2026-10-06-0700",
+        "owner": "eero@dev",
+        "class": "cls-2026-10-06-0700",
+        "booking": "booked",
+        "attendance": "attended",
+        "checkin_code": "K7PQM"
+      },
+      {
+        "id": "bk-eero-2026-10-08-1900",
+        "owner": "eero@dev",
+        "class": "cls-2026-10-08-1900",
+        "booking": "booked",
+        "attendance": "no_show",
+        "checkin_code": ""
+      }
+    ],
+    "visits": [
+      {
+        "id": "visit-aino-2026-10-01",
+        "owner": "aino@dev",
+        "gym": "City Centre",
+        "visited_on": "2026-10-01",
+        "at": "2026-10-01T16:30:00.000Z",
+        "door_code": "",
+        "verified": "yes"
+      },
+      {
+        "id": "visit-aino-2026-10-03",
+        "owner": "aino@dev",
+        "gym": "Harbour",
+        "visited_on": "2026-10-03",
+        "at": "2026-10-03T16:30:00.000Z",
+        "door_code": "",
+        "verified": "yes"
+      },
+      {
+        "id": "visit-aino-2026-10-06",
+        "owner": "aino@dev",
+        "gym": "City Centre",
+        "visited_on": "2026-10-06",
+        "at": "2026-10-06T16:30:00.000Z",
+        "door_code": "",
+        "verified": "yes"
+      },
+      {
+        "id": "visit-aino-2026-10-08",
+        "owner": "aino@dev",
+        "gym": "Harbour",
+        "visited_on": "2026-10-08",
+        "at": "2026-10-08T16:30:00.000Z",
+        "door_code": "",
+        "verified": "yes"
+      },
+      {
+        "id": "visit-aino-2026-10-10",
+        "owner": "aino@dev",
+        "gym": "City Centre",
+        "visited_on": "2026-10-10",
+        "at": "2026-10-10T16:30:00.000Z",
+        "door_code": "",
+        "verified": "yes"
+      },
+      {
+        "id": "visit-eero-2026-10-02",
+        "owner": "eero@dev",
+        "gym": "City Centre",
+        "visited_on": "2026-10-02",
+        "at": "2026-10-02T16:30:00.000Z",
+        "door_code": "",
+        "verified": "yes"
+      },
+      {
+        "id": "visit-eero-2026-10-07",
+        "owner": "eero@dev",
+        "gym": "Harbour",
+        "visited_on": "2026-10-07",
+        "at": "2026-10-07T16:30:00.000Z",
+        "door_code": "",
+        "verified": "yes"
+      },
+      {
+        "id": "visit-eero-2026-10-09",
+        "owner": "eero@dev",
+        "gym": "City Centre",
+        "visited_on": "2026-10-09",
+        "at": "2026-10-09T16:30:00.000Z",
+        "door_code": "",
+        "verified": "yes"
+      }
+    ],
+    "workouts": [
+      {
+        "id": "wo-aino-2026-09-22-squat",
+        "owner": "aino@dev",
+        "done_on": "2026-09-22",
+        "exercise": "Squat",
+        "sets": 4,
+        "reps": 8,
+        "weight_kg": 55,
+        "minutes": 15,
+        "km": "",
+        "note": ""
+      },
+      {
+        "id": "wo-aino-2026-09-24-treadmill",
+        "owner": "aino@dev",
+        "done_on": "2026-09-24",
+        "exercise": "Treadmill",
+        "sets": "",
+        "reps": "",
+        "weight_kg": "",
+        "minutes": 30,
+        "km": 5,
+        "note": ""
+      },
+      {
+        "id": "wo-aino-2026-09-29-deadlift",
+        "owner": "aino@dev",
+        "done_on": "2026-09-29",
+        "exercise": "Deadlift",
+        "sets": 3,
+        "reps": 5,
+        "weight_kg": 75,
+        "minutes": 15,
+        "km": "",
+        "note": ""
+      },
+      {
+        "id": "wo-aino-2026-10-01-rowing-machine",
+        "owner": "aino@dev",
+        "done_on": "2026-10-01",
+        "exercise": "Rowing machine",
+        "sets": "",
+        "reps": "",
+        "weight_kg": "",
+        "minutes": 25,
+        "km": 4.5,
+        "note": ""
+      },
+      {
+        "id": "wo-aino-2026-10-06-squat",
+        "owner": "aino@dev",
+        "done_on": "2026-10-06",
+        "exercise": "Squat",
+        "sets": 4,
+        "reps": 8,
+        "weight_kg": 60,
+        "minutes": 15,
+        "km": "",
+        "note": ""
+      },
+      {
+        "id": "wo-aino-2026-10-06-rowing-machine",
+        "owner": "aino@dev",
+        "done_on": "2026-10-06",
+        "exercise": "Rowing machine",
+        "sets": "",
+        "reps": "",
+        "weight_kg": "",
+        "minutes": 20,
+        "km": 3.5,
+        "note": ""
+      },
+      {
+        "id": "wo-aino-2026-10-08-deadlift",
+        "owner": "aino@dev",
+        "done_on": "2026-10-08",
+        "exercise": "Deadlift",
+        "sets": 3,
+        "reps": 5,
+        "weight_kg": 80,
+        "minutes": 15,
+        "km": "",
+        "note": ""
+      },
+      {
+        "id": "wo-aino-2026-10-10-bench-press",
+        "owner": "aino@dev",
+        "done_on": "2026-10-10",
+        "exercise": "Bench press",
+        "sets": 4,
+        "reps": 8,
+        "weight_kg": 40,
+        "minutes": 15,
+        "km": "",
+        "note": ""
+      },
+      {
+        "id": "wo-aino-2026-10-10-treadmill",
+        "owner": "aino@dev",
+        "done_on": "2026-10-10",
+        "exercise": "Treadmill",
+        "sets": "",
+        "reps": "",
+        "weight_kg": "",
+        "minutes": 25,
+        "km": 4.2,
+        "note": ""
+      },
+      {
+        "id": "wo-aino-2026-10-12-squat",
+        "owner": "aino@dev",
+        "done_on": "2026-10-12",
+        "exercise": "Squat",
+        "sets": 5,
+        "reps": 5,
+        "weight_kg": 65,
+        "minutes": 20,
+        "km": "",
+        "note": ""
+      },
+      {
+        "id": "wo-eero-2026-10-07-pull-up",
+        "owner": "eero@dev",
+        "done_on": "2026-10-07",
+        "exercise": "Pull-up",
+        "sets": 4,
+        "reps": 6,
+        "weight_kg": "",
+        "minutes": 10,
+        "km": "",
+        "note": ""
+      },
+      {
+        "id": "wo-eero-2026-10-09-overhead-press",
+        "owner": "eero@dev",
+        "done_on": "2026-10-09",
+        "exercise": "Overhead press",
+        "sets": 4,
+        "reps": 8,
+        "weight_kg": 35,
+        "minutes": 15,
+        "km": "",
+        "note": ""
+      }
+    ],
+    "steps": [
+      {
+        "id": "steps-aino-2026-10-06",
+        "owner": "aino@dev",
+        "day": "2026-10-06",
+        "step_count": 8200
+      },
+      {
+        "id": "steps-aino-2026-10-07",
+        "owner": "aino@dev",
+        "day": "2026-10-07",
+        "step_count": 11400
+      },
+      {
+        "id": "steps-aino-2026-10-08",
+        "owner": "aino@dev",
+        "day": "2026-10-08",
+        "step_count": 6900
+      },
+      {
+        "id": "steps-aino-2026-10-09",
+        "owner": "aino@dev",
+        "day": "2026-10-09",
+        "step_count": 12100
+      },
+      {
+        "id": "steps-aino-2026-10-10",
+        "owner": "aino@dev",
+        "day": "2026-10-10",
+        "step_count": 9800
+      },
+      {
+        "id": "steps-aino-2026-10-11",
+        "owner": "aino@dev",
+        "day": "2026-10-11",
+        "step_count": 4300
+      },
+      {
+        "id": "steps-aino-2026-10-12",
+        "owner": "aino@dev",
+        "day": "2026-10-12",
+        "step_count": 7600
+      }
+    ],
+    "memberships": [
+      {
+        "id": "ms-aino-1",
+        "owner": "aino@dev",
+        "plan": "12 months",
+        "start_on": "2026-01-15",
+        "order_state": "submitted",
+        "membership_status": "active"
+      },
+      {
+        "id": "ms-eero-1",
+        "owner": "eero@dev",
+        "plan": "Monthly",
+        "start_on": "2026-10-20",
+        "order_state": "submitted",
+        "membership_status": "pending"
+      }
+    ],
+    "pt_sessions": [
+      {
+        "id": "pt-aino-1",
+        "owner": "aino@dev",
+        "trainer": "Laura",
+        "preferred_on": "2026-10-21",
+        "goal": "Deadlift technique",
+        "pt_status": "confirmed",
+        "trainer_notes": "Bring lifting shoes"
+      },
+      {
+        "id": "pt-eero-1",
+        "owner": "eero@dev",
+        "trainer": "Mikko",
+        "preferred_on": "2026-10-23",
+        "goal": "A programme to start with",
+        "pt_status": "requested",
+        "trainer_notes": ""
+      }
+    ],
+    "news": [
+      {
+        "id": "news-1",
+        "published_on": "2026-10-05",
+        "headline": "New spinning bikes at City Centre",
+        "body": "Twenty new bikes with power meters arrive this week.",
+        "picture": ""
+      },
+      {
+        "id": "news-2",
+        "published_on": "2026-10-09",
+        "headline": "Harbour opens at 6 on weekdays",
+        "body": "From November, Harbour opens an hour earlier on weekdays.",
+        "picture": ""
+      }
+    ],
+    "coach_library": [
+      {
+        "id": "coach-mobility-in-15",
+        "title": "Mobility in 15",
+        "format": "Workout",
+        "category": "Mobility",
+        "level": "Beginner",
+        "minutes": 15,
+        "weeks": "",
+        "equipment": "Mat",
+        "video": "https://example.com/coach/mobility-in-15",
+        "thumbnail": ""
+      },
+      {
+        "id": "coach-core-burner",
+        "title": "Core burner",
+        "format": "Workout",
+        "category": "Strength",
+        "level": "Intermediate",
+        "minutes": 20,
+        "weeks": "",
+        "equipment": "Mat",
+        "video": "https://example.com/coach/core-burner",
+        "thumbnail": ""
+      },
+      {
+        "id": "coach-kettlebell-basics",
+        "title": "Kettlebell basics",
+        "format": "Workout",
+        "category": "Strength",
+        "level": "Beginner",
+        "minutes": 25,
+        "weeks": "",
+        "equipment": "Kettlebell",
+        "video": "https://example.com/coach/kettlebell-basics",
+        "thumbnail": ""
+      },
+      {
+        "id": "coach-tabata-sprint",
+        "title": "Tabata sprint",
+        "format": "Workout",
+        "category": "Cardio",
+        "level": "Advanced",
+        "minutes": 20,
+        "weeks": "",
+        "equipment": "Treadmill",
+        "video": "https://example.com/coach/tabata-sprint",
+        "thumbnail": ""
+      },
+      {
+        "id": "coach-evening-stretch",
+        "title": "Evening stretch",
+        "format": "Workout",
+        "category": "Yoga",
+        "level": "Beginner",
+        "minutes": 30,
+        "weeks": "",
+        "equipment": "Mat",
+        "video": "https://example.com/coach/evening-stretch",
+        "thumbnail": ""
+      },
+      {
+        "id": "coach-strong-glutes",
+        "title": "Strong glutes",
+        "format": "Programme",
+        "category": "Strength",
+        "level": "Intermediate",
+        "minutes": 60,
+        "weeks": 6,
+        "equipment": "Barbell, cable machine",
+        "video": "https://example.com/coach/strong-glutes",
+        "thumbnail": ""
+      },
+      {
+        "id": "coach-first-4-weeks-at-the-gym",
+        "title": "First 4 weeks at the gym",
+        "format": "Programme",
+        "category": "Strength",
+        "level": "Beginner",
+        "minutes": 45,
+        "weeks": 4,
+        "equipment": "Machines",
+        "video": "https://example.com/coach/first-4-weeks-at-the-gym",
+        "thumbnail": ""
+      }
+    ]
+  },
+  "config": {}
+}

@@ -91,8 +91,8 @@ describe('views that declare what they need', () => {
   // through what it injects, so another host can mount it by providing the same object. The calendar
   // and rotation families, the shared UI elements and the read-only views are converted; calendar-screen
   // and rotation-screen, the app's own top-level screens, deliberately are not.
-  const DECLARED = ['cal-event-row', 'cal-month', 'cal-week', 'cal-agenda', 'cal-day-panel', 'calendar-view',
-    'copy-field', 'confirm-x', 'confirm-btn', 'section-toggle',
+  const DECLARED = ['cal-event-row', 'cal-month', 'cal-week', 'cal-year', 'cal-agenda', 'cal-day-panel', 'calendar-view',
+    'copy-field', 'confirm-x', 'confirm-btn', 'section-toggle', 'count-stepper', 'pick-filters',
     'list-value', 'user-avatar', 'user-ref', 'pivot-view', 'timeline-view', 'stats-view',
     'rotation-table', 'rotation-cards', 'rotation-list', 'rotation-view', 'data-gallery'];
   function ownSource(name) {

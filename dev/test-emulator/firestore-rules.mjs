@@ -9,7 +9,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { initializeTestEnvironment, assertSucceeds, assertFails } from '@firebase/rules-unit-testing';
-import { doc, getDoc, setDoc, deleteDoc, collection, getDocs, query, where } from 'firebase/firestore';
+import { doc, getDoc, setDoc, deleteDoc, collection, getDocs, query, where, writeBatch } from 'firebase/firestore';
 
 const rulesPath = fileURLToPath(new URL('../../firestore.rules', import.meta.url));
 const testEnv = await initializeTestEnvironment({
@@ -27,9 +27,9 @@ await testEnv.withSecurityRulesDisabled(async (ctx) => {
   });
 });
 
-const viewer = testEnv.authenticatedContext('viewer-uid', { email: 'viewer@x.com' }).firestore();
-const editor = testEnv.authenticatedContext('editor-uid', { email: 'editor@x.com' }).firestore();
-const admin = testEnv.authenticatedContext('admin-uid', { email: 'admin@x.com' }).firestore();
+const viewer = testEnv.authenticatedContext('viewer-uid', { email: 'viewer@x.com', email_verified: true }).firestore();
+const editor = testEnv.authenticatedContext('editor-uid', { email: 'editor@x.com', email_verified: true }).firestore();
+const admin = testEnv.authenticatedContext('admin-uid', { email: 'admin@x.com', email_verified: true }).firestore();
 
 let passed = 0;
 const ok = async (label, p) => { await p; console.log('  ✓', label); passed++; };
@@ -64,6 +64,14 @@ await testEnv.withSecurityRulesDisabled(async (ctx) => {
 });
 await ok('viewer CAN create their own row in a self-service (owner-column) table',
   assertSucceeds(setDoc(doc(viewer, 'rsvps__active/mine'), { id: 'mine', owner: 'viewer@x.com', status: 'coming' })));
+await testEnv.withSecurityRulesDisabled(async (ctx) => {
+  await setDoc(doc(ctx.firestore(), '_lists/rsvp_status'), { name: 'rsvp_status', items: ['coming'], tables: ['rsvps'] });
+  await setDoc(doc(ctx.firestore(), '_lists/task_tags'), { name: 'task_tags', items: ['x'], tables: ['tasks'] });
+});
+await ok('viewer with no grant CAN read a list owned by a self-service table (its status vocabulary)',
+  assertSucceeds(getDoc(doc(viewer, '_lists/rsvp_status'))));
+await ok('viewer with no grant CANNOT read a list owned only by a granted table',
+  assertFails(getDoc(doc(viewer, '_lists/task_tags'))));
 await ok('viewer CANNOT owner-inject into a non-self-service table (the #3 fix)',
   assertFails(setDoc(doc(viewer, 'tasks__active/spam'), { id: 'spam', owner: 'viewer@x.com', title: 'junk' })));
 // --- _profiles shape validation (display names feed user-backed lists / roster). ---
@@ -160,7 +168,7 @@ await ok('owner CANNOT delete an owner-stamped row in a non-self-service table',
   assertFails(deleteDoc(doc(viewer, 'tasks__active/stray'))));
 
 // --- _access_requests shape validation (self-create only; these render in the admin approval UI). ---
-const stranger = testEnv.authenticatedContext('s-uid', { email: 'stranger@x.com' }).firestore();
+const stranger = testEnv.authenticatedContext('s-uid', { email: 'stranger@x.com', email_verified: true }).firestore();
 await ok('well-formed access request is allowed',
   assertSucceeds(setDoc(doc(stranger, '_access_requests/stranger@x.com'), { email: 'stranger@x.com', name: 'Sam', note: 'hi', ts: Date.now() })));
 await ok('oversized request note is denied',
@@ -227,8 +235,8 @@ await testEnv.withSecurityRulesDisabled(async (ctx) => {
   await setDoc(doc(db, 'refdata__active/ref1'), { id: 'ref1', label: 'points' });
   await setDoc(doc(db, 'tasks__active/t1'), { id: 't1', title: 'a task' });
 });
-const mixed = testEnv.authenticatedContext('mixed-uid', { email: 'mixed@x.com' }).firestore();
-const premig = testEnv.authenticatedContext('premig-uid', { email: 'premigration@x.com' }).firestore();
+const mixed = testEnv.authenticatedContext('mixed-uid', { email: 'mixed@x.com', email_verified: true }).firestore();
+const premig = testEnv.authenticatedContext('premig-uid', { email: 'premigration@x.com', email_verified: true }).firestore();
 
 await ok("map grant: 'r' table is READABLE",
   assertSucceeds(getDoc(doc(mixed, 'refdata__active/ref1'))));
@@ -289,7 +297,7 @@ await testEnv.withSecurityRulesDisabled(async (ctx) => {
   });
   await setDoc(doc(db, 'chore_log__active/sib'), { id: 'sib', owner: 'other@x.com', chore: 'dishes' });
 });
-const kid = testEnv.authenticatedContext('kid-uid', { email: 'kid@x.com' }).firestore();
+const kid = testEnv.authenticatedContext('kid-uid', { email: 'kid@x.com', email_verified: true }).firestore();
 await ok("read-only grant on an owner table: CAN read a sibling's row (shared leaderboard)",
   assertSucceeds(getDoc(doc(kid, 'chore_log__active/sib'))));
 await ok('read-only grant on an owner table: CAN create my own owner-stamped row',
@@ -470,7 +478,7 @@ await testEnv.withSecurityRulesDisabled(async (ctx) => {
   await setDoc(doc(db, '_users/keeper@x.com'),
     { role: 'editor', user: 'keeper@x.com', tables: { claims: 'rw' }, rwTables: ['claims'] });
 });
-const keeper = testEnv.authenticatedContext('keeper-uid', { email: 'keeper@x.com' }).firestore();
+const keeper = testEnv.authenticatedContext('keeper-uid', { email: 'keeper@x.com', email_verified: true }).firestore();
 
 await ok('owner CAN create their own row with no _status',
   assertSucceeds(setDoc(doc(viewer, 'claims__active/st_new'),
@@ -545,5 +553,111 @@ await ok('an ADMIN can still correct a wrong stamp',
 await ok('a table absent from the mirror is unbounded (opt-in)',
   assertSucceeds(setDoc(doc(viewer, 'plainlist__active/free'), { id: 'free', added_by: 'Whoever' })));
 
+// --- Capacity: a response that takes a place travels with the event's count, in one batch. ---
+await testEnv.withSecurityRulesDisabled(async (ctx) => {
+  const db = ctx.firestore();
+  const ot = (await getDoc(doc(db, '_meta/ownerTables'))).data().tables;
+  await setDoc(doc(db, '_meta/ownerTables'), { tables: ot.concat(['gbookings']), capacity: {
+    responses: { gbookings: { events: 'gclasses', link: 'class', status: 'booking', capacity: 'capacity', count: 'booked', holds: ['booked'] } },
+    events: { gclasses: 'gbookings' }
+  } });
+  await setDoc(doc(db, 'gclasses__active/c1'), { id: 'c1', capacity: 1, booked: 0 });
+});
+const bk = (who, id, status) => ({ id, owner: who, class: 'c1', booking: status, rosterPublic: false });
+const book = (db, who, id, status, booked) => {
+  const b = writeBatch(db);
+  b.set(doc(db, 'gbookings__active/' + id), bk(who, id, status));
+  if (booked !== undefined) b.set(doc(db, 'gclasses__active/c1'), { booked, lastBooking: id }, { merge: true });
+  return b.commit();
+};
+const batch = (db, fill) => { const b = writeBatch(db); fill(b); return b.commit(); };
+await ok('capacity: a member books with the count moved by one in the same batch',
+  assertSucceeds(book(viewer, 'viewer@x.com', 'b1', 'booked', 1)));
+await ok('capacity: a booking WITHOUT the count moving is refused',
+  assertFails(book(editor, 'editor@x.com', 'b2', 'booked')));
+await ok('capacity: a booking that moves the count past the limit is refused',
+  assertFails(book(editor, 'editor@x.com', 'b2', 'booked', 2)));
+await ok('capacity: moving the count with no booking of mine behind it is refused',
+  assertFails(setDoc(doc(editor, 'gclasses__active/c1'), { booked: 0, lastBooking: 'b1' }, { merge: true })));
+await ok('capacity: a status that holds no place needs no count',
+  assertSucceeds(book(editor, 'editor@x.com', 'b2', 'maybe')));
+await ok('capacity: cancelling without giving the place back is refused',
+  assertFails(deleteDoc(doc(viewer, 'gbookings__active/b1'))));
+await ok('capacity: cancelling with the count moved back down succeeds',
+  assertSucceeds(batch(viewer, (b) => { b.delete(doc(viewer, 'gbookings__active/b1')); b.set(doc(viewer, 'gclasses__active/c1'), { booked: 0, lastBooking: 'b1' }, { merge: true }); })));
+await ok('capacity: switching to a status that holds a place takes the freed one',
+  assertSucceeds(batch(editor, (b) => { b.set(doc(editor, 'gbookings__active/b2'), { booking: 'booked' }, { merge: true }); b.set(doc(editor, 'gclasses__active/c1'), { booked: 1, lastBooking: 'b2' }, { merge: true }); })));
+await ok('capacity: two bookings cannot share one increment',
+  assertFails(batch(viewer, (b) => {
+    b.set(doc(viewer, 'gbookings__active/b3'), bk('viewer@x.com', 'b3', 'booked'));
+    b.set(doc(viewer, 'gbookings__active/b4'), bk('viewer@x.com', 'b4', 'booked'));
+    b.set(doc(viewer, 'gclasses__active/c1'), { booked: 2, lastBooking: 'b3' }, { merge: true });
+  })));
+await ok('capacity: a member may not touch any other field of the event',
+  assertFails(setDoc(doc(viewer, 'gclasses__active/c1'), { capacity: 99 }, { merge: true })));
+
+
+// --- Capacity with walk-ins (`reserved`): places taken on the event row, not by responses. ---
+await testEnv.withSecurityRulesDisabled(async (ctx) => {
+  const db = ctx.firestore();
+  const m = (await getDoc(doc(db, '_meta/ownerTables'))).data();
+  m.capacity.responses.gbookings.reserved = 'walk_ins';
+  await setDoc(doc(db, '_meta/ownerTables'), m);
+  await setDoc(doc(db, 'gclasses__active/c2'), { id: 'c2', capacity: 2, booked: 0, walk_ins: 1 });
+});
+const bookC2 = (db, who, id, booked) => batch(db, (b) => {
+  b.set(doc(db, 'gbookings__active/' + id), { id, owner: who, class: 'c2', booking: 'booked', rosterPublic: false });
+  b.set(doc(db, 'gclasses__active/c2'), { booked, lastBooking: id }, { merge: true });
+});
+await ok('capacity + walk-ins: a booking into the place the walk-ins left succeeds',
+  assertSucceeds(bookC2(viewer, 'viewer@x.com', 'w1', 1)));
+await ok('capacity + walk-ins: a booking the walk-ins leave no room for is refused',
+  assertFails(bookC2(editor, 'editor@x.com', 'w2', 2)));
+
+// --- Public tables and open sign-up: a visitor reads the public tables, the lists they name, the schema
+// and the translations -- nothing else; a signed-in stranger may write their own /_users record, exactly
+// the mirrored grant. ---
+await testEnv.withSecurityRulesDisabled(async (ctx) => {
+  const db = ctx.firestore();
+  const m = (await getDoc(doc(db, '_meta/ownerTables'))).data();
+  m.public = { tables: ['gclasses'], lists: ['coaches'] };
+  m.signup = { role: 'viewer', tables: { gclasses: 'r' }, rwTables: [] };
+  await setDoc(doc(db, '_meta/ownerTables'), m);
+  await setDoc(doc(db, '_meta/schema'), { tables: {} });
+  await setDoc(doc(db, '_meta/config'), { feeds: { secret: 'link' } });
+  await setDoc(doc(db, '_lists/coaches'), { name: 'coaches', items: ['Kim'], tables: ['gclasses'] });
+  await setDoc(doc(db, '_lists/hidden'), { name: 'hidden', items: ['x'], tables: ['nope'] });
+  await setDoc(doc(db, 'secrets__active/s1'), { id: 's1', note: 'hush' });
+});
+const visitor = testEnv.unauthenticatedContext().firestore();
+await ok('public: a visitor reads a public table', assertSucceeds(getDoc(doc(visitor, 'gclasses__active/c1'))));
+await ok('public: a visitor reads the schema', assertSucceeds(getDoc(doc(visitor, '_meta/schema'))));
+await ok('public: a visitor reads a list a public table names', assertSucceeds(getDoc(doc(visitor, '_lists/coaches'))));
+await ok('public: a visitor may not read the config', assertFails(getDoc(doc(visitor, '_meta/config'))));
+await ok('public: a visitor may not read another list', assertFails(getDoc(doc(visitor, '_lists/hidden'))));
+await ok('public: a visitor may not read a table that is not public', assertFails(getDoc(doc(visitor, 'secrets__active/s1'))));
+await ok('public: a visitor may not write a public table', assertFails(setDoc(doc(visitor, 'gclasses__active/c9'), { id: 'c9' })));
+const newbie = testEnv.authenticatedContext('newbie-uid', { email: 'newbie@x.com', email_verified: true }).firestore();
+await ok('signup: a stranger may not take more than the grant',
+  assertFails(setDoc(doc(newbie, '_users/newbie@x.com'), { role: 'admin', user: 'newbie@x.com', tables: 'all' })));
+await ok('signup: a stranger may not sign up someone else',
+  assertFails(setDoc(doc(newbie, '_users/victim@x.com'), { role: 'viewer', user: 'victim@x.com', tables: { gclasses: 'r' }, rwTables: [] })));
+await ok('signup: a stranger writes their own record with exactly the grant',
+  assertSucceeds(setDoc(doc(newbie, '_users/newbie@x.com'), { role: 'viewer', user: 'newbie@x.com', tables: { gclasses: 'r' }, rwTables: [] })));
+await ok('signup: and may not then raise it',
+  assertFails(setDoc(doc(newbie, '_users/newbie@x.com'), { role: 'admin', user: 'newbie@x.com', tables: 'all' })));
+
+// --- An UNVERIFIED email counts for nothing: a token claiming the admin's address (email + password with
+// verification off, say) is a visitor, not the admin. ---
+const impostor = testEnv.authenticatedContext('imp-uid', { email: 'admin@x.com', email_verified: false }).firestore();
+const unflagged = testEnv.authenticatedContext('unf-uid', { email: 'admin@x.com' }).firestore();
+await ok('unverified: the admin address without verification cannot read a granted table',
+  assertFails(getDoc(doc(impostor, 'tasks__active/t1'))));
+await ok('unverified: nor write one', assertFails(setDoc(doc(impostor, 'tasks__active/imp'), { id: 'imp', title: 'x' })));
+await ok('unverified: nor read the users registry', assertFails(getDoc(doc(impostor, '_meta/users'))));
+await ok('unverified: a token with no verification flag at all is treated the same',
+  assertFails(getDoc(doc(unflagged, 'tasks__active/t1'))));
+await ok('unverified: but reads a public table like any visitor',
+  assertSucceeds(getDoc(doc(impostor, 'gclasses__active/c1'))));
 await testEnv.cleanup();
 console.log(`\nFIRESTORE RULES OK — ${passed} checks passed`);

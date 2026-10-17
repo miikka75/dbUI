@@ -527,6 +527,40 @@ describe('Grant modes (r / rw) across the three stored shapes', () => {
     assert.equal(BH.userGrantDoc('k@x', 'editor', 'k@x', null).tables, 'all');
   });
 
+  // REGRESSION: clearing the edit row resolved straight to 'all' before the view row was merged in, so
+  // "read the catalogue, write nothing" saved as full access and the view chips vanished. Runs the
+  // shipped updateUserTables -> _resolveTableSelection -> _saveGrants chain on a draft row.
+  describe('updateUserTables: an empty edit row keeps the view-only grants', () => {
+    const { appCoreFn } = require('./app-core-fn');
+    const deps = {
+      SCHEMA: schema, VIEWS: views,
+      grantFeatures: () => AF.grantFeatures(schema, views),
+      selectedFeatures: (list) => AF.selectedFeatures(list, schema, views)
+    };
+    const save = (tables, selected) => {
+      const draft = { key: '_new_1', role: 'editor', tables: tables, draft: true };
+      const ctx = {
+        _userDraft: () => draft,
+        _resolveTableSelection: appCoreFn('_resolveTableSelection', deps),
+        _saveGrants: appCoreFn('_saveGrants', deps),
+        userFeatures: appCoreFn('userFeatures', deps),
+        userViewFeatures: appCoreFn('userViewFeatures', deps)
+      };
+      appCoreFn('updateUserTables', deps).call(ctx, draft, selected);
+      return draft.tables;
+    };
+
+    it('removing the last edit chip leaves the read-only grant', () => {
+      assert.deepEqual(save({ chores: 'rw', catalogue: 'r' }, []), { catalogue: 'r' });
+    });
+    it('with no view grants either, an empty edit row is still unrestricted', () => {
+      assert.equal(save({ chores: 'rw' }, []), 'all');
+    });
+    it("un-ticking 'All' on a full-access user stays on 'all'", () => {
+      assert.equal(save('all', []), 'all');
+    });
+  });
+
   it('the chore-app shape: read the catalogue, self-serve the log', () => {
     // A member granted 'r' on reference data and nothing on the owner-column table they log into.
     const grant = { catalogue: 'r' };

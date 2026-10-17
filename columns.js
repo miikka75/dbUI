@@ -57,14 +57,17 @@
   // `multiselect` is here despite being legacy (migration v3 rewrites it to select + multiple): the
   // migration is idempotent and runs at load, but a schema on disk may still spell it, and rejecting
   // what the migration accepts would fail the document before it got the chance to be upgraded.
-  var COLUMN_TYPES = ['text', 'number', 'date', 'select', 'multiselect', 'ref', 'url', 'image', 'owner'];
+  var COLUMN_TYPES = ['text', 'number', 'date', 'datetime', 'select', 'multiselect', 'ref', 'url', 'image', 'owner'];
   var COLUMN_KEYS = [
     'name', 'type', 'hidden',                                   // identity + display
-    'list', 'listSwitch', 'allowNew', 'sorted', 'picker',        // list-backed columns
-    'table', 'valueCol', 'filterBy',                             // ref columns
+    'list', 'listSwitch', 'allowNew', 'sorted', 'picker', 'listFilter', // list-backed columns
+    'table', 'valueCol', 'filterBy', 'label',                    // ref columns
     'multiple',                                                  // cardinality (composes with select AND ref)
     'default', 'defaultFrom', 'stamped',                         // what a new row starts with, and who may rewrite it
-    'syncFrom'                                                   // mirror columns
+    'syncFrom',                                                  // mirror columns
+    'computed',                                                  // derived on read, never stored
+    'scale',                                                     // multiplies a computed column's number (-1 subtracts it in a total)
+    'enabledWhen'                                                // which options a picker lets you choose
   ];
 
   // Every way a column def can be wrong ABOUT ITSELF, as a list of messages. Pure over the tables map
@@ -91,9 +94,95 @@
                         '" — nothing reads it, so it does nothing (see SCHEMA.md, "column properties")');
           }
         });
+        // `label` on a ref: the referenced table's columns an option and a cell show instead of the raw value.
+        if (d.label != null) {
+          var lat = 'table "' + t + '": column "' + c + '" `label`';
+          if (d.type !== 'ref' || !tables[d.table]) errors.push(lat + ' applies only to a `ref` column');
+          else if (!Array.isArray(d.label) || !d.label.length) errors.push(lat + ' must be a list of columns of "' + d.table + '"');
+          else { var labCols = columnDefs(tables[d.table]); d.label.forEach(function(k) { if (!labCols[k]) errors.push(lat + ' names "' + k + '", which is not a column of "' + d.table + '"'); }); }
+        }
+        // `listFilter` narrows which rows of a lookup-backed `list:` the picker offers. It means nothing on any
+        // other column, and a condition naming a column the lookup lacks would empty the picker silently.
+        if (d.listFilter != null) {
+          var lk = d.list && tables[d.list];
+          var at = 'table "' + t + '": column "' + c + '" `listFilter`';
+          if (!d.listFilter || typeof d.listFilter !== 'object' || Array.isArray(d.listFilter)) errors.push(at + ' must be a condition object, like { "kind": "position" }');
+          else if (d.type === 'ref' && tables[d.table]) {
+            var rcols = columnDefs(tables[d.table]);
+            conditionColumns(d.listFilter).forEach(function(k) {
+              if (!rcols[k] && k !== 'id') errors.push(at + ' names "' + k + '", which is not a column of "' + d.table + '"');
+            });
+          }
+          else if (!lk || !lk.isLookup) errors.push(at + ' applies only to a column whose `list` names a lookup table, or to a `ref` — it narrows which of its rows are offered');
+          else {
+            var lcols = columnDefs(lk);
+            conditionColumns(d.listFilter).forEach(function(k) {
+              if (!lcols[k]) errors.push(at + ' names "' + k + '", which is not a column of the lookup "' + d.list + '"');
+            });
+          }
+        }
       }
     }
     return errors;
+  }
+
+  // THE PICKER: how a column's value is chosen. One word everywhere a choice is made -- a column's
+  // `picker`, an rsvp's `picker` -- with `dropdown` the default. Every widget but the dropdown shows ALL
+  // its options at once, so each needs a single value chosen from a set: a list or a ref, not `multiple`
+  // (already chips) and not `allowNew` (which needs typing). `cards` also needs a catalogue row behind
+  // each option to show, so it takes a ref -- or a list that names a lookup table.
+  var PICKERS = ['dropdown', 'chips', 'toggle', 'cards'];
+  function pickerErrors(tables) {
+    var errors = [];
+    for (var t in (tables || {})) {
+      var defs = columnDefs(tables[t]);
+      for (var c in defs) {
+        var d = defs[c];
+        if (!d || typeof d !== 'object' || d.picker === undefined) continue;
+        var at = 'table "' + t + '": column "' + c + '" `picker` ', p = d.picker;
+        if (PICKERS.indexOf(p) < 0) { errors.push(at + 'is "' + p + '" — use ' + PICKERS.join(', ')); continue; }
+        if (p === 'dropdown') continue;
+        var isRef = d.type === 'ref', isList = !!d.list && d.type !== 'ref';
+        if (!isRef && !isList) errors.push(at + '"' + p + '" needs a column with options — a `list` or a `ref`');
+        else if (d.multiple || d.type === 'multiselect') errors.push(at + '"' + p + '" picks one value; a `multiple` column is already chips');
+        else if (d.allowNew) errors.push(at + '"' + p + '" shows a fixed set; `allowNew` needs a field to type a new value into');
+        else if (p === 'cards' && isList && !(tables[d.list] && tables[d.list].isLookup)) errors.push(at + '"cards" shows each option\'s catalogue row — a `ref`, or a `list` naming a lookup table; "' + d.list + '" is a plain list');
+      }
+    }
+    return errors;
+  }
+  // `enabledWhen`: which options may be chosen, as a condition over each option's catalogue row. Needs a
+  // catalogue to read -- a ref, or a list naming a lookup -- or every option would be judged on nothing.
+  function enabledWhenErrors(tables) {
+    var errors = [];
+    for (var t in (tables || {})) {
+      var defs = columnDefs(tables[t]);
+      for (var c in defs) {
+        var d = defs[c];
+        if (!d || typeof d !== 'object' || d.enabledWhen === undefined) continue;
+        var at = 'table "' + t + '": column "' + c + '" `enabledWhen` ';
+        if (!d.enabledWhen || typeof d.enabledWhen !== 'object' || Array.isArray(d.enabledWhen)) { errors.push(at + 'must be a condition object'); continue; }
+        var cat = d.type === 'ref' ? d.table : (d.list && tables[d.list] && tables[d.list].isLookup ? d.list : null);
+        if (!cat || !tables[cat]) { errors.push(at + 'needs a catalogue to judge each option by — a `ref`, or a `list` naming a lookup table'); continue; }
+        var lcols = columnDefs(tables[cat]);
+        conditionColumns(d.enabledWhen).forEach(function(k) { if (!lcols[k]) errors.push(at + 'names "' + k + '", which is not a column of "' + cat + '"'); });
+      }
+    }
+    return errors;
+  }
+
+  // The columns a condition reads, through $and / $or / $not.
+  function conditionColumns(cond) {
+    var out = [];
+    (function walk(c) {
+      if (Array.isArray(c)) { c.forEach(walk); return; }
+      if (!c || typeof c !== 'object') return;
+      Object.keys(c).forEach(function(k) {
+        if (k === '$and' || k === '$or' || k === '$not') walk(c[k]);
+        else if (out.indexOf(k) < 0) out.push(k);
+      });
+    })(cond);
+    return out;
   }
 
   function columnType(schema, table, col) {
@@ -283,10 +372,11 @@
     for (var t in schema) {
       var cols = (schema[t] && schema[t].columns) || {};
       for (var c in cols) {
-        var e = info[c] || (info[c] = { list: null, listValueCol: null, listSwitch: null, multiselect: false, ref: false, refDef: null, date: false, allowNew: false, sorted: false, image: false, url: false, number: false, picker: null });
+        var e = info[c] || (info[c] = { list: null, listValueCol: null, listFilter: null, listSwitch: null, multiselect: false, ref: false, refDef: null, date: false, datetime: false, allowNew: false, sorted: false, image: false, url: false, number: false, picker: null });
         var typ = columnType(schema, t, c), d = cols[c];
         if (typ === 'multiselect') e.multiselect = true;
         if (typ === 'date') e.date = true;
+        if (typ === 'datetime') e.datetime = true;
         if (typ === 'image') e.image = true;
         if (typ === 'url') e.url = true;
         if (typ === 'number') e.number = true;
@@ -309,6 +399,7 @@
           // already a legal key on any column -- it simply had no reader, so a select over a
           // multi-dimensional catalogue was stuck with whichever dimension lookupListValues defaults to.
           if (e.listValueCol == null && d.list && d.valueCol) e.listValueCol = d.valueCol;
+          if (e.listFilter == null && (d.list || d.type === 'ref') && d.listFilter) e.listFilter = d.listFilter;   // a ref narrows its rows the same way
           if (e.listSwitch == null && d.listSwitch) e.listSwitch = d.listSwitch;
           if (d.allowNew) e.allowNew = true;
           if (d.sorted) e.sorted = true;
@@ -318,7 +409,7 @@
     }
     return info;
   }
-  var _EMPTY = { list: null, listValueCol: null, listSwitch: null, multiselect: false, ref: false, refDef: null, date: false, allowNew: false, sorted: false, image: false, url: false, number: false, picker: null };
+  var _EMPTY = { list: null, listValueCol: null, listFilter: null, listSwitch: null, multiselect: false, ref: false, refDef: null, date: false, datetime: false, allowNew: false, sorted: false, image: false, url: false, number: false, picker: null };
   function colInfo(schema, col) {
     var m = _scanCache && _scanCache.get(schema);
     if (!m) { m = scanSchema(schema); if (_scanCache) _scanCache.set(schema, m); }
@@ -327,6 +418,10 @@
   function colIsList(schema, col) { return colInfo(schema, col).list; }                    // list name or null
   function colIsMultiselect(schema, col) { return colInfo(schema, col).multiselect; }
   function colIsDate(schema, col) { return colInfo(schema, col).date; }
+  // A moment, stored as an ISO instant in UTC (`2026-10-13T15:40:00.000Z`, what toISOString writes and
+  // what `created_at` already holds) -- so it sorts as a string and both rules languages can compare it.
+  // Shown and edited in the reader's local time.
+  function colIsDateTime(schema, col) { return colInfo(schema, col).datetime; }
   function colIsNumber(schema, col) { return colInfo(schema, col).number; }                // any table declaring it `number` -> sort numerically (views have no SCHEMA entry)
   function colIsRef(schema, col) { return colInfo(schema, col).ref; }
   function colListSwitch(schema, col) { return colInfo(schema, col).listSwitch; }
@@ -366,9 +461,11 @@
     return cols.length === 1 ? cols[0] : null;
   }
   function colListValueCol(schema, col) { return colInfo(schema, col).listValueCol; }   // lookup dimension a `list:` column draws on
+  function colListFilter(schema, col) { return colInfo(schema, col).listFilter; }   // which lookup rows a `list:` column's picker offers
   function colIsImage(schema, col) { return colInfo(schema, col).image; }
   function colIsUrl(schema, col) { return colInfo(schema, col).url; }
-  function colPicker(schema, col) { return colInfo(schema, col).picker; }   // 'chips' | 'toggle' | null (dropdown)
+  // 'chips' | 'toggle' | 'cards' | null (dropdown). An explicit 'dropdown' is the default, said out loud.
+  function colPicker(schema, col) { var p = colInfo(schema, col).picker; return p === 'dropdown' ? null : p; }
 
   // View column-entry shape predicates (a view's `columns` array mixes plain names, {name,...} defs,
   // inline embeds, named-view embeds and legacy text blocks). Moved here from schema-loader.js so the
@@ -397,6 +494,7 @@
     var comp = def.computed;
     if (comp && typeof comp === 'object') {
       if (comp.lookup && comp.lookup.table) out.push(comp.lookup.table);
+      if (typeof comp.count === 'string' && comp.count) out.push(comp.count);
       if (comp.rotationTable) out.push(comp.rotationTable);
       if (comp.occurrenceSource) out.push(comp.occurrenceSource);
     }
@@ -448,9 +546,27 @@
   // `columns` ships in BOTH shapes -- a name->def map, and an array of {name,...} defs (examples/
   // bishopric-schema.json uses the array form). Normalizing to a list of defs handles both; defTables
   // reads only the def, never the key.
-  function tableDeps(schema, table) {
-    var seen = {}, out = [];
-    var add = function(t) { if (t && t !== table && !seen[t]) { seen[t] = 1; out.push(t); } };
+  function hasComputed(tableDef) { return columnDefList(tableDef).some(function(d) { return d && typeof d === 'object' && !!d.computed; }); }
+  // The table's computed (derived) columns, as resolveComputed takes them.
+  function derivedDefs(tableDef) {
+    var defs = columnDefs(tableDef || {}), out = [];
+    for (var c in defs) { var d = defs[c]; if (d && typeof d === 'object' && d.computed) out.push(Object.assign({ name: c }, d)); }
+    return out;
+  }
+  function isDerived(schema, table, col) { var d = columnDefs((schema && schema[table]) || {})[col]; return !!(d && typeof d === 'object' && d.computed); }
+  // `_seen` is shared across the recursion below, so tables whose derivations point at each other
+  // (a membership counts its pauses; a pause reads its membership) are each visited once.
+  function tableDeps(schema, table, _seen) {
+    var seen = _seen || {}, out = [];
+    seen[table] = 1;
+    // A dependency with computed columns of its own needs THEIR inputs too -- a pause reads its
+    // membership's end date, which reads the plan and the other pauses -- so follow those, and only those:
+    // a plain ref chain stays one level, as it always was.
+    var add = function(t) {
+      if (!t || t === table || seen[t]) return;
+      seen[t] = 1; out.push(t);
+      if (hasComputed(schema && schema[t])) out.push.apply(out, tableDeps(schema, t, seen));
+    };
     columnDefList(schema && schema[table]).forEach(function(d) {
       defTables(d).forEach(add);
       // A SIXTH shape, and the one defTables cannot recognise on its own: a `list:` may name a lookup
@@ -468,17 +584,17 @@
   }
 
   var C = {
-    COLUMN_TYPES: COLUMN_TYPES, COLUMN_KEYS: COLUMN_KEYS, vocabularyErrors: vocabularyErrors,
+    COLUMN_TYPES: COLUMN_TYPES, COLUMN_KEYS: COLUMN_KEYS, vocabularyErrors: vocabularyErrors, pickerErrors: pickerErrors, enabledWhenErrors: enabledWhenErrors, PICKERS: PICKERS,
     columnDefs: columnDefs, columnDefList: columnDefList, ownerColOf: ownerColOf,
     columnType: columnType, columnList: columnList, columnRef: columnRef,
     isMirror: isMirror, tableMirrorSource: tableMirrorSource, tableOwnerCol: tableOwnerCol,
     tableDefaultCols: tableDefaultCols, tableRefCol: tableRefCol,
     lookupCols: lookupCols, lookupHierarchy: lookupHierarchy, buildHierarchy: buildHierarchy,
-    colIsList: colIsList, colIsMultiselect: colIsMultiselect, colIsDate: colIsDate, colIsNumber: colIsNumber,
-    colIsRef: colIsRef, colListSwitch: colListSwitch, colAllowNew: colAllowNew, colIsSorted: colIsSorted, colListValueCol: colListValueCol, lookupIdentityCol: lookupIdentityCol, rowHandle: rowHandle,
+    colIsList: colIsList, colIsMultiselect: colIsMultiselect, colIsDate: colIsDate, colIsDateTime: colIsDateTime, colIsNumber: colIsNumber,
+    colIsRef: colIsRef, colListSwitch: colListSwitch, colAllowNew: colAllowNew, colIsSorted: colIsSorted, colListValueCol: colListValueCol, colListFilter: colListFilter, lookupIdentityCol: lookupIdentityCol, rowHandle: rowHandle,
     colIsImage: colIsImage, colIsUrl: colIsUrl, colPicker: colPicker,
     colName: colName, isEmbed: isEmbed, isViewEmbed: isViewEmbed, isText: isText,
-    defTables: defTables, entryTables: entryTables, tableDeps: tableDeps, mirrorCluster: mirrorCluster
+    defTables: defTables, entryTables: entryTables, tableDeps: tableDeps, derivedDefs: derivedDefs, isDerived: isDerived, mirrorCluster: mirrorCluster
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = C;
   else { root.Columns = C; root.colName = colName; root.isEmbed = isEmbed; root.isViewEmbed = isViewEmbed; root.isText = isText; } // shape predicates as bare globals (schema-loader + app-core call them unqualified)

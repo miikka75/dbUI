@@ -58,17 +58,23 @@
     return out;
   }
 
-  // The caller's own record. `once` forms have at most one; without it the caller starts a new blank
-  // each time and nothing here is theirs to find.
+  // The caller's own record. `once` forms have at most one. Without it the caller starts a new blank
+  // each time -- and the one they have STARTED and not yet submitted is theirs to fill in: the record
+  // they pressed Start for has to be found again, or the form could never show it. That needs
+  // `submitColumn` to tell a draft from a sent one; with none, nothing here is theirs to find.
   //
   // Signed out (no `me`) matches NOTHING, deliberately: an owner column is stamped with an identity,
   // and matching rows whose owner is also blank would hand one anonymous visitor another's draft.
   function mine(rows, opts) {
     var me = opts.me || '', ownerCol = opts.ownerCol || 'owner';
-    if (!me || opts.once === false) return null;
+    if (!me) return null;
+    var draftOnly = opts.once === false;
+    if (draftOnly && !opts.submitColumn) return null;
+    var sentVal = String(opts.submitValue === undefined ? 'submitted' : opts.submitValue);
     var found = null;
     (rows || []).forEach(function (r) {
       if (!r || r[ownerCol] !== me) return;
+      if (draftOnly && String(r[opts.submitColumn] == null ? '' : r[opts.submitColumn]) === sentVal) return;
       // Last wins: if a duplicate ever exists (two tabs, a failed delete), the most recently updated
       // one is the one the person last worked on.
       if (!found || String(r.updated_at || '') >= String(found.updated_at || '')) found = r;

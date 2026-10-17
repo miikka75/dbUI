@@ -6,20 +6,48 @@
   "type": "object",
   "additionalProperties": false,
   "properties": {
-    "$schema": { "type": "string", "description": "Pointer to this meta-schema. Ignored by the app." },
-    "schemaVersion": { "type": "integer", "minimum": 1, "description": "Document version. Older documents are brought forward at load by migrations.js; the result is written back once, by a caller who may save." },
-    "title": { "type": "string", "description": "Document/tab title." },
-    "defaultLanguage": { "type": "string", "description": "Language code used as the base string set (e.g. \"en\")." },
-    "icon": { "type": "string", "description": "MDI icon name for the app itself." },
+    "$schema": {
+      "type": "string",
+      "description": "Pointer to this meta-schema. Ignored by the app."
+    },
+    "schemaVersion": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Document version. Older documents are brought forward at load by migrations.js; the result is written back once, by a caller who may save."
+    },
+    "title": {
+      "type": "string",
+      "description": "Document/tab title."
+    },
+    "defaultLanguage": {
+      "type": "string",
+      "description": "Language code used as the base string set (e.g. \"en\")."
+    },
+    "icon": {
+      "type": "string",
+      "description": "MDI icon name for the app itself."
+    },
     "icons": {
       "type": "object",
       "description": "Per-database branding. Every field is optional and falls back to the bundled default, which is what lets one schema brand itself without every other schema having to opt out.",
       "additionalProperties": false,
       "properties": {
-        "favicon": { "type": "string", "description": "<link rel=\"icon\"> — the browser tab." },
-        "appleTouch": { "type": "string", "description": "<link rel=\"apple-touch-icon\"> — the iOS home-screen tile." },
-        "png512": { "type": "string", "description": "The PWA install/splash icon. Must be a PNG, square, >=144px." },
-        "png512Sizes": { "type": "string", "description": "Declares a differently-sized png512 accurately, e.g. \"512x512\" (avoids a DevTools size-mismatch warning)." }
+        "favicon": {
+          "type": "string",
+          "description": "<link rel=\"icon\"> — the browser tab."
+        },
+        "appleTouch": {
+          "type": "string",
+          "description": "<link rel=\"apple-touch-icon\"> — the iOS home-screen tile."
+        },
+        "png512": {
+          "type": "string",
+          "description": "The PWA install/splash icon. Must be a PNG, square, >=144px."
+        },
+        "png512Sizes": {
+          "type": "string",
+          "description": "Declares a differently-sized png512 accurately, e.g. \"512x512\" (avoids a DevTools size-mismatch warning)."
+        }
       }
     },
     "theme": {
@@ -27,116 +55,263 @@
       "description": "Partially overrides the built-in Vuetify light/dark palettes. Only the keys you set change.",
       "additionalProperties": false,
       "properties": {
-        "light": { "$ref": "#/$defs/palette" },
-        "dark": { "$ref": "#/$defs/palette" }
+        "light": {
+          "$ref": "#/$defs/palette"
+        },
+        "dark": {
+          "$ref": "#/$defs/palette"
+        }
       }
     },
     "tables": {
       "type": "object",
       "description": "Raw data, one entry per table. The key is the table name and IS its storage id.",
-      "additionalProperties": { "$ref": "#/$defs/table" }
+      "additionalProperties": {
+        "$ref": "#/$defs/table"
+      }
     },
     "views": {
       "type": "array",
       "description": "Flat, named units of presentation. Hierarchy lives in `nav` — there is no views.views nesting.",
-      "items": { "$ref": "#/$defs/view" }
+      "items": {
+        "$ref": "#/$defs/view"
+      }
     },
-    "nav": { "$ref": "#/$defs/nav" },
+    "nav": {
+      "$ref": "#/$defs/nav"
+    },
     "lists": {
       "type": "object",
       "description": "Seed values for named lists, by list name. Values referenced by a view filter are auto-seeded and become non-deletable.",
-      "additionalProperties": { "type": "array" }
+      "additionalProperties": {
+        "type": "array"
+      }
+    },
+    "newUser": {
+      "type": "object",
+      "description": "What approving an access request grants: a role (viewer or editor) and table access, as a list of names or a map of table -> \"r\" / \"rw\". Without it, Approve makes an editor with no tables.",
+      "additionalProperties": false,
+      "properties": {
+        "role": {
+          "enum": [
+            "viewer",
+            "editor"
+          ]
+        },
+        "open": {
+          "type": "boolean",
+          "description": "Anyone who signs in registers themselves with this grant, no approval."
+        },
+        "tables": {
+          "oneOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": {
+                "enum": [
+                  "r",
+                  "rw"
+                ]
+              }
+            }
+          ]
+        }
+      }
     },
     "listSources": {
       "type": "object",
-      "description": "Where a list's values come from, and what a link to an account means. \"users\": the values ARE the opted-in display names, maintained automatically. \"userlink\": the values stay curated and an admin maps each to an account, which drives `@me` and the avatar. \"userlink-name\": the same link, but the cell displays the linked account's profile name instead of the value \u2014 for a list of roles, where the reader wants to know who holds one.",
-      "additionalProperties": { "enum": ["users", "userlink", "userlink-name"] }
+      "description": "Where a list's values come from, and what a link to an account means. \"users\": the values ARE the opted-in display names, maintained automatically. \"userlink\": the values stay curated and an admin maps each to an account, which drives `@me` and the avatar. \"userlink-name\": the same link, but the cell displays the linked account's profile name instead of the value — for a list of roles, where the reader wants to know who holds one.",
+      "additionalProperties": {
+        "enum": [
+          "users",
+          "userlink",
+          "userlink-name"
+        ]
+      }
     },
     "translatableLists": {
       "type": "array",
       "description": "Lists whose values carry translation keys rather than being shown verbatim.",
-      "items": { "type": "string" }
+      "items": {
+        "type": "string"
+      }
     },
     "userWritableLists": {
       "type": "array",
       "description": "Free-form vocabularies an ordinary user may extend as they work, rather than admin-only ones.",
-      "items": { "type": "string" }
+      "items": {
+        "type": "string"
+      }
     }
   },
   "$defs": {
     "palette": {
       "type": "object",
       "description": "Vuetify colour roles. Only the keys you set are overridden.",
-      "additionalProperties": { "type": "string" }
+      "additionalProperties": {
+        "type": "string"
+      }
     },
-
     "columnType": {
       "description": "An unknown type is NOT an error the app can see on its own — it silently reads as \"text\", so a typo renders a working text column and the dropdown just never appears. Kept in step with Columns.COLUMN_TYPES by dev/test/schema-meta.test.js.",
       "type": "string",
-      "enum": ["text", "number", "date", "select", "multiselect", "ref", "url", "image", "owner"]
+      "enum": [
+        "text",
+        "number",
+        "date",
+        "datetime",
+        "select",
+        "multiselect",
+        "ref",
+        "url",
+        "image",
+        "owner"
+      ]
     },
-
     "column": {
       "description": "A column definition. The property list is CLOSED: an unrecognised key is never read, so it does nothing and says nothing — which is why both this list and Columns.COLUMN_KEYS exist, and why validateSchema rejects anything outside them at load.",
       "oneOf": [
-        { "$ref": "#/$defs/columnType" },
+        {
+          "$ref": "#/$defs/columnType"
+        },
         {
           "type": "object",
-          "required": ["name"],
+          "required": [
+            "name"
+          ],
           "additionalProperties": false,
           "properties": {
-            "name": { "type": "string", "description": "Column identifier (required)." },
-            "type": { "$ref": "#/$defs/columnType" },
-            "hidden": { "type": "boolean", "description": "Don't display in the UI (e.g. created_at)." },
-            "list": { "type": "string", "description": "List name backing a `select` column." },
+            "name": {
+              "type": "string",
+              "description": "Column identifier (required)."
+            },
+            "type": {
+              "$ref": "#/$defs/columnType"
+            },
+            "hidden": {
+              "type": "boolean",
+              "description": "Don't display in the UI (e.g. created_at)."
+            },
+            "list": {
+              "type": "string",
+              "description": "List name backing a `select` column."
+            },
             "listSwitch": {
               "type": "object",
               "description": "An ALTERNATE list the cell can be toggled to, e.g. { \"list\": \"external_workers\" }. The list is seeded like any other. `label` names the toggle and is OPTIONAL: it is prose, and prose in a schema cannot be translated, so a bundle meant to be read in more than one language leaves it out and gets the translated `col.switch_list` tooltip instead.",
-              "required": ["list"],
+              "required": [
+                "list"
+              ],
               "additionalProperties": false,
               "properties": {
-                "label": { "type": "string" },
-                "list": { "type": "string" }
+                "label": {
+                  "type": "string"
+                },
+                "list": {
+                  "type": "string"
+                }
               }
             },
-            "allowNew": { "type": "boolean", "description": "Allow adding new list values (combobox)." },
-            "sorted": { "type": "boolean", "description": "Sort dropdown items alphabetically." },
+            "allowNew": {
+              "type": "boolean",
+              "description": "Allow adding new list values (combobox)."
+            },
+            "sorted": {
+              "type": "boolean",
+              "description": "Sort dropdown items alphabetically."
+            },
             "picker": {
               "type": "string",
-              "enum": ["chips", "toggle"],
-              "description": "Input widget for a single `select` column; omit for the default dropdown. Ignored with `allowNew` (which needs free-text entry) and with `multiple` (already chips)."
+              "enum": [
+                "dropdown",
+                "chips",
+                "toggle",
+                "cards"
+              ],
+              "description": "How the value is chosen: dropdown (default), chips, toggle, or cards (each option's catalogue row). Any of them on a `list` or a `ref`; cards needs a ref or a list naming a lookup. Not with `multiple` or `allowNew`."
             },
-            "multiple": { "type": "boolean", "description": "Hold several values instead of one, stored as an array. Cardinality is all that ever separated `multiselect` from `select`, so it is a flag rather than a type — which is what lets it compose with `ref` too." },
-            "table": { "type": "string", "description": "Lookup table a `ref` column points at." },
-            "valueCol": { "type": "string", "description": "Column of the lookup table used as the value (for `ref`)." },
+            "multiple": {
+              "type": "boolean",
+              "description": "Hold several values instead of one, stored as an array. Cardinality is all that ever separated `multiselect` from `select`, so it is a flag rather than a type — which is what lets it compose with `ref` too."
+            },
+            "table": {
+              "type": "string",
+              "description": "Lookup table a `ref` column points at."
+            },
+            "valueCol": {
+              "type": "string",
+              "description": "Column of the lookup table used as the value (for `ref`)."
+            },
             "filterBy": {
               "type": "object",
               "description": "Narrow a `ref` column's options by another column: { \"<this table's column>\": \"<ref table's column>\" }.",
-              "additionalProperties": { "type": "string" }
+              "additionalProperties": {
+                "type": "string"
+              }
             },
-            "default": { "description": "Literal seeded into the cell when a row is CREATED, then freely editable. Prefer an explicit value over \"whatever is first in the list\" — list order is data and can be reordered." },
+            "label": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "For a ref: the referenced table's columns that name a row in its options and cells, instead of the raw value."
+            },
+            "computed": {
+              "type": "object",
+              "description": "Derived on read, never stored: lookup, count, dateAdd, daysSince, … (see SCHEMA.md, computed columns). On a table, every view, lookup, path, form and rule sees it; it is never written or edited."
+            },
+            "enabledWhen": {
+              "type": "object",
+              "description": "Which options a picker lets you choose: a condition over each option's catalogue row (a ref, or a list naming a lookup). Unmatched options stay on show, greyed. Operands may be { \"view\": \"<view>\", \"field\": \"<col>\" } (a view's first row) or { \"col\": \"<col>\" } (the option row's own column)."
+            },
+            "listFilter": {
+              "type": "object",
+              "description": "For a column whose `list` names a LOOKUP TABLE: which of its rows the picker offers, as a condition over the lookup's columns (the filter language), e.g. { \"kind\": \"position\" }. Narrows the picker only: a value already stored keeps rendering and stays among its own cell's options."
+            },
+            "default": {
+              "description": "Literal seeded into the cell when a row is CREATED, then freely editable. Prefer an explicit value over \"whatever is first in the list\" — list order is data and can be reordered."
+            },
             "defaultFrom": {
               "type": "string",
-              "enum": ["@me"],
+              "enum": [
+                "@me"
+              ],
               "description": "Seed the cell on create from a token. \"@me\" resolves the signed-in identity exactly as the @me filter does. Takes precedence over `default`. Unlike `owner`, the value stays editable."
             },
-            "stamped": { "type": "boolean", "description": "The app fills this column in and nobody rewrites it — it binds a grant-holder, not just an owner. Needs `defaultFrom: \"@me\"` and a `list`; at most one per table, because the rules layers resolve ONE column and cannot loop a map." },
-            "syncFrom": { "type": "string", "description": "Mirror this column's value from another table." }
+            "stamped": {
+              "type": "boolean",
+              "description": "The app fills this column in and nobody rewrites it — it binds a grant-holder, not just an owner. Needs `defaultFrom: \"@me\"` and a `list`; at most one per table, because the rules layers resolve ONE column and cannot loop a map."
+            },
+            "syncFrom": {
+              "type": "string",
+              "description": "Mirror this column's value from another table."
+            },
+            "scale": {
+              "type": "number",
+              "description": "Multiplies a computed column's number: -1 makes a cost count against a total."
+            }
           }
         }
       ]
     },
-
     "partitionLabels": {
       "type": "object",
       "description": "Renames the two tabs of a {{view:x@both}} embed. The values are TRANSLATION KEYS, and both halves fail silently when wrong: an unknown partition key is never read, and a non-string value resolves to no label at all.",
       "additionalProperties": false,
       "properties": {
-        "active": { "type": "string" },
-        "archive": { "type": "string" }
+        "active": {
+          "type": "string"
+        },
+        "archive": {
+          "type": "string"
+        }
       }
     },
-
     "table": {
       "type": "object",
       "description": "One table: its columns, and how the app treats its rows. A table also answers to the presentation properties a view carries (layout, printable, defaultSort, search, background, …) — `currentConfig` is `VIEWS[x] || SCHEMA[x]`, so the two vocabularies occupy the same object position. That is why this property list is not closed; see the note on `view`.",
@@ -145,44 +320,101 @@
         "columns": {
           "description": "The table's columns, in either shape: the authored array of defs, or a name->def map.",
           "oneOf": [
-            { "type": "array", "items": { "$ref": "#/$defs/column" } },
-            { "type": "object", "additionalProperties": { "$ref": "#/$defs/column" } }
-          ]
-        },
-        "archivable": { "type": "boolean", "description": "Enable archive/restore. Archiving sets _status: \"archive\" on the row; the row itself does not move." },
-        "archiveAfter": {
-          "type": "object",
-          "description": "File finished rows away on their own. Needs `archivable: true` (somewhere to move rows to) and a declared `updated_at` column (a clock to measure) — both are checked at load, because without either the sweep silently finds no eligible rows forever.",
-          "required": ["column", "values", "days"],
-          "additionalProperties": false,
-          "properties": {
-            "column": { "type": "string", "description": "Column whose value says the row is finished." },
-            "values": { "type": "array", "minItems": 1, "description": "The values that count as finished." },
-            "days": { "type": "number", "minimum": 0, "description": "How long after `updated_at` a finished row is filed away." }
-          }
-        },
-        "isLookup": { "type": "boolean", "description": "Marks a reference/lookup table — managed in the Lookup tab, not the sidebar." },
-        "hierarchy": {
-          "description": "Which column of this lookup is the GROUP and which holds the value under it. Declaring it is what lets a lookup carry a third column (a code, a note) and stay a hierarchy: without it the shape is inferred from there being exactly two author-facing columns, so a third one silently flattens the Lookup editor. `false` says the table is flat — two columns that are a value and an attribute (chore + points), not a group and its members.",
-          "oneOf": [
-            { "type": "boolean", "enum": [false] },
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/column"
+              }
+            },
             {
               "type": "object",
-              "required": ["parent", "value"],
-              "additionalProperties": false,
-              "properties": {
-                "parent": { "type": "string", "description": "The grouping column — the Lookup editor's parent rows, a board ref lane's phase, a rosterRef rotation's slots. Under `by: \"id\"` it holds a row id instead, and is usually `hidden: true` since it is plumbing rather than something an author types." },
-                "value": { "type": "string", "description": "The column holding the value under the group — what a `ref` column stores." },
-                "by": { "type": "string", "enum": ["value", "id"], "description": "What the parent column holds. \"value\" (the default, and every lookup written before this existed) means it holds the group's own value, which makes the table exactly two levels. \"id\" means it holds another ROW's id, so a parent is a row and the tree is as deep as the data — use it for a NEW table, never by converting one whose values are already stored in other tables, translated, or pinned by a schema filter." }
+              "additionalProperties": {
+                "$ref": "#/$defs/column"
               }
             }
           ]
         },
-        "reorderable": { "type": "boolean", "description": "Rows may be dragged into a new order, stored in a `number` position column." },
+        "archivable": {
+          "type": "boolean",
+          "description": "Enable archive/restore. Archiving sets _status: \"archive\" on the row; the row itself does not move."
+        },
+        "archiveAfter": {
+          "type": "object",
+          "description": "File finished rows away on their own. Needs `archivable: true` (somewhere to move rows to) and a declared `updated_at` column (a clock to measure) — both are checked at load, because without either the sweep silently finds no eligible rows forever.",
+          "required": [
+            "column",
+            "values",
+            "days"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "column": {
+              "type": "string",
+              "description": "Column whose value says the row is finished."
+            },
+            "values": {
+              "type": "array",
+              "minItems": 1,
+              "description": "The values that count as finished."
+            },
+            "days": {
+              "type": "number",
+              "minimum": 0,
+              "description": "How long after `updated_at` a finished row is filed away."
+            }
+          }
+        },
+        "isLookup": {
+          "type": "boolean",
+          "description": "Marks a reference/lookup table — managed in the Lookup tab, not the sidebar."
+        },
+        "hierarchy": {
+          "description": "Which column of this lookup is the GROUP and which holds the value under it. Declaring it is what lets a lookup carry a third column (a code, a note) and stay a hierarchy: without it the shape is inferred from there being exactly two author-facing columns, so a third one silently flattens the Lookup editor. `false` says the table is flat — two columns that are a value and an attribute (chore + points), not a group and its members.",
+          "oneOf": [
+            {
+              "type": "boolean",
+              "enum": [
+                false
+              ]
+            },
+            {
+              "type": "object",
+              "required": [
+                "parent",
+                "value"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "parent": {
+                  "type": "string",
+                  "description": "The grouping column — the Lookup editor's parent rows, a board ref lane's phase, a rosterRef rotation's slots. Under `by: \"id\"` it holds a row id instead, and is usually `hidden: true` since it is plumbing rather than something an author types."
+                },
+                "value": {
+                  "type": "string",
+                  "description": "The column holding the value under the group — what a `ref` column stores."
+                },
+                "by": {
+                  "type": "string",
+                  "enum": [
+                    "value",
+                    "id"
+                  ],
+                  "description": "What the parent column holds. \"value\" (the default, and every lookup written before this existed) means it holds the group's own value, which makes the table exactly two levels. \"id\" means it holds another ROW's id, so a parent is a row and the tree is as deep as the data — use it for a NEW table, never by converting one whose values are already stored in other tables, translated, or pinned by a schema filter."
+                }
+              }
+            }
+          ]
+        },
+        "reorderable": {
+          "type": "boolean",
+          "description": "Rows may be dragged into a new order, stored in a `number` position column."
+        },
         "ownerWritable": {
           "type": "array",
           "description": "Columns an owner-scoped write may touch on their own row. Mirrored to both rules layers.",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         },
         "ownerWritableWhile": {
           "type": "object",
@@ -190,148 +422,592 @@
           "minProperties": 1,
           "maxProperties": 1
         },
-        "privateRoster": { "type": "boolean", "description": "Rows of this response table are not visible to other participants: the app stamps rosterPublic:false on each row instead of true. The rules enforce that per-row FLAG, not this policy — an owner may still publish a row they own. See \"What privateRoster actually guarantees\" in SCHEMA.md." },
-        "partitionLabels": { "$ref": "#/$defs/partitionLabels" }
+        "capacity": {
+          "type": "object",
+          "description": "Caps how many rows of this response table may hold a place in one event. `link`: the ref column naming the event (by id); `status`: the response column; `column`: the events table's number column holding the limit (blank = no limit); `count`: its number column the server keeps the count in; `holds`: the statuses that take a place (default: any non-empty). Enforced in both rules layers from the _meta/capacity mirror.",
+          "required": [
+            "link",
+            "status",
+            "column",
+            "count"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "link": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            },
+            "column": {
+              "type": "string"
+            },
+            "count": {
+              "type": "string"
+            },
+            "holds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1
+            }
+          }
+        },
+        "privateRoster": {
+          "type": "boolean",
+          "description": "Rows of this response table are not visible to other participants: the app stamps rosterPublic:false on each row instead of true. The rules enforce that per-row FLAG, not this policy — an owner may still publish a row they own. See \"What privateRoster actually guarantees\" in SCHEMA.md."
+        },
+        "partitionLabels": {
+          "$ref": "#/$defs/partitionLabels"
+        },
+        "public": {
+          "type": "boolean",
+          "description": "Readable with no account, read-only -- a schedule, a price list. Its lists, the schema and the translations become readable too; nothing else. No owner column, and refs only to public tables."
+        }
       }
     },
-
     "view": {
       "type": "object",
       "description": "One view. Its `kind` is what the loader dispatches on; migration writes it, so a hand-authored view normally omits it and gets one at load. The property list is deliberately OPEN: each kind carries its own configuration object (rotation, calendar, pivot, rsvp, board, form, stats, timeline, scan), and a TABLE answers to the same presentation properties a view does — `currentConfig` is `VIEWS[x] || SCHEMA[x]`, so the two occupy one object position. The properties below are the ones common to every kind; each kind's own object is documented in SCHEMA.md.",
       "additionalProperties": true,
-      "required": ["name"],
+      "required": [
+        "name"
+      ],
       "properties": {
-        "name": { "type": "string", "description": "View identifier — what `nav` and {{view:…}} embeds reference." },
-        "views": { "type": "array", "items": { "$ref": "#/$defs/view" }, "description": "LEGACY nesting: a named nav folder holding views. Hierarchy belongs in `nav` — this shape survives only because old documents carry it, and is what `kind: \"group\"` labels." },
+        "name": {
+          "type": "string",
+          "description": "View identifier — what `nav` and {{view:…}} embeds reference."
+        },
+        "views": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/view"
+          },
+          "description": "LEGACY nesting: a named nav folder holding views. Hierarchy belongs in `nav` — this shape survives only because old documents carry it, and is what `kind: \"group\"` labels."
+        },
         "kind": {
           "type": "string",
-          "enum": ["data", "page", "rotation", "calendar", "pivot", "rsvp", "board", "form", "stats", "timeline", "scan", "group"],
+          "enum": [
+            "data",
+            "page",
+            "rotation",
+            "calendar",
+            "pivot",
+            "rsvp",
+            "board",
+            "form",
+            "stats",
+            "timeline",
+            "scan",
+            "group"
+          ],
           "description": "What this entry IS — the discriminator the loader dispatches on (SchemaNormalize.viewKind). Written by migration, so a hand-authored view normally omits it and gets one at load; set it only to override. \"group\" is a nav folder carrying nested `views` and no body of its own."
         },
-        "sources": { "type": "array", "items": { "type": "string" }, "description": "Table names to pull data from." },
-        "mode": { "type": "string", "enum": ["union", "join"], "description": "How several sources combine: stack rows, or merge them by id." },
-        "columns": { "type": "array", "description": "Column names, embeds, conditional columns ({name, when}) and computed columns." },
-        "filter": { "type": "object", "description": "Static row filter — the unified condition language." },
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Table names to pull data from."
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "union",
+            "join"
+          ],
+          "description": "How several sources combine: stack rows, or merge them by id."
+        },
+        "columns": {
+          "type": "array",
+          "description": "Column names, embeds, conditional columns ({name, when}) and computed columns."
+        },
+        "filter": {
+          "type": "object",
+          "description": "Static row filter — the unified condition language."
+        },
         "search": {
           "description": "Offer a runtime search box over this view's rows: true = every column, an array = only those. Narrows what is rendered, never the data.",
-          "oneOf": [{ "type": "boolean" }, { "type": "array", "items": { "type": "string" } }]
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ]
         },
-        "readonly": { "type": "boolean", "description": "Disable editing (report views)." },
-        "includeArchive": { "type": "boolean", "description": "Read the archive partition alongside the active one. A view sees only active rows by default, which is right for a worklist and wrong for a TOTAL: with archiveAfter in play, a sum that nets one thing against another goes wrong the moment either side ages out." },
-        "layout": { "type": "string", "enum": ["table", "card", "list", "gallery", "split"], "description": "`split` is master-detail: the rows as a list (first column, second beneath) beside the selected record, edited in place; on a phone a row opens its record as its own screen. `list` is a READING layout: values render read-only, so a row added there has no editor. Use table/card/gallery for anything people actually enter data into. `gallery` is the card layout as a grid of tiles: the first image column it shows is the picture, and every column (the picture's included) is edited under it." },
+        "readonly": {
+          "type": "boolean",
+          "description": "Disable editing (report views)."
+        },
+        "includeArchive": {
+          "type": "boolean",
+          "description": "Read the archive partition alongside the active one. A view sees only active rows by default, which is right for a worklist and wrong for a TOTAL: with archiveAfter in play, a sum that nets one thing against another goes wrong the moment either side ages out."
+        },
+        "layout": {
+          "type": "string",
+          "enum": [
+            "table",
+            "card",
+            "list",
+            "gallery",
+            "split"
+          ],
+          "description": "`split` is master-detail: the rows as a list (first column, second beneath) beside the selected record, edited in place; on a phone a row opens its record as its own screen. `list` is a READING layout: values render read-only, so a row added there has no editor. Use table/card/gallery for anything people actually enter data into. `gallery` is the card layout as a grid of tiles: the first image column it shows is the picture, and every column (the picture's included) is edited under it."
+        },
         "gallery": {
-          "type": "object", "additionalProperties": false,
+          "type": "object",
+          "additionalProperties": false,
           "description": "How a `layout: \"gallery\"` draws its tiles. Every key is optional.",
           "properties": {
-            "image": { "type": "string", "description": "The image column that is the picture. Default: the first image column the view shows. Need not be in `columns`; then it has no field on the tile." },
-            "size": { "type": "string", "enum": ["small", "medium", "large"], "description": "Tile size, relative to the space the gallery has: the grid fits as many tiles of at least this size as it can (about 140 / 220 / 320px). Default medium." },
-            "shape": { "type": "string", "enum": ["square", "landscape", "portrait"], "description": "The picture's crop: 1:1, 16:9 or 3:4. Default square." },
-            "fit": { "type": "string", "enum": ["crop", "contain"], "description": "crop fills the shape; contain shows the whole picture inside it. Default crop." }
+            "image": {
+              "type": "string",
+              "description": "The image column that is the picture. Default: the first image column the view shows. Need not be in `columns`; then it has no field on the tile."
+            },
+            "size": {
+              "type": "string",
+              "enum": [
+                "small",
+                "medium",
+                "large"
+              ],
+              "description": "Tile size, relative to the space the gallery has: the grid fits as many tiles of at least this size as it can (about 140 / 220 / 320px). Default medium."
+            },
+            "shape": {
+              "type": "string",
+              "enum": [
+                "square",
+                "landscape",
+                "portrait"
+              ],
+              "description": "The picture's crop: 1:1, 16:9 or 3:4. Default square."
+            },
+            "fit": {
+              "type": "string",
+              "enum": [
+                "crop",
+                "contain"
+              ],
+              "description": "crop fills the shape; contain shows the whole picture inside it. Default crop."
+            }
           }
         },
-        "collapsed": { "type": "boolean", "description": "Cards start collapsed (accordion)." },
-        "defaultSort": { "type": "string", "description": "Default sort column." },
+        "collapsed": {
+          "type": "boolean",
+          "description": "Cards start collapsed (accordion)."
+        },
+        "defaultSort": {
+          "type": "string",
+          "description": "Default sort column."
+        },
+        "defaultSortDesc": {
+          "type": "boolean",
+          "description": "Sort `defaultSort` descending: newest first."
+        },
+        "preview": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Embedded, show the first N rows with a Show all / Show fewer toggle."
+        },
         "feedSubscribers": {
           "type": "object",
           "description": "Where a `feed: \"per-person\"` calendar reads its subscribers. Subscribing is a row the person creates for themselves in an owner-stamped table, so the list is opt-in; unsubscribing sets `activeColumn`, which freezes the row until a publisher blanks the file. The row has two writers by design: the subscriber owns the request (that they subscribe, and in which language), the publisher owns the grant (the minted URL). The table must declare `privateRoster: true` (otherwise every row, and so every link, is readable by every member), and `ownerWritable` INCLUDING the language, active and view columns and EXCLUDING the owner, id and url columns — a subscriber who can write their own url could point it at a path revocation never blanks.",
-          "required": ["table", "urlColumn"],
+          "required": [
+            "table",
+            "urlColumn"
+          ],
           "properties": {
-            "table": { "type": "string", "description": "The owner-stamped table people subscribe in." },
-            "urlColumn": { "type": "string", "description": "Column the publisher writes each subscriber's own .ics URL into. Must NOT be in the table's `ownerWritable`. It lives in the row rather than in folder config because a per-person URL is a bearer credential for one person's calendar, and folder config is readable by everyone with view access." },
-            "langColumn": { "type": "string", "description": "Column holding the subscriber's chosen language for their file. Must be in `ownerWritable` — it is their own choice. Blank, or a language this database no longer declares, falls back to the calendar's own `ics.lang`, never to the session's." },
-            "activeColumn": { "type": "string", "description": "Column the subscriber sets to unsubscribe (\"no\"/\"false\"/\"off\"/\"0\"/\"unsubscribed\"/\"inactive\"; anything else, including blank, counts as subscribed). Required alongside `urlColumn`, and must be in `ownerWritable`. Unsubscribing is a STATE rather than a deletion because the row is the only record of the file's path and the subscriber cannot blank it themselves — so the table must also declare `ownerWritableWhile` gating on this column, which freezes the row once they unsubscribe and keeps the tombstone alive for the publisher to act on." },
-            "viewColumn": { "type": "string", "description": "Column naming which feed a row subscribes to, when one table serves several. Must be in `ownerWritable`, since the subscriber's own new row sets it. Omit when the table serves this calendar alone." },
-            "idColumn": { "type": "string", "description": "Column the publisher writes the file's id (its storage path) into. Required alongside `urlColumn`, and must NOT be in `ownerWritable`." },
-            "ownerColumn": { "type": "string", "description": "The `owner`-type column (default \"owner\")." }
+            "table": {
+              "type": "string",
+              "description": "The owner-stamped table people subscribe in."
+            },
+            "urlColumn": {
+              "type": "string",
+              "description": "Column the publisher writes each subscriber's own .ics URL into. Must NOT be in the table's `ownerWritable`. It lives in the row rather than in folder config because a per-person URL is a bearer credential for one person's calendar, and folder config is readable by everyone with view access."
+            },
+            "langColumn": {
+              "type": "string",
+              "description": "Column holding the subscriber's chosen language for their file. Must be in `ownerWritable` — it is their own choice. Blank, or a language this database no longer declares, falls back to the calendar's own `ics.lang`, never to the session's."
+            },
+            "activeColumn": {
+              "type": "string",
+              "description": "Column the subscriber sets to unsubscribe (\"no\"/\"false\"/\"off\"/\"0\"/\"unsubscribed\"/\"inactive\"; anything else, including blank, counts as subscribed). Required alongside `urlColumn`, and must be in `ownerWritable`. Unsubscribing is a STATE rather than a deletion because the row is the only record of the file's path and the subscriber cannot blank it themselves — so the table must also declare `ownerWritableWhile` gating on this column, which freezes the row once they unsubscribe and keeps the tombstone alive for the publisher to act on."
+            },
+            "viewColumn": {
+              "type": "string",
+              "description": "Column naming which feed a row subscribes to, when one table serves several. Must be in `ownerWritable`, since the subscriber's own new row sets it. Omit when the table serves this calendar alone."
+            },
+            "idColumn": {
+              "type": "string",
+              "description": "Column the publisher writes the file's id (its storage path) into. Required alongside `urlColumn`, and must NOT be in `ownerWritable`."
+            },
+            "ownerColumn": {
+              "type": "string",
+              "description": "The `owner`-type column (default \"owner\")."
+            }
           }
         },
-        "feed": { "anyOf": [{ "type": "boolean" }, { "enum": ["shared", "per-person"] }], "description": "Publish this calendar as a subscribable .ics at a stable URL (calendar views only). The app renders the file and uploads it through the backend blob store; the object URL is the subscription and is a BEARER credential — anyone holding it reads the calendar. Republished when a source table changes, by a full-access client only. `true` means \"shared\": ONE file every subscriber fetches, which may not use `@me` or `mineOnly` because it has no viewer to resolve them against. \"per-person\" is one file per subscriber and inverts that rule — every source must carry an `@me` filter, and any rotation overlay must be `mineOnly`, since an unfiltered source would put its rows in everybody's file." },
-        "hideEmpty": { "type": "boolean", "description": "Hide empty columns. Table layout drops a column empty across ALL rows; card/board layouts drop it per row." },
-        "icon": { "type": "string", "description": "MDI icon for the sidebar." },
+        "feed": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "enum": [
+                "shared",
+                "per-person"
+              ]
+            }
+          ],
+          "description": "Publish this calendar as a subscribable .ics at a stable URL (calendar views only). The app renders the file and uploads it through the backend blob store; the object URL is the subscription and is a BEARER credential — anyone holding it reads the calendar. Republished when a source table changes, by a full-access client only. `true` means \"shared\": ONE file every subscriber fetches, which may not use `@me` or `mineOnly` because it has no viewer to resolve them against. \"per-person\" is one file per subscriber and inverts that rule — every source must carry an `@me` filter, and any rotation overlay must be `mineOnly`, since an unfiltered source would put its rows in everybody's file."
+        },
+        "hideEmpty": {
+          "type": "boolean",
+          "description": "Hide empty columns. Table layout drops a column empty across ALL rows; card/board layouts drop it per row."
+        },
+        "icon": {
+          "type": "string",
+          "description": "MDI icon for the sidebar."
+        },
+        "fab": {
+          "description": "What this screen's corner button does: \"add\" a row (the default, on a phone), \"scan\" a code (needs nav.scan), \"none\", or an activity elsewhere: { \"add\": \"<view>\" } adds a row to that view, { \"open\": \"<view>\" } goes to it; both take `label` (a translation key) and `icon`. Overrides nav.fab.",
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "add",
+                "scan",
+                "none"
+              ]
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "minProperties": 1,
+              "properties": {
+                "add": {
+                  "type": "string"
+                },
+                "open": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "icon": {
+                  "type": "string"
+                }
+              }
+            }
+          ]
+        },
         "printable": {
           "description": "Opt-in print buttons. Off by default. \"cards\" only renders in card/list layout.",
           "oneOf": [
-            { "type": "string", "enum": ["view", "cards"] },
-            { "type": "array", "items": { "type": "string", "enum": ["view", "cards"] } }
+            {
+              "type": "string",
+              "enum": [
+                "view",
+                "cards"
+              ]
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "view",
+                  "cards"
+                ]
+              }
+            }
           ]
         },
-        "markdown": { "type": "string", "description": "Makes this a DOCUMENT view instead of a data grid. May carry {{view:x}} / {{table:x}} embeds." },
+        "markdown": {
+          "type": "string",
+          "description": "Makes this a DOCUMENT view instead of a data grid. May carry {{view:x}} / {{table:x}} embeds."
+        },
         "access": {
           "description": "Doc-views only. Restrict the page to users granted at least one of these tables. Omit = visible to every registered user. \"all\" is a first-class sentinel, not a table name: it means full-access users only (tables: 'all' plus admins), which is why it is exempt from the existence check every other entry gets. Mixing it with table names is rejected HERE though the app tolerates it, because it cannot mean anything: a full-access user already passes any non-empty list, so [\"all\", \"tasks\"] is exactly [\"tasks\"] and an author writing it believes it does something it does not.",
           "type": "array",
           "minItems": 1,
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "oneOf": [
-            { "const": ["all"], "title": "full-access users only" },
-            { "items": { "not": { "const": "all" } }, "title": "table names — a grant on any one of them unlocks the page" }
+            {
+              "const": [
+                "all"
+              ],
+              "title": "full-access users only"
+            },
+            {
+              "items": {
+                "not": {
+                  "const": "all"
+                }
+              },
+              "title": "table names — a grant on any one of them unlocks the page"
+            }
           ]
         },
         "obscureNames": {
           "description": "Display-only privacy: abbreviate person names to \"First L.\" in this view. true = all list columns; an array = exactly those. Stored data is untouched.",
-          "oneOf": [{ "type": "boolean" }, { "type": "array", "items": { "type": "string" } }]
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ]
         },
         "mineOnly": {
           "description": "rotationViews only. Show a viewer just the slot column that IS them. An object rather than a bare string so it cannot be misread as the column array obscureNames takes.",
           "oneOf": [
-            { "type": "boolean" },
-            { "type": "object", "additionalProperties": false, "properties": { "list": { "type": "string" } } }
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "list": {
+                  "type": "string"
+                }
+              }
+            }
           ]
         },
         "background": {
           "type": "object",
           "description": "Background image for this view's card. Works on every view kind. Presentation, so nothing downstream fails loudly when it is malformed — the image just silently doesn't appear, which is why it is validated at load.",
-          "required": ["image"],
+          "required": [
+            "image"
+          ],
           "additionalProperties": false,
           "properties": {
-            "image": { "type": "string", "minLength": 1, "description": "An https URL, a raster data: URI, \"asset:<id>\" (bytes in the _assets table — the no-bucket tier), or \"icon:<mdi-name>\" — that icon drawn as the image in the theme's primary colour; bare \"icon:\" is the nav entry's own icon." },
-            "fit": { "type": "string", "enum": ["cover", "contain", "tile", "width"] },
-            "width": { "type": "number", "minimum": 1, "maximum": 100, "description": "Percentage, with fit: \"width\"." },
-            "opacity": { "type": "number", "minimum": 0, "maximum": 1 },
-            "position": { "type": "string", "enum": ["center", "top", "bottom", "left", "right", "top left", "top right", "bottom left", "bottom right"] }
+            "image": {
+              "type": "string",
+              "minLength": 1,
+              "description": "An https URL, a raster data: URI, \"asset:<id>\" (bytes in the _assets table — the no-bucket tier), or \"icon:<mdi-name>\" — that icon drawn as the image in the theme's primary colour; bare \"icon:\" is the nav entry's own icon."
+            },
+            "fit": {
+              "type": "string",
+              "enum": [
+                "cover",
+                "contain",
+                "tile",
+                "width"
+              ]
+            },
+            "width": {
+              "type": "number",
+              "minimum": 1,
+              "maximum": 100,
+              "description": "Percentage, with fit: \"width\"."
+            },
+            "opacity": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "position": {
+              "type": "string",
+              "enum": [
+                "center",
+                "top",
+                "bottom",
+                "left",
+                "right",
+                "top left",
+                "top right",
+                "bottom left",
+                "bottom right"
+              ]
+            }
           }
         },
-        "partitionLabels": { "$ref": "#/$defs/partitionLabels" }
+        "partitionLabels": {
+          "$ref": "#/$defs/partitionLabels"
+        },
+        "requires": {
+          "description": "A member-only view: shown (in the menu and embedded) only while one of the person's own rows of `table` covers today (from..to, `where`) -- an active membership. Admins and editors always see it.",
+          "type": "object",
+          "properties": {
+            "table": {
+              "type": "string"
+            },
+            "from": {
+              "type": "string"
+            },
+            "to": {
+              "type": "string"
+            },
+            "where": {
+              "type": "object"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "table",
+            "from"
+          ]
+        },
+        "filters": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "A page (markdown): multi-selects above it, one per list or ref column, narrowing every view embedded on it -- only the rows that have the column. Kept per viewer."
+        }
       }
     },
-
     "nav": {
       "type": "object",
       "description": "The navigation tree. References views and tables by name; system tabs (Lookup / Languages / Settings) are appended automatically.",
       "additionalProperties": false,
       "properties": {
-        "layout": { "type": "string", "enum": ["drawer", "tabs", "browse"], "description": "Side drawer (default), top tabs on desktop, or browse: no drawer — home lists the top level, a group opens as a page listing its entries, and a breadcrumb leads back up. Each user can override it in Settings." },
-        "display": { "type": "string", "enum": ["list", "tiles"], "description": "BROWSE ONLY: how a level's entries are drawn — a list (default) or a grid of tiles. A group or a view with entries may override it with its own." },
-        "items": { "type": "array", "items": { "$ref": "#/$defs/navItem" } },
+        "layout": {
+          "type": "string",
+          "enum": [
+            "drawer",
+            "tabs",
+            "browse"
+          ],
+          "description": "Side drawer (default), top tabs on desktop, or browse: no drawer — home lists the top level, a group opens as a page listing its entries, and a breadcrumb leads back up. Each user can override it in Settings."
+        },
+        "display": {
+          "type": "string",
+          "enum": [
+            "list",
+            "tiles"
+          ],
+          "description": "BROWSE ONLY: how a level's entries are drawn — a list (default) or a grid of tiles. A group or a view with entries may override it with its own."
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/navItem"
+          }
+        },
+        "fab": {
+          "type": "string",
+          "enum": [
+            "add",
+            "scan",
+            "none"
+          ],
+          "description": "The corner button's default action on every screen: add (the default), scan (needs `scan`), or none. A view's own `fab` overrides it."
+        },
+        "scan": {
+          "type": "array",
+          "description": "The scan button: views it may send a scanned code to -- scan views, and rsvp views with `checkin`. A QR the app drew names its own view; a typed code goes to the one picked. Empty or absent: no button.",
+          "items": {
+            "type": "string"
+          }
+        },
         "bottomNav": {
           "type": "array",
           "description": "MOBILE ONLY: view/table ids in the bottom bar, in this order. More than 5 -> the first 4 plus a \"More\" button. Omit to auto-pick the first 5 flattened items. Unresolved ids are silently dropped.",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         }
       }
     },
-
     "navItem": {
       "type": "object",
       "description": "One entry: a view, a table, or a group of them, nested to any depth. Access-filtered — a view needs all its sources.",
       "additionalProperties": false,
       "properties": {
-        "view": { "type": "string", "description": "Name of a view — a data view or a document." },
-        "table": { "type": "string", "description": "Name of a table, shown as its own tab." },
-        "group": { "type": "string", "description": "Group label; its children go in `items`." },
-        "items": { "type": "array", "items": { "$ref": "#/$defs/navItem" }, "description": "Children of a group, or a view's own entries. Any depth: browse draws every level as a page; the drawer and top tabs draw two levels and open a deeper group as its page, which lists its entries." },
-        "icon": { "type": "string", "description": "MDI icon name." },
-        "title": { "type": "string", "description": "Override the entry's label." },
-        "description": { "type": "string", "description": "BROWSE ONLY: a line shown under the entry's title on its tile or list row. Translatable as nav.desc.<group label | view | table>; this text is the fallback." },
-        "image": { "type": "string", "description": "A picture shown in place of the icon on the entry's tile (a 16:9 cover) and list row (a thumbnail): an https URL, a raster data: URI, or \"asset:<id>\". The drawer, tabs and breadcrumb keep the icon. Settings -> Appearance can override it." },
-        "focus": { "type": "string", "enum": ["top", "center", "bottom"], "description": "Which part of `image` a tile keeps when it crops. Default center." },
-        "display": { "type": "string", "enum": ["list", "tiles"], "description": "BROWSE ONLY: on a group or a view with entries, how its page draws them. Defaults to the nav's `display`." },
-        "adminOnly": { "type": "boolean", "description": "Hide the entry from non-admins; on a group, the whole branch. TIDINESS, NOT ACCESS CONTROL — what a member may read is decided by their table grants, and a hidden entry is still reachable if something links to it." },
-        "hideFromAdmin": { "type": "boolean", "description": "The mirror, for views about being a PARTICIPANT: an admin is exempt from mineOnly, so a personal page embedding a mineOnly rotation would show them everyone else's column under a heading reading \"My tasks\". Setting both flags hides the entry from every user and is rejected at load." }
+        "view": {
+          "type": "string",
+          "description": "Name of a view — a data view or a document."
+        },
+        "table": {
+          "type": "string",
+          "description": "Name of a table, shown as its own tab."
+        },
+        "group": {
+          "type": "string",
+          "description": "Group label; its children go in `items`."
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/navItem"
+          },
+          "description": "Children of a group, or a view's own entries. Any depth: browse draws every level as a page; the drawer and top tabs draw two levels and open a deeper group as its page, which lists its entries."
+        },
+        "icon": {
+          "type": "string",
+          "description": "MDI icon name."
+        },
+        "title": {
+          "type": "string",
+          "description": "Override the entry's label."
+        },
+        "description": {
+          "type": "string",
+          "description": "BROWSE ONLY: a line shown under the entry's title on its tile or list row. Translatable as nav.desc.<group label | view | table>; this text is the fallback."
+        },
+        "image": {
+          "type": "string",
+          "description": "A picture shown in place of the icon on the entry's tile (a 16:9 cover) and list row (a thumbnail): an https URL, a raster data: URI, or \"asset:<id>\". The drawer, tabs and breadcrumb keep the icon. Settings -> Appearance can override it."
+        },
+        "focus": {
+          "type": "string",
+          "enum": [
+            "top",
+            "center",
+            "bottom"
+          ],
+          "description": "Which part of `image` a tile keeps when it crops. Default center."
+        },
+        "display": {
+          "type": "string",
+          "enum": [
+            "list",
+            "tiles"
+          ],
+          "description": "BROWSE ONLY: on a group or a view with entries, how its page draws them. Defaults to the nav's `display`."
+        },
+        "adminOnly": {
+          "type": "boolean",
+          "description": "Hide the entry from non-admins; on a group, the whole branch. TIDINESS, NOT ACCESS CONTROL — what a member may read is decided by their table grants, and a hidden entry is still reachable if something links to it."
+        },
+        "hideFromAdmin": {
+          "type": "boolean",
+          "description": "The mirror, for views about being a PARTICIPANT: an admin is exempt from mineOnly, so a personal page embedding a mineOnly rotation would show them everyone else's column under a heading reading \"My tasks\". Setting both flags hides the entry from every user and is rejected at load."
+        }
       },
       "oneOf": [
-        { "required": ["view"] },
-        { "required": ["table"] },
-        { "required": ["group"] }
+        {
+          "required": [
+            "view"
+          ]
+        },
+        {
+          "required": [
+            "table"
+          ]
+        },
+        {
+          "required": [
+            "group"
+          ]
+        }
       ]
     }
   }

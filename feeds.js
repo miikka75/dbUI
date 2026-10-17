@@ -117,7 +117,7 @@
 
     if (mode === 'shared') {
       if (view.mineOnly) errors.push(at + '`feed` cannot be combined with `mineOnly` — a published file has no viewer to resolve "me" against (use `feed: "per-person"`)');
-      var meFound = hasMe(view.filter) || srcs.some(function(s) { return hasMe(s && s.filter); });
+      var meFound = hasMe(view.filter) || srcs.some(function(s) { return s && s.feed !== false && hasMe(s.filter); });
       if (meFound) errors.push(at + '`feed` cannot be combined with an `@me` filter — a published file is served to everyone, so it would carry whoever published it (use `feed: "per-person"`)');
       return errors;
     }
@@ -129,7 +129,7 @@
       return errors;
     }
     srcs.forEach(function(s, i) {
-      if (!s || hasMe(s.filter)) return;
+      if (!s || s.feed === false || hasMe(s.filter)) return;   // left out of the file: nothing to narrow
       errors.push(at + '`feed: "per-person"` needs an `@me` filter on every source, and source ' + (i + 1) +
                   ' ("' + ((s && s.table) || '?') + '") has none — it would put its rows in every subscriber\'s file');
     });

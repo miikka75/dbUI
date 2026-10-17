@@ -459,3 +459,104 @@ describe('rows.js — sortByCol direction', () => {
     assert.deepEqual(Rows.sortByCol(rows, 'n', null, false).map(r => r.n), ['c', 'b', 'a']);
   });
 });
+
+describe('rows.js — comparing to another column, and a lookup that reads a view', () => {
+  const R = require('../../rows');
+  it('an operand { col } reads the same row', () => {
+    assert.equal(R.condMatches({ balance: 350, cost: 300 }, { balance: { gte: { col: 'cost' } } }), true);
+    assert.equal(R.condMatches({ balance: 150, cost: 300 }, { balance: { gte: { col: 'cost' } } }), false);
+    assert.equal(R.condMatches({ a: 1, b: 1 }, { a: { ne: { col: 'b' } } }), false);
+  });
+  it('lookup.view takes its rows from ctx.viewRows', () => {
+    const rows = R.resolveComputed([{ owner: 'a@x' }, { owner: 'b@x' }],
+      [{ name: 'balance', computed: { lookup: { view: 'bal', match: 'owner', on: 'owner', field: 'coins', default: 0 } } }],
+      { dataCache: {}, viewRows: (n) => (n === 'bal' ? [{ owner: 'a@x', coins: 350 }] : []) });
+    assert.deepEqual(rows.map((r) => r.balance), [350, 0]);
+  });
+});
+
+describe('rows.js — dateAdd and max/min aggregates', () => {
+  const R = require('../../rows');
+  const add = (row, spec) => R.resolveComputed([row], [{ name: 'e', computed: { dateAdd: spec } }], {})[0].e;
+  it('adds months then days; an amount may name a column', () => {
+    assert.equal(add({ s: '2026-01-15', m: 12 }, { from: 's', months: { col: 'm' }, days: -1 }), '2027-01-14');
+    assert.equal(add({ s: '2026-03-10' }, { from: 's', days: 14 }), '2026-03-24');
+  });
+  it('clamps to the month end (31 Jan + 1 month = 28 Feb)', () => {
+    assert.equal(add({ s: '2026-01-31' }, { from: 's', months: 1 }), '2026-02-28');
+  });
+  it('no start, or an amount that is not a number, gives no date', () => {
+    assert.equal(add({ s: '' }, { from: 's', months: 1 }), '');
+    assert.equal(add({ s: '2026-01-01', m: '' }, { from: 's', months: { col: 'm' } }), '');
+  });
+  it('max / min per group, blank when a group has no value', () => {
+    const rows = [{ o: 'a', e: '2026-05-01' }, { o: 'a', e: '2027-01-14' }, { o: 'b', e: '' }];
+    const out = (agg) => Object.fromEntries(R.aggregateRows({ groupBy: { column: 'o' }, aggregate: agg }, rows).map((r) => [r.o, r.x]));
+    assert.deepEqual(out({ max: 'e', into: 'x' }), { a: '2027-01-14', b: '' });
+    assert.deepEqual(out({ min: 'e', into: 'x' }), { a: '2026-05-01', b: '' });
+  });
+});
+
+describe('rows.js — dateAdd weeks', () => {
+  const R = require('../../rows');
+  it('weeks move the date by seven days each, after the months', () => {
+    const r = R.resolveComputed([{ s: '2026-01-15', m: 12, w: 2 }], [{ name: 'e', computed: { dateAdd: { from: 's', months: { col: 'm' }, weeks: { col: 'w' }, days: -1 } } }], {})[0];
+    assert.equal(r.e, '2027-01-28');
+  });
+});
+
+describe('rows.js — count, reference paths and table derivation hooks', () => {
+  const R = require('../../rows');
+  it('count: active rows of another table pointing here, optionally narrowed', () => {
+    const cache = { p: [{ id: 1, mem: 'm1', sent: 'yes' }, { id: 2, mem: 'm1', sent: '' }, { id: 3, mem: 'm2', sent: 'yes', _status: 'archive' }] };
+    const rows = R.resolveComputed([{ id: 'm1' }, { id: 'm2' }], [{ name: 'n', computed: { count: 'p', on: 'mem', where: { sent: 'yes' } } }], { dataCache: cache });
+    assert.deepEqual(rows.map((r) => r.n), [1, 0]);
+  });
+  it('a dotted key or {col} operand follows the path hook; a key the row holds is read as is', () => {
+    R.setHooks({ path: (row, p) => (p === 'plan.months' ? 12 : 'x') });
+    try {
+      assert.equal(R.condMatches({ plan: 'a' }, { 'plan.months': { gte: 12 } }), true);
+      assert.equal(R.condMatches({ n: 13 }, { n: { gt: { col: 'plan.months' } } }), true);
+      assert.equal(R.condMatches({ 'a.b': 1 }, { 'a.b': 1 }), true);
+      const r = R.resolveComputed([{ s: '2026-01-15' }], [{ name: 'e', computed: { dateAdd: { from: 's', months: { col: 'plan.months' }, days: -1 } } }], {})[0];
+      assert.equal(r.e, '2027-01-14');
+    } finally { R.setHooks(null); }
+  });
+  it('buildRows fills a table\'s derived columns through the derive hook, on copies', () => {
+    const cache = { t: [{ id: 'a', x: 1 }] };
+    R.setHooks({ derive: (table, rows) => rows.map((r) => Object.assign({}, r, { y: r.x + 1 })) });
+    try {
+      assert.equal(R.buildRows({ sources: ['t'] }, cache)[0].y, 2);
+      assert.equal(cache.t[0].y, undefined);
+    } finally { R.setHooks(null); }
+  });
+});
+
+describe('rows.js — computed `value`', () => {
+  it('puts the same amount on every row of its source', () => {
+    const rows = [{ _source: 'bookings' }, { _source: 'claims' }, { _source: 'bookings' }];
+    Rows.resolveComputed(rows, [{ name: 'delta', source: 'bookings', computed: { value: 100 } }], { dataCache: {} });
+    assert.deepEqual(rows.map((r) => r.delta), [100, undefined, 100]);
+  });
+});
+
+describe('rows.js — computed `streakAt` and `add`', () => {
+  // Mondays: 2026-10-05, 10-12, 10-19, 10-26.
+  const rows = [
+    { _source: 'b', owner: 'a', on: '2026-09-21' },                     // week A
+    { _source: 'b', owner: 'a', on: '2026-10-05' }, { _source: 'b', owner: 'a', on: '2026-10-13' },
+    { _source: 'b', owner: 'a', on: '2026-10-21' }, { _source: 'b', owner: 'a', on: '2026-10-22' },
+    { _source: 'b', owner: 'z', on: '2026-10-21' },
+    { _source: 'c', owner: 'a' }
+  ];
+  it('is the run of weeks this row ends, per owner; levels count the thresholds reached; add sums', () => {
+    const out = Rows.resolveComputed(rows.map((r) => Object.assign({}, r)), [
+      { name: 'run', source: 'b', computed: { streakAt: 'on', by: 'owner' } },
+      { name: 'lvl', source: 'b', computed: { streakAt: 'on', by: 'owner', levels: [1, 3] } },
+      { name: 'delta', source: 'b', computed: { add: [1, { col: 'lvl' }] } }
+    ], { dataCache: {} });
+    assert.deepEqual(out.map((r) => r.run), [1, 1, 2, 3, 3, 1, undefined]);
+    assert.deepEqual(out.map((r) => r.lvl), [1, 1, 1, 2, 2, 1, undefined]);
+    assert.deepEqual(out.map((r) => r.delta), [2, 2, 2, 3, 3, 2, undefined]);
+  });
+});

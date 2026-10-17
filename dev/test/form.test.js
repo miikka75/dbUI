@@ -39,9 +39,14 @@ describe('form — whose record is it', () => {
     assert.equal(Form.build(custom, { me: ME, ownerCol: 'kirjoittaja', columns: ['q'] }).record.id, 'a');
   });
 
-  it('with `once: false` it never claims an existing row', () => {
+  it('with `once: false` a SENT record is never claimed, but the one started and not yet sent is', () => {
     // A form that collects many submissions per person starts blank every time; the previous ones are
-    // rows in the table, not this person's draft.
+    // rows in the table, not this person's draft. The one just started is -- or it could not be filled in.
+    const many = [{ id: 'old', owner: ME, sent: 'yes', updated_at: '2026-10-01' }, { id: 'new', owner: ME, sent: '', updated_at: '2026-10-02' }];
+    const opts = { me: ME, once: false, columns: ['q'], submitColumn: 'sent', submitValue: 'yes' };
+    assert.equal(Form.build(many, opts).record.id, 'new');
+    assert.equal(Form.build(many.slice(0, 1), opts).record, null);
+    // Without a submitColumn there is no telling a draft from a sent one, so nothing is claimed.
     assert.equal(Form.build(rows, { me: ME, once: false, columns: ['q'] }).record, null);
   });
 

@@ -162,6 +162,15 @@ function _startSupabase(config) {
       appInstance.currentUserEmail = user.email;
       appInstance.needsReauth = false;   // clear any transient prompt raised before the redirect resolved
       if (!_sbAuthInited) { _sbAuthInited = true; init(); }   // boot once
+    } else if (!_sbAuthInited) {
+      // Signed out. A database with public tables lets a visitor in (anon may read its schema then);
+      // any other asks them to sign in, exactly as before.
+      // Ignored if someone signed in meanwhile (see backend-firebase.js): the session is theirs, not a visitor's.
+      StorageSupabase.get('_meta', 'schema').then(function(sd) {
+        if (_sbUser || _sbAuthInited) return;
+        if (!sd) throw new Error('no public schema');
+        _sbAuthInited = true; appInstance.currentUserEmail = ''; appInstance.visitorMode = true; init();
+      }).catch(function() { if (_sbUser || _sbAuthInited) return; appInstance.needsReauth = true; appInstance.loading = false; });
     } else {
       appInstance.needsReauth = true; appInstance.loading = false;
     }
@@ -175,6 +184,20 @@ function _startSupabase(config) {
     if (user && _sbAuthInited) { _sbUser = user; return; }   // ignore token-refresh churn once booted
     onUser(user);
   });
+}
+
+// Email sign-in: Supabase sends one email with a sign-in LINK and (if the template includes {{ .Token }})
+// a 6-digit CODE. Either proves the mailbox, which is what app_email_verified accepts. A new address gets
+// an account; whether it then gets in is the app's question (open sign-up, or an admin's approval).
+function authEmailStart(email) {
+  if (!_sb) return Promise.reject(new Error('not configured'));
+  return _sb.auth.signInWithOtp({ email: email, options: { emailRedirectTo: location.origin + location.pathname, shouldCreateUser: true } })
+    .then(function(r) { if (r && r.error) throw r.error; return { code: true }; });
+}
+// The code from that email. Signed in, the page reloads into the account (rather than reboot a running app).
+function authEmailVerify(email, code) {
+  return _sb.auth.verifyOtp({ email: email, token: String(code || '').trim(), type: 'email' })
+    .then(function(r) { if (r && r.error) throw r.error; location.reload(); });
 }
 
 function triggerOAuth() {

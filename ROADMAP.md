@@ -717,7 +717,7 @@ useful to an admin who already holds the token there — and the panel is what m
 own this is a button that solves a problem nobody has: a token is rotated when it leaks, which has
 happened exactly once, and `npx supabase secrets set` handled it in one line.
 
-### RSVP attendance verification *(schema pattern, not code)*
+### RSVP attendance verification *(landed — in the demo bundle, and it was not quite config)*
 
 "Did the people who signed up actually turn up?" — a verifier marks attendance, and only verified
 rows count toward any report.
@@ -743,7 +743,22 @@ Two traps worth writing into SCHEMA.md when this is done:
 Known limitation: `ownerWritableWhile` gates on a column value, not a date. "Editable until the event
 happens" is not expressible; "editable until someone marks attendance" is.
 
-### QR check-in — scan a code to mark attendance *(scan phase 1.5 — the config branch of the shipped scan view)*
+**What building it found.** "Config, not code" was wrong by one function. The RSVP writer built its row
+by hand, without column defaults, so `attendance` was born blank. The write layers then refused the
+create, because a non-owner-writable column must equal its default at create, and had they accepted it,
+the row would have been frozen from birth. `setRsvp` now stamps defaults through the same
+`_seedDefaults` `_createBlankRow` uses. The picker also had no idea a verified response was frozen, and
+offered a change the server refused; `rsvpFrozen` disables it. A third trap went into SCHEMA.md beside
+the two above: adding the gate to a table that already has rows freezes those rows until their gate
+column is filled.
+
+### QR check-in — scan a code to mark attendance *(the shared-code arrangement is the chosen one: claim + organizer stamp landed, the organizer's QR is next; the verifier arrangement was dropped)*
+
+**Decided 2026-10-10: members check themselves in; nobody scans the attendee.** The verifier
+arrangement below was built (#264) and closed unmerged. Standing at the door scanning phones one by
+one is the queue this was meant to remove, and it needs every member to carry a personal code first.
+The shared code needs neither, so it is the one this entry builds on. The verifier text is kept for its
+reasoning; *Scan to log an action* phase 1.5 is withdrawn with it.
 
 The companion to *RSVP attendance verification* above: instead of the verifier hunting for each name
 in a list, they scan a code and the attendance column is written.
@@ -825,6 +840,61 @@ Worth being clear about what each step buys, because the ladder has a flat top:
 | Code expires (`validUntil`) | Checking in tomorrow for yesterday | One timestamp comparison in the same rule |
 | Code rotates during the event | Narrows relaying, does not close it | An organizer device writing a heartbeat |
 
+*The first row LANDED* as `rsvp.checkin: { codeColumn, set }`, and one detail moved. The table above has
+the organizer comparing claims "against the real code", which reads as if that code were stored. It is
+not: the organizer types it on the stamping screen and it goes nowhere else, because a code kept on the
+event row is readable by every member from home, which undoes the one thing this step stops. The rows
+below it (a rule checking a stored `_checkin` code, expiry, rotation) remain unbuilt.
+
+**Next: the organizer shows the code as a QR, and the phone's own camera reads it.** Typing a code off a
+slide works, but scanning it is what people expect. The QR carries the deep link the scan view's labels
+already use (`?view=<rsvp view>&scan=<code>`), so iOS Camera, Control Center and
+Android's camera open the app on the right view. No in-app decoder, no `BarcodeDetector`, which iOS does
+not have. The pieces exist: `_ensureQrEncoder`, `Print.qrSvg` and `_pendingScanFromUrl`. What is new:
+
+- an icon button beside the organizer's code box that shows the typed code as a large QR, with the code
+  in text under it for anyone who cannot scan;
+- `_pendingScanFromUrl` also accepts an rsvp view with `checkin`, and the view fills the member's code
+  box. Like a scanned label it **arms, it does not write**: the member presses once,
+  because a link is something anyone can send you.
+
+The code is still stored nowhere. The QR is drawn from what the organizer typed, on their screen only.
+
+**Decided 2026-10-10: the code is the day's, not one event's.** A gym member doing two classes scans
+once, and the claim lands on every response they have for today; the organizer's one press stamps all of
+today's events. Per-event codes would mean one QR per class and a scan per class, which is the friction
+this removes. The cost is accepted: a member who leaves after the first class is still marked for the
+second. Neither this nor the entrance log (a `scan` view at the door) requires the other; joining them
+is a report, not a rule.
+
+**LANDED: the code changes by itself while the QR is on screen (`checkin.rotateMinutes`).** Asked for
+2026-10-12. Today the code changes only when the organizer types a new one, and a press accepts only the
+code in the box, so a member who scanned just before a change is not marked. With `rotateMinutes: N`:
+
+- the organizer's screen makes a fresh random code every N minutes while the QR dialog is open: five
+  characters from an alphabet without look-alikes (no 0/O, 1/I/L), from `crypto.getRandomValues`;
+- the open dialog stamps by itself every 15 seconds, accepting the **current and the previous** code, and
+  stamps once more just before each change and on close. So a code is good for at least N minutes and at
+  most 2N, and a member who scans as the code changes is still marked;
+- it holds a screen wake lock while open, where the browser offers one;
+- the typed box goes away (the organizer types nothing), and **Check in** still stamps by hand with the
+  current and previous code.
+
+Still browser-only: no rules change, and the codes are stored nowhere. The server cannot tell when a
+claim was made, so the frequent stamping is what bounds a code's life, not a timestamp. The failure mode is
+benign: if the tablet sleeps, the code stops changing and nobody is marked until it wakes; claims wait,
+and a claim older than the previous code must be made again. It narrows texting the code home to the
+code's lifetime; it does not close it.
+
+**Later, both modes from one setting.** `checkin.verify: "organizer"` (the default, what landed) or
+`"code"`, where a matching claim is the verdict and the member is marked present with no stamping
+press. `"code"` is the second row of the table above, and it has the cost that row lists. The rules
+must compare the claim against a code the member cannot read: a `_checkin/<eventKey>` document only
+editors can read or write, which the organizer's screen writes when it shows the QR, with a
+`validUntil`. That same check is needed in four places: Firestore rules, Supabase RLS, the dev server
+and `backend-helpers`. Build it only when the stamping press is the actual complaint. A member who was
+not told the code can still be told it by text, in either mode.
+
 **No step closes relaying.** Someone at the event can always text the code to someone who is not. A
 30-second window narrows it; it does not shut it. Every "type the code on the screen" system has this,
 and it is worth deciding up front that it is acceptable rather than buying rotation expecting it to be
@@ -863,7 +933,469 @@ exists, since without that there is nothing for a scan to do. Of the two, the sh
 better first build — it needs no camera at all in its typed form, so it can ship and be used at a real
 event before any of the decoding work above is done.
 
-### Scan to log an action — the same camera, a row appended *(phases 1–4 landed; 1.5 and 5 open)*
+### Registering at the venue — a QR that opens the page on the member's phone *(A: building; B: optional, unbuilt)*
+
+Asked for 2026-10-10: a gym has a tablet with a QR, and a member scans it to register for classes there,
+as they would in the app.
+
+**A. The QR opens the page on the member's own phone.** To scan anything the member needs their phone,
+signed in, and that phone can already register them. So the QR's only job is getting them to the right
+page: it carries `?view=<rsvp view>`, the phone's camera app opens it, and they register as themselves
+on the usual screen. No new identity, no rules, nothing left signed in on a shared device. The tablet
+just shows the code, or the code is printed.
+
+What it needs: a plain `?view=` link opens that screen. Until now `view` was honoured only beside
+`scan`, deliberately, as a scan contract. It becomes a general one: the view opens if the access-filtered
+nav reaches it, and otherwise the app opens as it would anyway (`_screenFor`), so a link cannot reveal a
+screen the reader is not granted. The organizer gets a "QR code for this page" button on the rsvp view,
+which shows the same QR dialog the check-in code uses.
+
+**B. The phone unlocks the tablet (optional, only if A is not enough).** The tablet itself becomes the
+screen the member registers on:
+
+1. The tablet stays signed in as a kiosk account and shows a QR naming a fresh session id.
+2. The member's phone, opening that link, writes a grant: `_kiosk/<session> = { member: me, until }`,
+   creatable only with `member == myEmail()`, and `until` at most a few minutes ahead of `request.time`.
+3. The rules let the kiosk create and change rows stamped `owner == grant.member` while
+   `request.time < grant.until`, within the same `ownerWritable` bounds the member has.
+4. The tablet locks when the member presses Done, or after a minute idle; the grant expires either way.
+
+It needs no server functions, so it fits the free plan. The cost is that it is a new access path,
+"someone acts for you", and it must be written into four layers: Firestore rules, Supabase RLS, the dev
+server and `backend-helpers`. The details that decide whether it is safe: a grant cannot be created for
+someone else, its `until` cannot be pushed out, a session id is single-use (a second grant for it is
+refused), and the kiosk account can do nothing without a live grant. Worth building only for a venue
+where phones are the problem: a small screen, or a member who would rather not use their own device.
+If the tablet should also check members in once unlocked, it can stamp their claim the same way, which
+would make the day code unnecessary there.
+
+### A gym's booking app — what the `gym` example could not express *(proposed 2026-10-12)*
+
+The `gym` bundle was built to mimic a real member app (GOGO Liikuntakeskus, from its store listing and a
+screen recording of every tab). Most of it mapped onto what exists: class booking is `rsvp`, the gate is a
+`scan`, the training history is `stats`, the loyalty shop is the chores bundle's reward shop paid in coins
+earned per visit. What follows is what did NOT map, in the order it should be built. Each item names
+what it costs, because two of them touch the rules and the rest are engine or UI work.
+
+**The flow being mimicked.** The member presses the app's key button and the camera opens. The QR at
+the gate opens the gate. A second QR inside, near the studios, checks them in to the classes they
+booked, with no further press. A member who booked nothing, scanning that second QR, picks a class from
+today's list and is booked and checked in at once. A booked member who has not checked in **10 minutes
+before the start** loses the place, and anyone may take it. Every class row shows the places left, or
+"full".
+
+#### 1. A self-service table's lists are unreadable to the members who use it *(defect — landed)*
+
+Found building the bundle, and it is a defect rather than a gap: SCHEMA.md recommends giving an rsvp's
+status column its own `list`, and on a deployment where members hold no grant on the responses table
+(the normal case — it is self-service) that list never reaches them. `ListAccess.filterLists` and the
+`_lists` read rule (`listAllowed`) both ask whether the reader has access to a table that owns the list,
+and a self-service table is not a grant. The booking view rendered with no toggle at all. The bundle
+worked around it with inline `statuses` until the fix; every other self-service list (attendance, PT status, claim
+status) renders only because those columns are read-only for the owner and fall back to the stored
+value's translation.
+
+Fix: a list is also readable when any of its owning tables is a self-service one. Both inputs are already
+mirrored — `_meta/listTables` and `_meta/ownerTables` — so it is one more disjunct in `listAllowed`,
+the matching clause in the Supabase policy, `filterLists` in the dev server, and a rules test each way.
+Reading a vocabulary reveals no rows, so this widens nothing that matters. **Small; rules.**
+
+#### 2. Check-in that needs no press — `checkin.link: "submit"` *(landed)*
+
+The day-code check-in deliberately arms the box and waits for a press, because a link is something
+anyone can send. `scan` already has the per-view answer to exactly that trade, `"link": "submit"`, and
+check-in should take the same key with the same default. With `rotateMinutes` the code in the link is
+dead within two periods, so a forwarded link buys a minute at most, and pressing nothing after the
+camera opens the app is the gym's whole experience. Same wait-for-tables guard the scan path has. **Small;
+UI only.**
+
+#### 3. Scanning with nothing booked offers today's classes *(landed)*
+
+Today a member with no response for today gets no code box, so the room QR does nothing for them. With
+a code in the link and no booking, show today's remaining classes with a Book button each; booking then
+claims the code into the new row. *(Landed as: the list narrows to today and the code shows disabled
+above it; the booking unfreezes it, and `link` decides whether it then saves itself. Two writes, not
+one: the booking, then the claim — the same two a member makes by hand.)* It is the rsvp view filtered to today with the code
+carried, not a new screen. Once capacity exists (5) a full class is shown but not offered. **Small; UI
+only.**
+
+#### 4. A start time a rule can compare *(landed — as a `datetime` column type, not `startColumn`)*
+
+*What landed:* a `datetime` column type stored as the UTC instant (`toISOString`, the shape `created_at`
+has), edited and shown in local time. An rsvp's existing `dateColumn` may be one, so there is no second
+key: the local day drives today/upcoming, the instant drives the order, and the list shows the time.
+Calendars accept it too. UTC rather than an offset (below) because a string compare is then
+chronological, which is what the rules in 5 and 6 need.
+
+*The proposal as written:*
+
+`classes.starts` is free text ("18:40"). Release (6) is decided at the server against `request.time` /
+`now()`, which needs one comparable instant, and the timezone is the trap: "18:40" is local, the rules
+clock is UTC. Proposal: the events table declares a start column holding a full ISO instant with offset
+(`2026-10-13T18:40:00+03:00`), written by staff (trusted) through a date+time editor, and the rsvp view
+names it (`rsvp.startColumn`). `dateColumn` keeps meaning the day. A `time` column type is the
+alternative and is worse here: it moves the date+time+zone arithmetic into both rules languages. Also
+fixes the calendar and the booking list sorting by a string. **Small–medium; a column editor.**
+
+#### 5. Capacity — places left, and the booking refused when full *(landed, both backends)*
+
+*What landed:* as proposed, with two changes the build forced. The config is a TABLE property of the
+responses table (`capacity: { link, status, column, count, holds }`), since the server enforces it whatever
+screen writes. And its mirror rides inside `_meta/ownerTables`: a `_meta/capacity` of its own put the
+single-write owner path over Firestore's ten document reads, which the emulator caught. The Firestore
+client writes through a transaction rather than a bare batch, so the count it moves is the stored one.
+
+The display and the enforcement turn out to be one mechanism, because of privacy. A booking table is
+`privateRoster`: a member reads only their own rows, so the client cannot count anyone else's booking,
+and making the roster public to get a count publishes who trains when. So the count has to be held by
+the server, on the class row, and that same counter is what refuses the 26th booking.
+
+- **Supabase:** a trigger on booking insert/delete that locks the class row (`select … for update`),
+  counts, refuses past `capacity`, and writes `booked` onto it. A policy alone is not enough: two
+  concurrent inserts each see 24 and both pass.
+- **Firestore:** rules cannot count, so the client writes the booking and `class.booked + 1` in one
+  batch, and the rules allow a member to touch exactly that field of a class they cannot otherwise
+  write, by exactly ±1, only alongside a create/delete of their own booking for that class
+  (`getAfter`), and only while `booked < capacity`. This is the expensive half: a new "member writes one
+  field of a row they have no grant on" path, in the rules, the dev server and the differential test.
+- Schema: `rsvp.capacity: "<column>"` on the events table; the view shows *N left* / *Full*.
+
+**Medium–large; rules in both backends.** This is the item the bundle most visibly lacks.
+
+#### 6. Releasing a no-show's place 10 minutes before the start
+
+No scheduled job is needed — the Spark plan has none anyway. A booking simply stops *holding* a place
+once `now > start − release` and it has not been checked in. The counter then has two parts:
+`booked` (5) and `checked_in`, the second written by the organizer's stamp, which already writes every
+checked-in row. Before the release instant a place is free when `booked < capacity`; after it, when
+`checked_in < capacity`, and a booking made after the release is made at the venue (3) and is claimed
+in the same write. The no-show's own row is left as it is, so the organizer's attendance list still
+says who booked and did not come — which is what `attendance: no_show` is for. Schema:
+`rsvp.release: { "minutesBefore": 10 }`. **Medium; it rides on 4 and 5.**
+
+#### 7. A waitlist — a full class still takes a booking, in a queue
+
+The app being mimicked has none: a full class is full until a place is released at the door. A queue is
+better for the member who planned ahead, and it is asked for, so it is recorded here, with the one
+thing that makes it weaker in this deployment than in a native app said first: **nobody can be told
+they got in.** There is no server to send a push (see *Not proposed*). The member finds out by opening
+the app, or from their calendar, where a promoted booking appears in the per-person feed once 8 exists.
+That is a real answer for a class booked a day ahead and no answer for one two hours away, which is
+what `until` below is for.
+
+**The shape.** Booking a full class writes the booking with `booking: waitlisted` instead of refusing
+it. A waitlisted booking holds no place and is not counted in `booked`. When a booked place is
+cancelled, the **oldest** waitlisted booking for that class becomes `booked`. The member sees *Booked*
+or *Waitlisted — 3rd*, and can leave the queue the way they cancel.
+
+```json
+"rsvp": { …, "capacity": "capacity",
+          "waitlist": { "status": "waitlisted", "until": 120 } }
+```
+
+`until` (minutes before the start) is when the queue stops moving. After it, a freed place is not handed
+to someone who may not know they have it; it waits for the release (6) and goes to whoever is at the
+door, as in the app being mimicked. A waitlisted member who is at the venue takes it the same way
+anyone does, by scanning (3).
+
+**Who promotes is the whole design**, because the cancelling member cannot see the queue (the roster is
+private) and so cannot write the next person's row.
+
+- **Supabase:** the capacity trigger (5) already runs on every cancellation with the class row locked.
+  It promotes the oldest waitlisted row in the same transaction. Ordered, atomic, and nobody's client is
+  involved. This is the natural home, and it is the live deploy.
+- **Firestore:** no trigger exists, so promotion must be a client write that the rules can check.
+  The class row gets a ticket counter: joining the queue takes `ticket = class.tickets + 1` in the same
+  batch (rules check the increment, as in 5). A waitlisted member's own client may then promote its own
+  row when `booked < capacity` and its ticket is the lowest one still waiting. The rules cannot see
+  "lowest still waiting" (that needs a query), so the class row also carries `served`, the highest ticket
+  promoted or abandoned, and a member leaving the queue advances it past any run of abandoned tickets.
+  It works, and it is three counters kept in step by members who cannot read each other's rows. The
+  honest alternative for Firestore is **organizer promotion**: the attendance view gets a *Promote next*
+  press, which needs no new rule at all, because the organizer may write every booking already.
+  Recommendation: build Supabase's trigger, give Firestore the organizer press, and build the ticket
+  counters only if a Firestore deployment asks for self-service promotion.
+- **Position** (*Waitlisted — 3rd*) is also something a member cannot count. Supabase returns it from a
+  `security definer` function that counts only rows ahead of the caller's own. Firestore shows
+  `ticket − served` from the class row, which is exact when nobody ahead has left and an upper bound
+  when someone has; it reads "about 3rd", and says so.
+
+**Medium; it rides on 5, and is only fully useful with 8.**
+
+#### 8. My upcoming bookings, and "Add to calendar"
+
+A booking row has no date — it refers to a class. So the home page cannot list *my upcoming classes*,
+and the per-person feed cannot carry them. Proposal: a calendar source (and a data view's
+`defaultSort`/filter) may take its date **through the ref**: `{ "table": "bookings", "dateColumn":
+"class.date" }`, resolved with the lookup machinery `computed.lookup` already uses. That makes both the
+home list and the feed work with no copy of the date on the booking. **Small–medium; engine.**
+
+#### 9. Statistics the app shows that `stats` cannot
+
+- **A series**: one tile per period, for the last N periods — "minutes per week, last 6 weeks". The
+  bundle hand-writes four tiles with `@week-1`…`@week-3`; `"series": { "column": "done_on",
+  "interval": "weekly", "count": 6 }` generates them, labelled by period. **Small; `stats.js`.**
+- **A streak**: consecutive periods, ending now, with at least one row — the app's class streak and
+  workout streak. `agg: "streak"` with an `interval`. **Small; `stats.js`.**
+- **Time of day**: the app's night-owl and early-bird badges need the hour of a timestamp. A
+  `computed.hourOf` would let a `when` say it. **Small; low value — do it only if asked.**
+
+#### 10. A per-viewer "my gym" choice *(partly: a calendar's `filters`, remembered per viewer)*
+
+Every list in the app is narrowed to the gym the member picked once. dbUI has per-viewer conveniences
+(the nav layout is one, kept in the browser), but none that filters views. A viewer-chosen value for one
+`@` token (`"gym": "@chosen"`) would do it, display-only like `@me`. **Medium; low priority.**
+
+#### 11. One scan button for the door and the class, and a door code that changes *(landed: `nav.scan`, `scan.verify`)*
+
+The app being mimicked has ONE key button: the camera opens, and the QR decides what happens (the gate
+opens, or the member is checked in to their classes). Here the two are separate: the door is a code box
+on the home page, the class is the phone's own camera on the front desk's QR, or a box on the booking
+page. Asked for: one button, large (on a phone, the floating corner button the grid's Add uses), the
+typing field only when the camera cannot read a code, and a door code that rotates like the class one.
+
+**a. A scan button that routes by the QR.** Every QR the app draws already carries
+`?view=<view>&scan=<code>`, so the QR knows where it goes. A floating button (phone: bottom right, the Add
+button's place and look; desktop: the app bar) opens the camera, decodes, and hands the link to the same
+`_pendingScanFromUrl` path the phone's camera uses -- same origin only, and only to a view the schema
+lists for it. Schema: `nav.scan: ["visit_scan", "class_booking"]`. In-app the person pointing the camera IS
+the intent, so it may save without the press a forwarded link needs (the existing deep-link comment says
+exactly this). **Small; UI only.**
+
+**b. The typing field as the fallback.** Decoding in the app needs the browser's `BarcodeDetector`:
+Android Chrome has it; iPhone Safari and desktop Chrome on Windows do not. Where it exists, the button is
+the camera and the field is one tap away ("Type the code"); where it does not, the button opens the field
+directly, and the phone's own camera app still works on the printed or shown QR, as today. Vendoring a
+JS QR decoder would bring the in-app camera to iPhones too; worth it only if the camera-app path is not
+good enough there. **Small; UI only.**
+
+**c. A door code that changes.** A printed code never changes, so anyone can photograph it and log visits
+from home. A changing one needs something AT the door to show it and to vouch for what was scanned --
+the server cannot, because, like the class code, the real code is stored nowhere. So: the class
+check-in's arrangement, generalised to a scan view. A tablet at the door, signed in as staff, shows a QR
+that rotates every few minutes and stamps (`verified`) the visits whose claimed code matches the current or
+previous one; members' visits are claims until then, and the stats count verified ones. Schema:
+`scan.rotate: { minutes, set: { verified: "yes" } }` with the same claim/verdict split `checkin` enforces
+(the verdict column not owner-writable). **Medium**: it lifts `rsvp-checkin`'s rotation and stamping
+into something both views use, rather than copying it. Without the tablet nothing is verified, which is
+the honest cost: the visits, and the gym streak, are worth exactly what the door can vouch for.
+
+Order: a and b together (one change to how scanning starts), then c.
+
+#### 12. Choosing by card — `picker: "cards"` *(landed)*
+
+The plan cards and the reward shop were read-only lists beside a dropdown that did the choosing. Asked
+for: pick the card itself, then press Buy / Claim. First drafted as a button on each card that made a row
+elsewhere (`rowAction`); asked instead to be a SELECTOR, like the dropdown and usable in its place — which
+is the better shape, because it is one more value of the existing column `picker` (`chips`, `toggle`)
+and so works wherever the column is edited: a form, a card, a grid.
+
+- `picker: "cards"` on a `ref` column: its catalogue rows as cards, each showing the lookup's other
+  columns (price, months, details); the chosen one is outlined with a check, pressing it again clears it.
+  The options are the same `getRefOptions` the dropdown offers, so `filterBy` narrows them identically.
+- Buy and Claim are then ordinary `form`s whose field is that column: choose the card, press the form's
+  button. No new write path.
+
+**Small; UI only.**
+
+#### 13. Rewards only when covered *(landed)*
+
+A claim spends coins the member may not have. Not enforced by the server, deliberately: coins come only from
+attended classes (staff-verified), and a claim is only a request until the front desk hands it over -- so
+the real gate is the hand-over. Four general pieces, each usable elsewhere:
+
+- `lookup.view`: a computed lookup reading a VIEW's rows (a balance per member);
+- condition operands `{ col }`: compare one column to another (`balance >= cost`);
+- `board.laneWhen`: a lane a card may enter only while it matches (*Handed over*);
+- a column's `enabledWhen`: picker options greyed by a condition over their catalogue row, with
+  `{ view, field }` operands (cards above *coins to spend*).
+
+#### 14. Pausing a membership *(landed)*
+
+A 12-month membership may be paused for two weeks in all (two one-week pauses), a 6-month one for one week;
+each week paused moves the end date a week later. Built from what exists — a `pauses` table (one row per
+week), a form with `rules` (weeks left on the plan; the week inside the membership), a per-membership
+count (`lookup.view` of an aggregate) — plus three small general pieces:
+
+- a `ref` column's **`label`**: the columns an option and a cell show instead of the raw value, so a
+  reference to a membership reads "12 months · 15/01/2026" rather than its id;
+- **`listFilter` on a `ref`**: narrow which rows are offered (bought, not ended), as it already does for a
+  lookup-backed list;
+- **`weeks`** in `dateAdd`, so the end date moves by the weeks paused without arithmetic in the schema.
+
+Not in it: the membership reading *Paused* during a pause week (the front desk's status column already has
+it), and refusing two pauses in the same week. **Small–medium.**
+
+#### 15. Derived values said once — computed columns on a table, reference paths, counting related rows *(landed)*
+
+The gym defined its membership end date in five places, with helper views only to carry values one step
+along. The same shape recurs in any schema with a due date (loans, invoices, certificates, service
+intervals, task durations), so three general pieces:
+
+- **A `computed` column on a TABLE**: derived on read wherever the table's rows go — views, lookups, paths,
+  forms, rules — and never stored: a new row does not write it, an owner bound does not lock it, a cell does
+  not edit it. A table whose derivation needs another table pulls that table's dependencies in too.
+- **Reference paths** `a.b.c`: follow a `ref` to the row it names — in condition keys, `{ col }` operands
+  and `dateAdd` amounts (`"months": { "col": "plan.months" }`).
+- **`count`**: how many rows of another table point at this one —
+  `{ "count": "pauses", "on": "membership", "where": { "sent": "yes" } }`.
+
+The names are the schema's, never the engine's. **Medium**: the derivation sits on the row path every view
+uses, so it is tested there.
+
+#### 16. Periods that refuse, periods that last, and one clock *(landed)*
+
+A paused member could still book classes and open the door, a pause showed on its first day only, and a
+calendar left open since the morning still offered the 07:00 class. Three general pieces:
+
+- **`blockedBy`** on an rsvp or a scan: days inside the caller's own rows of another table (from..to,
+  `where`) are refused with a message — booking, the shared-code check-in, and the scan. Any "not while
+  suspended / on leave / banned" period has the same shape.
+- **`endColumn`** on a calendar source: a row that lasts shows on each day it spans, with its range.
+- **One app clock** (`clockNow`, ticking every 30 s) for the booking rules, instead of per-component
+  clocks — the calendar's booking control had none and froze at the moment it was drawn.
+
+Screen rules, as `closeBefore` is. **Small.**
+
+#### 17. A log that shows the recent past — relative dates, newest first, the latest N *(landed)*
+
+The workout log and the visit list grow without end. Archiving them is the wrong tool: it takes rows out
+of the streak, the weekly totals and My calendar, the sweep runs only for someone who may archive the
+whole table (not the member), and an archived row still lives in the active store, so it saves no reads.
+What the screen needs is to SHOW less, so three general pieces, each useful on its own:
+
+- **`@today`, `@today-N`, `@today+N` as comparison operands** — `{ "done_on": { "gte": "@today-6" } }` is
+  the last 7 days, `{ "due_on": { "lt": "@today" } }` is overdue. Rolling, unlike `within`'s periods.
+- **`defaultSortDesc`** — the default sort, newest first.
+- ~~**`limit`**~~ and ~~the `@today-N` operands~~ — built for the log, then replaced by `preview` and
+  `within: { calendar }` before merging, and removed: nothing used them.
+
+And `defaultFrom: "@today"`, so a new log row is dated today and stays inside a date-filtered view.
+**Small.**
+
+#### 18. Reports that follow the calendar — a shared period, a Year mode, hours *(landed)*
+
+My calendar's ‹ › and Week / Month moved only the calendar; the workout log, the visits and the reports
+under it kept their own fixed periods. General pieces:
+
+- **A calendar shares the period it shows** (its week, month or year — not the padded grid).
+- **`{ "done_on": { "within": { "calendar": "my_calendar" } } }`** in a view's `filter`: the rows in that
+  period. Logs, aggregates (top 3) and stats all read it, so one page answers "this week / month / year".
+  A calendar that is not on screen counts as its default view around today.
+- **A Year mode** on the calendar: twelve small months, a day with events shaded (a day opens in the day
+  panel, a month's name opens the month), ‹ › a year at a time.
+- **`divide`** on a stats tile: minutes shown as hours.
+
+Next, not built: a **series** tile — the period broken into its weeks or months as bars. **Medium.**
+
+#### 19. A folded embed — `preview: N` *(landed)*
+
+The workout log and the visits under My calendar can be long for a year. `preview: 5` on a view shows an
+embed of it as its first 5 rows with **Show all (M)** / **Show fewer**. Display only: the rows are all
+there for the totals and for the top-level screen. **Small.**
+
+#### 20. My calendar as a feed *(landed)*
+
+A member subscribes to their own booked classes and workouts in their phone's calendar. Pieces:
+
+- **`@me` under an owner column** is the account's email, so a self-service table narrows to a person —
+  what a per-person feed requires of every source. (The signed-in identity's email was never set; fixed.)
+- **`feed: false`** on a calendar source: on screen, out of the file (visits, pauses).
+- **Timed events in the .ics**, with `durationColumn` (a column or a path) for the end.
+- **Subscribe on an embedded calendar**, and **`export: false`** to drop the download button.
+
+**Medium.**
+
+#### 21. The desk: walk-ins and arrivals by hand *(landed)*
+
+Non-members signed in at the desk take places too, and a member without a phone still needs checking in.
+
+- **`capacity.reserved`**: a number on the event row counted as taken by both servers (the Postgres
+  trigger and the Firestore rules) and by *Places left*. Staff set it with a **− n +** stepper in the
+  booking list (`<count-stepper>`, a shared element).
+- **Tap to arrive**: with `checkin.set`, a staff tap on a name in the roster stamps it, a second undoes.
+
+The gym's Attendance view loses its booked count and roll (now in Class check-in) and is renamed Classes.
+**Small–medium.**
+
+#### 22. Statistics, streak coins, and a users list that scales *(landed)*
+
+- **Page `filters`**: multi-selects on a page that narrow every embed on it (shared `<pick-filters>`,
+  also the calendar's). The gym's Statistics page: visits, people, attendance by class and by trainer,
+  visits by gym — filtered by gym, class type and trainer.
+- **`agg: "distinct"`** on a stats tile.
+- **Computed `streakAt`** (the streak level when a row happened) and **`add`**: coins per class = 1 + level.
+- **Settings → Users**: search, role and linked-list filters.
+
+**Medium.**
+
+#### 23. Approve grants the right access — `newUser` *(landed)*
+
+Approving an access request made an editor with no tables, which for a gym member is wrong twice. The
+schema now says what a new person gets (`newUser`: role and tables) and Approve grants exactly that. Not
+proposed here: approving automatically (open registration needs a self-grant rule in all three
+layers), and dropping the gym's curated members list for the owner column.
+
+#### 24. One identity per row, and membership before booking *(landed)*
+
+- **The gym's curated members list is gone**: every row already records whose it is (`owner`), `@me`
+  under it is the account, and an owner column now reads as the person's name everywhere.
+- **`requires`** (rsvp, scan): the inverse of `blockedBy` — a day inside one of the caller's own rows
+  (an active membership), or refused with a message. Staff are exempt from both.
+- **Removing a user** also unlinks them from user-linked lists, and the feed pass revokes the feed of
+  anyone no longer registered.
+
+#### 25. Visitors, open sign-up, and member-only pages *(landed)*
+
+Joining today takes three steps: create an account, request access, and wait for an admin to approve —
+only then can someone buy a membership. A gym wants a visitor to see the schedule and prices without an
+account, sign up on their own, buy, and only then see the member pages. Four pieces:
+
+1. **Public tables** — `"public": true` on a table (the schedule, gyms, class types, plans, news) makes
+   it readable without signing in, read-only. Mirrored like `ownerTables` (`_meta/publicTables`): a
+   Firestore read rule for those collections, an `anon` select policy in Supabase, and the dev server
+   answering a request with no user for them only. The app boots a signed-out visitor into the views
+   whose tables are all public, with a Sign in button; a Book button says to sign in.
+2. **Open sign-up** — `newUser.open: true`: a signed-in account with no user record registers itself
+   with exactly the `newUser` grant, no approval. The rules check that the record it writes equals the
+   mirrored grant, so nobody can sign themselves up for more. The grant names its tables (the rules read
+   an empty one as none; only the Settings grant editor turns an empty selection into full access).
+3. **Member-only pages** — `requires` on a VIEW (the shape rsvp and scan already use): hidden from the
+   menu until the person has a covering row today (an active membership). My calendar, Rewards, Coach
+   and Personal training appear once a membership is active, and go away when it lapses.
+4. **History through a lapse** — nothing is deleted when a membership ends: bookings, workouts, visits
+   and coins stay, out of sight with the member pages, and are all there again on renewal.
+
+Not in this: taking payment. Buying still files an order the front desk activates; real payment needs a
+provider (a Stripe Checkout link, or a Supabase Edge Function — the Firebase free plan allows no
+functions). **Large**: three access layers, and the first signed-out mode of the app.
+
+#### 26. Sign in without Google, and only verified emails count *(landed)*
+
+- **Email sign-in**: the sign-in dialog offers an emailed code or link beside Google — Supabase sends one
+  email with both, Firebase a link. Needs a sending service for real volume (SUPABASE.md).
+- **Only a verified email is an identity**, in all three layers: Firestore and Storage rules
+  (`signedIn()` requires `email_verified`), and Postgres (`app_email_verified`: the provider says so, the
+  sign-in proved the mailbox, or auth.users records the confirmation). Before, only Google being the one
+  provider kept an unverified sign-up under the admin's address from being the admin.
+
+#### 27. The code screen as a kiosk — full screen, PIN lock *(landed)*
+
+The changing door / class code can go full screen and be locked with a PIN chosen on the tablet; the lock
+lives in that browser (the PIN hashed) and survives a reload. The app cannot stop someone leaving the
+browser — that is Guided Access / app pinning on the tablet (SCHEMA.md, scan `verify`). **Small.**
+
+#### Not proposed
+
+- **Opening the gate.** It needs the gate controller's own API and a server to call it from; the
+  `scan` already records the visit, which is the part a database is for.
+- **Push notifications** (booking reminders, membership expiry, a freed place). They need a server to
+  send them, which the Spark plan forbids and GitHub Pages does not have. The subscribable calendar feed
+  is the reminder this deployment can give, which is one more reason for 8.
+- **Payment, device step sync, recommendations.** Payment is a provider integration, Apple Health has no
+  web API, and recommendations are a product rather than a schema.
+
+### Scan to log an action — the same camera, a row appended *(phases 1–4 landed; 1.5 withdrawn; 5 open)*
 
 QR check-in, above, writes an *answer* onto a row that already exists: someone signed up, and the scan
 records that they turned up. This entry asks whether the same scan can create the record instead — a
@@ -1040,9 +1572,9 @@ afterwards. And **the config check belongs to `scan.js`, not to `validateSchema`
 is the precedent, and it is what makes requirement 4 (a view that renders but cannot write) a tested
 property rather than an error string nobody executes.
 
-**Phase 1.5 — check-in, as config.** `match: "owner"` plus `codeCol` turns the same module into the
-entry above, still with no camera. It is listed as a half-phase because it is a resolver branch and a
-test, not a feature.
+**Phase 1.5 — check-in, as config. WITHDRAWN.** `match: "owner"` plus `codeCol` would have turned the
+same module into the verifier arrangement of the entry above. It was built (#264) and closed: members
+check themselves in with the organizer's shared code instead, which lives in `rsvp.checkin`.
 
 **Phase 2 — codes on paper. LANDED.** A printable label sheet over the scan view's catalogue, one code
 per row, through `print.js`. Code 39 is a 44-entry pattern table rendered as inline SVG — no vendored
@@ -2316,7 +2848,7 @@ instance, and renders a `shown` computed that is `rows` untouched until a header
 `Rows.sortByCol` over them — so an embedded `ref` column sorts in the same catalogue order as the grid.
 All three table bodies an embed can draw (the editable table, the read-only spec table, and an inline
 `{{self}}` table) have it, with no arrow — no sortable header in the app shows one any more; `aria-sort` carries the direction on all of them. The card, list and chip layouts have no header row and keep `defaultSort`.
-### Narrowing a lookup-backed picker — which rows are OFFERED
+### Narrowing a lookup-backed picker — which rows are OFFERED *(landed: the column shape, as `listFilter`)*
 
 A `select` whose `list:` names a lookup offers every row of it. `lookupListValues` sweeps
 `dataCache[name]`, derives each row's value in the asked-for dimension, dedupes, and returns the lot;
@@ -2364,6 +2896,17 @@ cell is always among its own options.
 Cost: a predicate and its wiring into one function (`lookupListValues`), Node-tested against the
 bishopric catalogue; plus, for the row shape, an editor affordance — which is the larger half, and the
 reason to prefer the column shape unless the exclusion is genuinely a property of the row.
+
+*LANDED as the column shape.* `"listFilter": { <condition> }` on a column whose `list:` names a lookup; the
+condition is the ordinary filter language over the lookup's rows, applied in `lookupListValues` (both
+dimension branches) only when the PICKER asks. `columnValueOrder` and the labels call it without one,
+so the invariant holds by construction: a stored value still sorts and renders. The cell's own current
+value is appended to its options when the narrowing excludes it. `Columns.vocabularyErrors` refuses a
+`listFilter` on a non-lookup list and a condition naming a column the lookup lacks. The bishopric example is
+NOT changed: its catalogue has no column that says which rows are positions, and choosing which callings
+may preside is that deployment's call. Named `listFilter` rather than the first draft's `offer`, because it pairs with the `list` it
+sits beside; and the values it names are pinned in `forEachFilterListValue` like a view filter's, so
+renaming one in the Lookup tab cannot silently empty the picker.
 
 ### A linked position that still says which position it is *(landed on screen: the role beside the name, not in it)*
 
@@ -3120,10 +3663,8 @@ has asked rather than work waiting to be done.
 shipped — see its entry above, which is kept in place rather than reduced to a Shipped bullet because
 the reasoning behind what landed is the same document as the reasoning for the rest of it.)
 
-**Scan phase 1.5** — check-in as config (`match: "owner"` + `codeCol`) — is the cheapest unbuilt thing
-now that the date label has shipped, a resolver branch and a test, and it is what turns the shipped scan view into the QR
-check-in entry above. Worth doing only when somebody actually wants the verifier-scans-attendee
-arrangement; it is not owed to the shipped half.
+**Scan phase 1.5** (verifier-scans-attendee check-in) was built and withdrawn (#264). Members check
+themselves in with the organizer's shared code instead; see *QR check-in*.
 
 **Sorting inside an embed** sat beside it on cost, and has shipped (#233) — both the `ref` order and the
 clickable header.
@@ -3148,13 +3689,34 @@ convention at the top of this file exists for precisely that, and is now applied
 loop — and since then the UI, the orphan sweep, and the storage rules without which a real backend
 refused every feed file. Nothing of the feed is ranked here any more.
 
-The RSVP attendance pattern is not in that order because it is not code — it can be authored into a
-schema today.
 
 *View components that declare what they need* sits beside finding 6's extraction series, not ahead
 of it. Neither fixes anything that is wrong on screen; both pay back in tests and in what can be moved
 out later. Its first step (`calendar-view`) is cheap enough to do whenever the calendar is next open
 for another reason.
+
+**The gym entry is ranked inside itself, and its first item jumps the queue.** Item 1 (a
+self-service table's lists are unreadable to its members) is a defect in something SCHEMA.md tells
+authors to do, so it goes ahead of every proposal here, behind only what is wrong in production. Then
+the order is by what each step unlocks for the least risk:
+
+1. **Lists of self-service tables** — the defect; one disjunct per rules layer.
+2. **`checkin.link: "submit"`** and 3. **scan with nothing booked** — UI only, and together they make
+   the room QR behave like the app's: one scan, booked or not, and you are in.
+4. **`startColumn`** — small, and the prerequisite for release; worth doing before capacity so the
+   counter design is written against real instants from the start.
+5. **Capacity** — the expensive one and the one the example most visibly lacks. Build Supabase first
+   (the live deploy; a trigger is the natural home), Firestore second (the new one-field write path).
+6. **No-show release** — only once 4 and 5 exist; small on top of them.
+7. **Waitlist** — after release, not before: both change what "holds a place" means, and settling
+   release first keeps the waitlist's `until` a cut-over to an existing rule rather than a second
+   design. Supabase's trigger promotion and Firestore's organizer press first; Firestore self-service
+   promotion only if asked.
+8. **Bookings through the ref** — independent of 4–7 and could move up if "my upcoming classes" is
+   wanted before capacity. It is also the waitlist's only way of telling a member they got in, so if
+   the waitlist ships, this should ship with it.
+9. **`stats` series and streak** — independent, cheap, and unranked against the rest: do them whenever
+   `stats.js` is next open. Time-of-day and the per-viewer gym choice (10) wait for someone to ask.
 
 `groupBy.having` (recorded inside *Empty groups*, in Shipped) is unranked on purpose. It is a genuine
 gap — there is no predicate over an aggregated row — but it was named there to stop it being built as

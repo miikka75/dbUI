@@ -205,3 +205,17 @@ describe('ics.js — over the real events.js output', () => {
     });
   });
 });
+
+describe('ics.js — a timed event keeps its time', () => {
+  it('starts at its UTC instant and ends `minutes` later; with no duration it has no DTEND', () => {
+    const doc = lines(Ics.build({ '2026-10-16': [
+      { id: 'b:1', title: 'Spinning', label: 'Class', at: '2026-10-16T04:00:00.000Z', minutes: 45 },
+      { id: 'b:2', title: 'Yoga', label: 'Class', at: '2026-10-16T15:30:00.000Z' }
+    ] }, META));
+    assert.ok(doc.includes('DTSTART:20261016T040000Z'));
+    assert.ok(doc.includes('DTEND:20261016T044500Z'));
+    assert.ok(doc.includes('DTSTART:20261016T153000Z'));
+    assert.equal(doc.filter((l) => l.startsWith('DTEND')).length, 1);
+    assert.ok(!doc.some((l) => l.startsWith('DTSTART;VALUE=DATE')));
+  });
+});

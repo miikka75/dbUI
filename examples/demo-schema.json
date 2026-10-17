@@ -250,8 +250,28 @@
         {
           "name": "note",
           "type": "text"
+        },
+        {
+          "name": "attendance",
+          "type": "select",
+          "list": "attendance_status",
+          "picker": "toggle",
+          "default": "pending"
+        },
+        {
+          "name": "checkin_code",
+          "type": "text"
         }
-      ]
+      ],
+      "ownerWritable": [
+        "practice",
+        "response",
+        "note",
+        "checkin_code"
+      ],
+      "ownerWritableWhile": {
+        "attendance": "pending"
+      }
     },
     "tickets": {
       "archivable": true,
@@ -703,8 +723,48 @@
         "statusColumn": "response",
         "picker": "toggle",
         "showCounts": true,
-        "rosterVisibility": "all"
+        "rosterVisibility": "all",
+        "checkin": {
+          "codeColumn": "checkin_code",
+          "set": {
+            "attendance": "attended"
+          }
+        }
       }
+    },
+    {
+      "name": "rsvp_roll",
+      "kind": "data",
+      "sources": [
+        "rsvps"
+      ],
+      "columns": [
+        "owner",
+        "response",
+        "attendance"
+      ],
+      "defaultSort": "owner"
+    },
+    {
+      "name": "attendance_check",
+      "kind": "data",
+      "sources": [
+        "practices"
+      ],
+      "layout": "card",
+      "defaultSort": "date",
+      "columns": [
+        "date",
+        "title",
+        {
+          "view": "rsvp_roll",
+          "filterBy": {
+            "practice": "id"
+          },
+          "hideEmpty": true
+        }
+      ],
+      "icon": "mdi-clipboard-check-outline"
     },
     {
       "name": "leaderboard",
@@ -1038,6 +1098,10 @@
           {
             "view": "my_rsvp",
             "icon": "mdi-account-check"
+          },
+          {
+            "view": "attendance_check",
+            "icon": "mdi-clipboard-check-outline"
           },
           {
             "table": "practices",

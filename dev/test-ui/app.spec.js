@@ -4602,6 +4602,12 @@ test.describe('v3 @both partition toggle in an embed', () => {
     await pub.locator('[data-testid="feed-stop-ppa_cal"]').click();
     await expect(pub.locator('[data-testid="feed-publish-ppa_cal"]')).toBeVisible();
     await expect(pub.locator('[data-testid="feed-stop-ppa_cal"]')).toHaveCount(0);
+    // The button flips back as soon as publishing is off; the subscribers' files are blanked after it,
+    // one write each, so wait for them rather than read them once (a slow CI runner caught one unwritten).
+    await expect.poll(() => page.evaluate((ids) => ids.every((id) => {
+      const t = window.__uploads.filter((u) => u.path === 'feeds/' + id + '.ics').pop().text;
+      return t.includes('BEGIN:VCALENDAR') && !t.includes('VEVENT');
+    }), firstIds)).toBe(true);
     const stopped = await page.evaluate((ids) => {
       const app = window.appInstance;
       const last = (id) => window.__uploads.filter((u) => u.path === 'feeds/' + id + '.ics').pop().text;
@@ -6377,7 +6383,7 @@ test.describe('calendar view', () => {
       return errs.join(' | ');
     });
     expect(joined).toContain('cal_bad1');
-    expect(joined.toLowerCase()).toContain('must be a date column');
+    expect(joined.toLowerCase()).toContain('must be a date or datetime column');
     expect(joined).toContain('non-existent table');
   });
 
@@ -6968,7 +6974,7 @@ test.describe('demo schema (examples/demo-schema.json) is valid v3', () => {
     expect(r.before).toEqual(['', '']);                          // no response from me yet
     expect(r.myStatusAfter).toBe('coming');                      // my response recorded
     expect(r.tally).toEqual({ coming: 1, maybe: 1 });            // me coming + the other's maybe
-    expect(r.roster).toEqual([                                   // public roster shows WHO (sorted by status)
+    expect(r.roster.map((p) => ({ owner: p.owner, status: p.status }))).toEqual([   // public roster shows WHO (sorted by status)
       { owner: 'me@x.com', status: 'coming' },
       { owner: 'you@x.com', status: 'maybe' }
     ]);
@@ -6982,7 +6988,7 @@ test.describe('demo schema (examples/demo-schema.json) is valid v3', () => {
     // Removing my vote deletes my row (no empty-status orphan) -> I disappear from the roster/tally.
     expect(r.afterRemoveMyStatus).toBe('');
     expect(r.myRowCountAfterRemove).toBe(0);                     // row deleted, not left blank
-    expect(r.afterRemoveRoster).toEqual([{ owner: 'you@x.com', status: 'maybe' }]); // no blank "me@x.com" line
+    expect(r.afterRemoveRoster.map((p) => ({ owner: p.owner, status: p.status }))).toEqual([{ owner: 'you@x.com', status: 'maybe' }]); // no blank "me@x.com" line
     expect(r.afterRemoveTally).toEqual({ maybe: 1 });
     await expect(page.locator('[data-testid="rsvp-view"]')).toBeVisible();
     // A non-admin viewer must not see an unshared member in the roster at all — neither name nor email

@@ -66,6 +66,14 @@ function getColumnRef(table, col) { return Columns.columnRef(SCHEMA, table, col)
 function getColumnOrder(col) { return appInstance ? appInstance.columnValueOrder(col) : null; }
 function colIsMirror(tables, col, tableName) { return Columns.isMirror(tables, tableName, col); }
 function getTableMirrorSource(tables, tableName) { return Columns.tableMirrorSource(tables, tableName); }
+// The local dev identity: `?user=` (empty included) or test_user; '' is a signed-out visitor, nothing set the
+// default dev user. One function, so the app and dev-client.js's X-User header cannot disagree.
+function localDevUser() {
+  var p = new URLSearchParams(location.search);
+  if (p.has('user')) return p.get('user');
+  var t = localStorage.getItem('test_user');
+  return t !== null ? t : 'local@dev';
+}
 function getOwnerCol(table) { return Columns.tableOwnerCol(SCHEMA, table); } // table's type:'owner' column name, or null
 function getDefaultCols(table) { return Columns.tableDefaultCols(SCHEMA, table); } // [{name, from}] for `defaultFrom` columns
 // Owner-write bounds for one table, from the SAME generator the two rules layers read (so the UI can
@@ -355,6 +363,23 @@ function createVueApp() {
       // A code a `?scan=` deep link handed over, and the scan view it belongs to. Held here rather
       // than in the component because it arrives before that component exists.
       pendingScan: null,
+      // THE clock booking rules read (rsvpClosed): ticks every 30 s, so a class closes on every screen
+      // showing it -- a calendar left open since the morning included -- when its window does.
+      clockNow: Date.now(),
+      // The period each mounted calendar shows ({ name: {from, toExclusive} }), for `within: { calendar }`.
+      calPeriods: {},
+      // Booted signed-out into a database with public tables (see the backends' auth handlers).
+      visitorMode: false,
+      // This tablet's QR lock: { view, door, hash } -- the screen it reopens into, and the PIN's hash.
+      kioskLock: (function() { try { return JSON.parse(localStorage.getItem('kiosk_lock') || 'null'); } catch (e) { return null; } })(),
+      // The sign-in dialog: Google, or an emailed code / link (when the backend offers email sign-in).
+      signInOpen: false, authEmail: '', authCode: '', authSent: false, authCodeAllowed: false, authBusy: false, authError: '', authLinkPending: false,
+      // A page's `filters` picks, { page: { column: [values] } }, kept per viewer in their browser.
+      pagePicks: {},
+      // Settings -> Users: what the admin narrowed the list to (a search, roles, linked lists).
+      userFilter: { q: '', roles: [], lists: [] },
+      // The scan button (nav.scan): its typing dialog, what is typed, and which view a typed code is for.
+      scanDialog: false, scanTyped: '', scanNote: '',
       dataCache: {},
       sortCol: null,
       sortAsc: true,
@@ -460,7 +485,7 @@ function createVueApp() {
         var canAccess = function(id) { return self.canAccessNavId(id); };
         var navCfg = self.navConfig;
         var navItems = (navCfg && Array.isArray(navCfg.items)) ? navCfg.items : [];
-        return Nav.build(navItems, self.t.bind(self), canAccess, { isAdmin: self.isAdmin, hasLookup: self.refTables.length || Object.keys(self.visibleLists).length, views: VIEWS, schema: SCHEMA, display: navCfg && navCfg.display, appearance: (self.appConfig && self.appConfig.navAppearance) || {} });
+        return Nav.build(navItems, self.t.bind(self), canAccess, { isAdmin: self.isAdmin, hasLookup: self.canUseLookup, views: VIEWS, schema: SCHEMA, display: navCfg && navCfg.display, appearance: (self.appConfig && self.appConfig.navAppearance) || {} });
       },
       bottomNavTabs: function() {
         // Schema can define explicit bottom nav items: nav.bottomNav = ["view1", "view2", ...]
@@ -472,7 +497,13 @@ function createVueApp() {
         // Fallback: first 5 flattened items
         return Nav.flatten(this.sidebarTabs).slice(0, 5);
       },
-      bottomNavVisible: function() { return this.bottomNavTabs.length > 5 ? this.bottomNavTabs.slice(0, 4) : this.bottomNavTabs; },
+      // "More" when the bar cannot hold every destination: more than 5 asked for, or menu pages the bar
+      // leaves out (they would otherwise be reachable only through the top-left menu). It takes the 5th slot.
+      bottomNavMore: function() {
+        var bar = this.bottomNavTabs, ids = bar.map(function(t) { return t.id; });
+        return bar.length > 5 || Nav.flatten(this.sidebarTabs).some(function(t) { return t.id.charAt(0) !== '_' && ids.indexOf(t.id) < 0; });   // Settings & co. do not count
+      },
+      bottomNavVisible: function() { return this.bottomNavMore ? this.bottomNavTabs.slice(0, 4) : this.bottomNavTabs; },
       // The view-kind computeds, all off ONE discriminator (SchemaNormalize.viewKind, which reads the
       // `kind` the schema carries). They used to be seven independent probes for seven fields, plus an
       // eighth in schema-normalize and a ninth in migrations -- an implicit discriminator cannot be kept
@@ -675,6 +706,9 @@ function createVueApp() {
       },
       // True once users exist and are loaded but the signed-in user matches no record -> Firestore
       // will deny every read. Surface a clear notice instead of a misleading empty-but-full nav.
+      // Signed out, browsing a database's public tables.
+      isVisitor: function() { return this.usersLoaded && !this.currentUserEmail; },
+      authEmailValid: function() { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(this.authEmail || '').trim()); },
       isUnregisteredUser: function() {
         if (this.selfUnregistered) return true;
         return this.usersLoaded && this.userList.length > 0 && !this.currentUserEntry;
@@ -682,6 +716,28 @@ function createVueApp() {
       // Stable display order for the Settings user table. userList is rebuilt from Firestore map-key
       // iteration order on every loadUsers(), which is unstable — sorting by key here keeps rows put
       // across role/tables edits (the key is unchanged) instead of jumping around.
+      // The users list as narrowed in Settings: a search over email and name, the roles picked, and the
+      // userlink lists picked (trainers, members) -- a user linked to a value of any of them. New rows stay.
+      shownUserList: function() {
+        var f = this.userFilter, q = String(f.q || '').trim().toLowerCase(), self = this;
+        return this.sortedUserList.filter(function(u) {
+          if (String(u.key || '').indexOf('_new_') === 0) return true;
+          if (q && String(u.key || '').toLowerCase().indexOf(q) < 0 && String(self.userDisplayName(u) || '').toLowerCase().indexOf(q) < 0) return false;
+          if (f.roles.length && f.roles.indexOf(u.role) < 0) return false;
+          if (f.lists.length) { var vals = ListUsers.valuesForEmail(self.listUserLinks, String(u.key || '').toLowerCase()) || {}; if (!f.lists.some(function(l) { return vals[l]; })) return false; }
+          return true;
+        });
+      },
+      userLinkListItems: function() {
+        var self = this, ls = ((this.schemaData || {}).listSources) || {};
+        return Object.keys(ls).filter(function(n) { return self.isUserLinkList(n); }).map(function(n) { return { title: self.tOr('list.' + n, n), value: n }; });
+      },
+      // The current page's `filters`, and the viewer's picks for them.
+      pageFilterCols: function() { var v = VIEWS[this.currentTable]; return (v && typeof v.markdown === 'string' && Array.isArray(v.filters)) ? v.filters : []; },
+      pagePicked: function() {
+        var n = this.currentTable, p = this.pagePicks[n]; if (p) return p;
+        try { return JSON.parse(localStorage.getItem('page_filter:' + n) || '{}') || {}; } catch (e) { return {}; }
+      },
       sortedUserList: function() {
         return this.userList.slice().sort(function(a, b) {
           return (a.key || '').toLowerCase().localeCompare((b.key || '').toLowerCase());
@@ -967,6 +1023,46 @@ function createVueApp() {
       // True when at least one list is editable — the Lists editor's own affordances are per list
       // (canEditList), this only answers "is any of this editable at all".
       canEditLists: function() { return this.isAdmin || this.userWritableLists.length > 0; },
+      // The views the scan button reaches (`nav.scan`), each with the name its code goes by: a scan view
+      // by its own label, an rsvp view by "Check-in code". Empty = no button.
+      scanTargets: function() {
+        var self = this, list = (this.navConfig && Array.isArray(this.navConfig.scan)) ? this.navConfig.scan : [];
+        if (this.selfUnregistered) return [];
+        return list.filter(function(n) { return VIEWS[n]; }).map(function(n) {
+          var v = VIEWS[n], kind = SchemaNormalize.viewKind(v);
+          var label = kind === 'scan' ? self.tOr(v.scan.label, self.t('scan.code')) : self.t('rsvp.checkin_code');
+          return { view: n, label: label };
+        });
+      },
+      // THE CORNER BUTTON: one per screen, and what it does is the screen's to say. A view's `fab`
+      // ("add" | "scan" | "none") wins; else `nav.fab` sets the app's default; else "add", the button
+      // the grid has always had on a phone. null = no button here (nothing to add, or nowhere to scan to).
+      //
+      // A view's `fab` may also be an object naming WHICH activity, for a page whose activity lives in an
+      // embed or on another screen: { add: "<view>" } adds a row to that view ("Add workout" on a page
+      // embedding the workout log), { open: "<view>" } goes there ("Buy" -> the order form). Each takes
+      // `label` and `icon`. A button the viewer could not use is not shown: no button, no activity.
+      // Resolves to { kind, target, label, icon, extended } or null.
+      fab: function() {
+        var v = VIEWS[this.currentTable];
+        var want = (v && v.fab) || (this.navConfig && this.navConfig.fab) || 'add';
+        if (want === 'scan') return this.scanTargets.length ? { kind: 'scan', icon: 'mdi-qrcode-scan', label: 'scan.press' } : null;
+        if (want === 'add') return (this.mobile && this.canAddRows && this.isDataView) ? { kind: 'add', icon: 'mdi-plus', label: 'btn.add' } : null;
+        if (want && typeof want === 'object') {
+          var ext = { label: want.label, icon: want.icon, extended: !!want.label };
+          if (want.add && VIEWS[want.add] && this.canMutateEmbed('view', want.add)) return Object.assign({ kind: 'addTo', target: want.add, icon: 'mdi-plus' }, ext, { icon: want.icon || 'mdi-plus', label: want.label || 'btn.add' });
+          if (want.open && VIEWS[want.open]) return Object.assign({ kind: 'open', target: want.open }, ext, { icon: want.icon || 'mdi-arrow-right', label: want.label || ('view.' + want.open) });
+        }
+        return null;
+      },
+      // The Lookup tab is where reference data is MAINTAINED. Someone who can change nothing in it -- a
+      // member who reads the catalogues through the app's own views -- gets no tab for it: a screen of
+      // read-only vocabularies is clutter to them, not a feature.
+      canUseLookup: function() {
+        var self = this, w = this.userWritableTables;
+        return this.refTables.some(function(t) { return !w || w.indexOf(t) >= 0; })
+          || Object.keys(this.visibleLists).some(function(l) { return self.canEditList(l); });
+      },
       // Doc-view bodies are writable by admins/editors (mirrors the _pages__active rule / dev-server
       // gate); viewers get a read-only page with no Edit button instead of a save that would 403.
       canEditPages: function() { return this.isAdmin || this.currentUserRole === 'editor'; },
@@ -1065,7 +1161,7 @@ function createVueApp() {
         return Leftovers.corpus([doc, VIEWS, this.pageCache, cfg], [doc.tables || {}], [doc.views || [], VIEWS]);
       },
       staticTranslationKeys: function() {
-        return ['app.title', 'btn.add', 'btn.show_active', 'btn.show_archived', 'btn.more',
+        return ['app.title', 'btn.add', 'btn.show_active', 'btn.show_archived', 'btn.show_all', 'btn.show_fewer', 'btn.decrease', 'btn.increase', 'settings.linked_list', 'auth.sign_in', 'auth.with_google', 'auth.or', 'auth.email', 'auth.send_email', 'auth.check_email', 'auth.check_email_code', 'auth.code', 'kiosk.fullscreen', 'kiosk.exit', 'kiosk.lock', 'kiosk.unlock', 'kiosk.pin', 'kiosk.pin_short', 'kiosk.wrong_pin', 'btn.more',
          'btn.edit', 'btn.copy', 'btn.show', 'btn.hide', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'cal.feed_url', 'feed.subscribe', 'feed.link_pending', 'feed.unsubscribe', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.no_blob_store', 'msg.feed_cap_reached', 'settings.feeds', 'settings.feed_regenerate', 'settings.feed_unpublish', 'settings.feed_not_republishing', 'settings.feed_all_personal', 'settings.feed_subscribers', 'settings.feed_revoking', 'settings.feed_over_cap', 'settings.feed_unpublished', 'settings.feed_revoked', 'settings.feed_sweep', 'settings.csp_reports', 'settings.csp_token', 'settings.csp_bad_token', 'settings.csp_read_failed', 'settings.csp_none', 'settings.csp_extensions', 'settings.csp_directive', 'settings.csp_blocked', 'settings.csp_count', 'settings.csp_last_seen', 'btn.refresh', 'settings.csp_rotate', 'msg.feed_swept', 'cal.err_no_source', 'cal.err_table', 'cal.err_date_col', 'cal.err_not_date', 'cal.err_title_col', 'settings.add_calendar', 'settings.cal_title', 'settings.cal_table', 'settings.cal_date_col', 'settings.cal_title_cols', 'settings.cal_add_source', 'btn.delete', 'btn.confirm_delete', 'cal.err_not_rotation', 'settings.cal_rotations', 'msg.name_taken', 'cal.err_name', 'lang.add_language', 'btn.cancel', 'timeline.empty', 'col.switch_list',
          'img.replace', 'img.upload', 'img.remove', 'img.url', 'img.view', 'img.open_original',
          'btn.close', 'btn.previous', 'btn.next',
@@ -1081,7 +1177,7 @@ function createVueApp() {
          'msg.server_error', 'msg.import_blocked', 'msg.import_error', 'msg.palette_applied', 'msg.error', 'msg.locked',
          'msg.ref_has_children',
          'pivot.total', 'stats.empty',
-         'scan.code', 'scan.created', 'scan.already', 'scan.unknown', 'scan.ambiguous', 'scan.recent',
+         'board.lane_blocked', 'scan.code', 'scan.press', 'scan.foreign', 'scan.claimed', 'scan.door', 'scan.blocked', 'scan.created', 'scan.already', 'scan.unknown', 'scan.ambiguous', 'scan.recent',
          'scan.print_codes', 'scan.print_code', 'scan.no_barcode',
          'scan.camera', 'scan.no_code_found', 'scan.several_codes', 'scan.camera_failed',
          'board.move_to', 'board.unassigned', 'board.add_in_lane', 'board.archive', 'board.confirm_archive',
@@ -1102,8 +1198,8 @@ function createVueApp() {
          'settings.user_id', 'settings.name', 'settings.role', 'settings.tables', 'settings.tables_view', 'settings.add_user', 'settings.all',
          'role.admin', 'role.editor', 'role.viewer',
          'settings.rotation_anchor', 'settings.rotation_from', 'settings.rotation_periods', 'settings.rotation_every', 'settings.rotation_cycle', 'cal.today', 'btn.reset',
-         'cal.month', 'cal.week', 'cal.list', 'cal.undated', 'cal.no_events', 'cal.items', 'cal.add_on_day',
-         'rsvp.date', 'rsvp.title', 'rsvp.your_response', 'rsvp.responses', 'rsvp.who', 'rsvp.none',
+         'cal.month', 'cal.week', 'cal.year', 'cal.list', 'cal.undated', 'cal.no_events', 'cal.items', 'cal.add_on_day',
+         'rsvp.date', 'rsvp.title', 'rsvp.your_response', 'rsvp.responses', 'rsvp.who', 'rsvp.none', 'rsvp.checkin_code', 'rsvp.checkin', 'rsvp.show_code', 'rsvp.page_qr', 'rsvp.places_left', 'rsvp.full', 'rsvp.closed', 'rsvp.started', 'msg.capacity_full', 'msg.checked_in',
          'access.request_access', 'access.request_sent', 'access.your_name', 'access.pending_requests', 'access.approve', 'access.deny', 'access.name_required',
          'profile.title', 'profile.email', 'profile.share_name', 'profile.picture',
          'period.this_week', 'period.weeks_ago', 'period.current',
@@ -1327,6 +1423,9 @@ function createVueApp() {
       // and the export list would come to disagree about what someone may see.
       canAccessNavId: function(id) {
         var self = this;
+        // `requires` on a view: a member-only page, shown while the person has a covering row today (an
+        // active membership). Staff are not members: an admin or editor always sees it.
+        if (VIEWS[id] && VIEWS[id].requires && !this.viewRequiresMet(VIEWS[id])) return false;
         var allowedTables = this.userAllowedTables;   // null = unrestricted
         if (!allowedTables) return true;
         if (VIEWS[id]) {
@@ -1628,7 +1727,7 @@ function createVueApp() {
             if (typeof backend_users === 'undefined') { resolve(); return; }
             if (!self.currentUserEmail) {
               var p = new URLSearchParams(location.search);
-              self.currentUserEmail = p.get('user') || localStorage.getItem('test_user') || 'local@dev';
+              self.currentUserEmail = localDevUser();
             }
             backend_users.getUsers().then(function(u) {
               var list = [];
@@ -1670,6 +1769,45 @@ function createVueApp() {
 
       // Navigation
       // Mobile bottom-nav "More": open the drawer AND expand every group so all sub-items are visible at once.
+      // A visitor's Sign in: the provider's sign-in, or -- on the dev server -- back to the default dev user.
+      signIn: function() {
+        if (typeof triggerOAuth === 'function' && this.mode !== 'local') { if (this.hasEmailSignIn()) this.signInOpen = true; else triggerOAuth(); return; }
+        try { localStorage.removeItem('test_user'); } catch (e) {}
+        var u = new URL(location.href); u.searchParams.delete('user'); location.href = u.toString();
+      },
+      // Email sign-in, through the backend's authEmailStart / authEmailVerify (Supabase: a code and a link in
+      // one email; Firebase: a link). Errors are the provider's own words.
+      // --- The QR kiosk lock (qr-dialog's `kiosk`): this tablet's, never the database's. ---
+      kioskLockMatches: function(k) { var l = this.kioskLock; return !!(l && k && l.view === k.view && String(l.door || '') === String(k.door || '')); },
+      _kioskHash: function(pin) {
+        var text = 'dbui-kiosk:' + pin;
+        if (!(window.crypto && crypto.subtle && window.TextEncoder)) return Promise.resolve(text);   // no SubtleCrypto: stored as-is, on this device only
+        return crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)).then(function(b) {
+          return Array.prototype.map.call(new Uint8Array(b), function(x) { return ('0' + x.toString(16)).slice(-2); }).join('');
+        });
+      },
+      setKioskLock: function(k, pin) {
+        var self = this;
+        return this._kioskHash(pin).then(function(h) {
+          self.kioskLock = { view: k.view, door: k.door || '', hash: h };
+          try { localStorage.setItem('kiosk_lock', JSON.stringify(self.kioskLock)); } catch (e) {}
+        });
+      },
+      kioskPinOk: function(pin) { var l = this.kioskLock; return l ? this._kioskHash(pin).then(function(h) { return h === l.hash; }) : Promise.resolve(true); },
+      clearKioskLock: function() { this.kioskLock = null; try { localStorage.removeItem('kiosk_lock'); } catch (e) {} },
+      // Whether the backend offers email sign-in. A method, not a computed: the backend script defines it on
+      // window after Vue has started, and a computed would keep its first answer.
+      hasEmailSignIn: function() { return typeof window.authEmailStart === 'function'; },
+      sendSignInEmail: function() {
+        var self = this; this.authBusy = true; this.authError = '';
+        return Promise.resolve(window.authEmailStart(this.authEmail.trim())).then(function(r) { self.authSent = true; self.authCodeAllowed = !!(r && r.code); })
+          .catch(function(e) { self.authError = (e && e.message) || String(e); }).then(function() { self.authBusy = false; });
+      },
+      verifySignInCode: function() {
+        var self = this; this.authBusy = true; this.authError = '';
+        return Promise.resolve(window.authEmailVerify(this.authEmail.trim(), this.authCode))
+          .catch(function(e) { self.authError = (e && e.message) || String(e); }).then(function() { self.authBusy = false; });
+      },
       openMoreDrawer: function() { this.openedGroups = this.allGroupIds.slice(); this.drawerOpen = true; },
       // A selection is a history entry, so Back/Forward and a reload keep the user's place. `quiet`
       // selects without one: boot and Back/Forward, where the browser already has the entry.
@@ -1686,7 +1824,7 @@ function createVueApp() {
         this.pageEditing = false;
         var cfg = VIEWS[id] || SCHEMA[id] || {};
         this.sortCol = cfg.defaultSort || null;
-        this.sortAsc = true;
+        this.sortAsc = !cfg.defaultSortDesc;
         if (this.isCalendarView || this.isPivotView || this.isRsvpView || this.isFormView) { this.loadTableData(); }
         else if (this.isDataView || this.isRotationView || this.isBoardView || this.isStatsView || this.isScanView) { this.periodOffset = 0; this.loadTableData(); }
         else if (VIEWS[id] && typeof VIEWS[id].markdown === 'string') this.loadPage(id);
@@ -1720,6 +1858,9 @@ function createVueApp() {
       canCalendarAdd: function(name) {
         var s = this.calAddSource(name);
         if (!s || !s.table || !s.dateColumn || !SCHEMA[s.table]) return false;
+        // A member's OWN row on a self-service table is theirs to add whatever their role -- a viewer books
+        // and logs exactly this way -- so it is decided before the role-wide read-only rule.
+        if (this.canSelfServe(s.table) && !(VIEWS[name] || {}).readonly) return true;
         if (this.viewReadonly(name)) return false;
         // Adding writes the whole mirror cluster, so a grant must cover all of it — but a member with no
         // grant at all may still own rows on a self-service table, and refusing them here was the only
@@ -1788,6 +1929,8 @@ function createVueApp() {
         var self = this;
         return {
           views: VIEWS, dataCache: this.dataCache,
+          deriveRows: function(t, rows) { return self.deriveRows(t, rows); },
+          rowPath: function(r, p) { return self.rowPath(r, p); },
           today: function() { return self._calToday(); },
           t: function(k) { return self.t(k); },
           tOr: function(k, fb) { return self.tOr(k, fb); },
@@ -1809,7 +1952,8 @@ function createVueApp() {
       // Build the { 'YYYY-MM-DD': [events] } map for a calendar view. Undated rows -> '__undated__'.
       // Fail-closed per source: a table the user cannot read contributes nothing. When `window` is
       // given, rotationSources' generated duties are added (bounded to that window).
-      calEventsFor: function(name, window) { return Events.build(name, window, this._eventsCtx()); },
+      // `forFeed`: building a published file, which leaves out `feed: false` sources.
+      calEventsFor: function(name, window, forFeed) { var ctx = this._eventsCtx(); if (forFeed) ctx.forFeed = true; return Events.build(name, window, ctx); },
       // The same ctx, rendering as SOMEBODY ELSE — the per-person feed's whole rendering path. Only the
       // two identity-dependent functions are swapped; everything else is shared, so this cannot drift
       // from what the app itself draws.
@@ -1829,7 +1973,7 @@ function createVueApp() {
         });
         return ctx;
       },
-      calEventsAsFor: function(name, window, identity) { return Events.build(name, window, this._eventsCtxAs(identity)); },
+      calEventsAsFor: function(name, window, identity, forFeed) { var ctx = this._eventsCtxAs(identity); if (forFeed) ctx.forFeed = true; return Events.build(name, window, ctx); },
       // --- Calendars defined in the DATABASE ----------------------------------------------------
       // A calendar is a saved question over tables that already exist, so it does not have to be part of
       // the schema document. These live in the FOLDER CONFIG -- which already holds per-view runtime
@@ -2042,7 +2186,7 @@ function createVueApp() {
           if (!s || !s.table || !SCHEMA[s.table]) { errs.push(self.t('cal.err_table')); return; }
           var cols = (SCHEMA[s.table] && SCHEMA[s.table].columns) || {};
           if (!s.dateColumn || !cols[s.dateColumn]) { errs.push(self.t('cal.err_date_col')); return; }
-          if (!Columns.colIsDate(SCHEMA, s.dateColumn)) errs.push(self.t('cal.err_not_date'));
+          if (!Columns.colIsDate(SCHEMA, s.dateColumn) && !Columns.colIsDateTime(SCHEMA, s.dateColumn)) errs.push(self.t('cal.err_not_date'));
           (s.titleColumns || []).forEach(function(c) { if (!cols[c]) errs.push(self.t('cal.err_title_col')); });
         });
         return errs;
@@ -2063,7 +2207,7 @@ function createVueApp() {
         return (c.sources || []).map(function(s) { return self.tOr('tab.' + s.table, s.table); }).join(', ');
       },
       dateColumnsOf: function(table) {
-        return getColumns(table).filter(function(c) { return Columns.colIsDate(SCHEMA, c); });
+        return getColumns(table).filter(function(c) { return Columns.colIsDate(SCHEMA, c) || Columns.colIsDateTime(SCHEMA, c); });
       },
       // The rows a calendar reads, present before anything renders a FILE from them.
       //
@@ -2077,7 +2221,9 @@ function createVueApp() {
       // and there is no promise to await). Bounded, because a table nobody can read never arrives and an
       // export that hangs is worse than one that is honestly short.
       _awaitViewData: function(name) {
-        var self = this, tables = Feeds.tablesOf(VIEWS, name);
+        // The sources, and what reading them needs (_viewTables: a `durationColumn` path, a `respond` view) --
+        // the same set the calendar screen loads, so a file cannot carry less than the screen shows.
+        var self = this, tables = Feeds.tablesOf(VIEWS, name).concat(this._viewTables(name)).filter(function(t, i, a) { return a.indexOf(t) === i; });
         var missing = function() {
           return tables.filter(function(t) { return self.canReachTable(t) && !self.dataCache[t]; });
         };
@@ -2200,12 +2346,13 @@ function createVueApp() {
       // covers all of it without threading a strings map through displayValue's twenty-one call sites.
       // `identity` renders the calendar as THAT person rather than as the signed-in user — a per-person
       // feed's whole difference. Absent, this is the shared path and nothing changes.
-      _renderIcs: function(name, win, strings, identity) {
+      // `forFeed`: a published file, which leaves out the sources marked `feed: false`.
+      _renderIcs: function(name, win, strings, identity, forFeed) {
         var saved = this.strings;
         if (strings) this.strings = strings;
         try {
           var title = this.tOr('view.' + name, this.tOr('tab.' + name, name));
-          return Ics.build(identity ? this.calEventsAsFor(name, win, identity) : this.calEventsFor(name, win), {
+          return Ics.build(identity ? this.calEventsAsFor(name, win, identity, forFeed) : this.calEventsFor(name, win, forFeed), {
             name: title,
             domain: (typeof Databases !== 'undefined' && Databases.activeKey()) || 'dbui.local'
           });
@@ -2326,7 +2473,7 @@ function createVueApp() {
         return this._awaitViewData(name).then(function() {
           return self._icsStringsFor(self.calendarIcsFor(name).lang, false);
         }).then(function(strings) {
-          return self._uploadFeed(id, self._renderIcs(name, win, strings));
+          return self._uploadFeed(id, self._renderIcs(name, win, strings, null, true));
         })
           .then(function(url) {
             self._setFeedInfo(name, { id: id, url: url, at: new Date().toISOString() });
@@ -2525,8 +2672,13 @@ function createVueApp() {
               self._setFeedInfo(name, { publishing: true });
             }
             var stopped = !self.feedPublishing(name);
-            var revoke = Feeds.pendingRevocation(v, rows, name, stopped);
-            var live = stopped ? [] : self.feedSubscribersFor(name).filter(function(s) { return s.active; });
+            // A subscriber whose account was removed is revoked like one who unsubscribed -- their link must
+            // stop showing their calendar. Only once the user list is known: an empty one means not loaded.
+            var known = self.usersLoaded && self.userList.length, keys = self.userList.map(function(u) { return String(u.key || '').toLowerCase(); });
+            var gone = function(s) { return known && keys.indexOf(s.owner) < 0; };
+            var revoke = Feeds.pendingRevocation(v, rows, name, stopped)
+              .concat(stopped ? [] : Feeds.subscribersOf(v, rows, name).filter(function(s) { return s.active && (s.id || s.url) && gone(s); }));
+            var live = stopped ? [] : self.feedSubscribersFor(name).filter(function(s) { return s.active && !gone(s); });
             var capped = live.slice(0, self.feedSubscriberCap());
             var skipped = live.length - capped.length, revoked = 0;
 
@@ -2558,7 +2710,7 @@ function createVueApp() {
         var id = sub.id || Feeds.newId();
         // Their chosen language while the database still declares it, else the calendar's (Feeds.languageFor).
         return this._icsStringsFor(Feeds.languageFor(sub.lang, declared, viewLang), false).then(function(strings) {
-          return self._uploadFeed(id, self._renderIcs(name, win, strings, self.identityFor(sub.owner)));
+          return self._uploadFeed(id, self._renderIcs(name, win, strings, self.identityFor(sub.owner), true));
         }).then(function(url) {
           return self._patchSubscriberRow(cfg, sub, id, url);
         });
@@ -2760,15 +2912,17 @@ function createVueApp() {
         // guard, same message, as setRsvp and formRecord.
         if (!me) { this.notify(this.t('msg.sign_in_respond')); return null; }
         var now = new Date();
+        var barred = this.barredOn(cfg, fmtDate(now), this.scanCanVerify(name));
+        if (barred) return { outcome: 'blocked', code: String(code || '').trim(), message: barred };
         var res = Scan.plan(code, {
           catalog: this.dataCache[ref.table] || [],
           rows: this.dataCache[table] || [],
           column: cfg.column, codeCol: cfg.codeCol, valueCol: ref.valueCol,
-          set: cfg.set, once: cfg.once || '',
+          set: cfg.set, once: cfg.once || '', verify: cfg.verify || null,
           me: me, ownerCol: getOwnerCol(table) || 'owner',
           today: fmtDate(now), now: now.toISOString()
         });
-        if (res.outcome === 'created') {
+        if (res.outcome === 'created' || res.outcome === 'claimed') {
           var row = this._createBlankRow(table, { prefill: res.prefill });
           // currentData is DERIVED, not aliased to dataCache, so a pushed row does not appear by
           // itself -- the same reason addRow pushes explicitly. Only when this view is the one on
@@ -2830,8 +2984,200 @@ function createVueApp() {
         var events = VIEWS[cfg.events] ? this.embedRows('view', cfg.events) : (this.dataCache[cfg.events] || []);
         var responses = this.dataCache[cfg.responses] || [];
         return Rsvp.build(events, responses, Object.assign({
-          me: this.currentUserEmail || '', ownerCol: getOwnerCol(cfg.responses) || 'owner', today: fmtDate(new Date())
+          me: this.currentUserEmail || '', ownerCol: getOwnerCol(cfg.responses) || 'owner', today: fmtDate(new Date()),
+          checkinColumn: cfg.checkin && cfg.checkin.codeColumn,
+          capacity: this.rsvpCapacity(cfg)
         }, cfg, this.rsvpLink(cfg)));
+      },
+      // The response table's `capacity`, as the engine reads it -- null when the table has none.
+      rsvpCapacity: function(cfg) {
+        var c = SCHEMA[cfg.responses] && SCHEMA[cfg.responses].capacity;
+        return c ? { column: c.column, count: c.count, reserved: c.reserved || '', holds: Array.isArray(c.holds) ? c.holds : [] } : null;
+      },
+      // Self check-in with a shared code (`rsvp.checkin`). The code is the DAY's: one claim covers every
+      // event the member reserved today, one press stamps all of today's events. Two sides, and the
+      // split is the point: the member writes only their CLAIM (the code they were shown), into a column their owner
+      // grant reaches; the organizer types the real code and stamps the verdict onto every matching row.
+      // The real code is never stored -- see Rsvp.checkinTargets.
+      //
+      // Whoever may write the responses table outright is an organizer here; a member's writes go
+      // through self-service and cannot reach the verdict column.
+      // Staff set an event's `capacity.reserved` count (walk-ins signed in at the desk) on the event row.
+      setRsvpReserved: function(name, ev, n) {
+        var cfg = VIEWS[name] && VIEWS[name].rsvp, cap = cfg && this.rsvpCapacity(cfg);
+        if (!cap || !cap.reserved) return;
+        var t = VIEWS[cfg.events] ? (VIEWS[cfg.events].sources || [])[0] : cfg.events;
+        var row = (this.dataCache[t] || []).filter(function(r) { return r.id === ev.id; })[0];
+        if (row) this.saveField(row, cap.reserved, Math.max(0, n), t);
+      },
+      // Staff tick a booked person off as arrived (or take it back): the check-in stamp (`checkin.set`) by
+      // hand, for someone with no phone; undone back to each column's default.
+      setRsvpArrived: function(name, rowId, arrived) {
+        var cfg = VIEWS[name] && VIEWS[name].rsvp, set = cfg && cfg.checkin && cfg.checkin.set;
+        if (!set) return;
+        var t = cfg.responses, self = this, defs = Columns.columnDefs(SCHEMA[t] || {});
+        var row = (this.dataCache[t] || []).filter(function(r) { return r.id === rowId; })[0];
+        if (!row) return;
+        Object.keys(set).forEach(function(c) { var d = defs[c]; self.saveField(row, c, arrived ? set[c] : ((d && typeof d === 'object' && d.default != null) ? d.default : ''), t); });
+      },
+      rsvpOrganizer: function(name) {
+        var v = VIEWS[name], t = v && v.rsvp && v.rsvp.responses;
+        if (!t || this.currentUserRole === 'viewer' || this.canSelfServe(t)) return false;
+        var w = this.userWritableTables;
+        return !w || w.indexOf(t) >= 0;
+      },
+      rsvpCanStamp: function(name) { var v = VIEWS[name]; return !!(v && v.rsvp && v.rsvp.checkin) && this.rsvpOrganizer(name); },
+      // A status VALUE's words: `list.<statusList || the status column's list || the column>.<value>`.
+      rsvpStatusLabel: function(name, v) {
+        var cfg = (VIEWS[name] && VIEWS[name].rsvp) || {};
+        var list = cfg.statusList || this.colIsList(cfg.statusColumn) || cfg.statusColumn;
+        return this.tOr('list.' + list + '.' + v, v);
+      },
+      // The status choices, as { value, title }: the view's inline `statuses`, else the column's list.
+      rsvpOptions: function(name) {
+        var self = this, cfg = (VIEWS[name] && VIEWS[name].rsvp) || {};
+        var vals = cfg.statuses || (this.getListOptions(cfg.statusColumn) || []).map(function(o) { return o.value; });
+        return vals.map(function(v) { return { value: v, title: self.rsvpStatusLabel(name, v) }; });
+      },
+      // At the venue: arrived by the venue's check-in link, or already checked in today. Being here is
+      // what reopens today's events after `closeBefore`.
+      rsvpOnSite: function(name) {
+        var p = this.pendingScan;
+        if (p && p.view === name) return true;
+        return this.rsvpFor(name).events.some(function(e) { return e.isToday && e.myRowId && !!e.myCode; });
+      },
+      // `closeBefore` minutes before the start, joining from anywhere stops; from then until the start it
+      // is open only to a member at the venue, and once the event has started, to nobody. Leaving is never
+      // closed. A date with no time has no start to count back from (validateSchema says so).
+      // An event with a start TIME that has passed: nobody joins or leaves it any more, whether or not
+      // the view sets closeBefore. Check-in is not this rule's (setRsvpCode): arriving late still counts.
+      rsvpStarted: function(ev, now) {
+        var st = String(ev.date || '').length > 10 ? Date.parse(ev.date) : NaN;
+        return !isNaN(st) && (now || this.clockNow) >= st;
+      },
+      rsvpClosed: function(name, ev, now) {
+        var mins = ((VIEWS[name] && VIEWS[name].rsvp) || {}).closeBefore, st = String(ev.date || '').length > 10 ? Date.parse(ev.date) : NaN;
+        if (mins === undefined || isNaN(st)) return false;
+        now = now || this.clockNow;
+        if (now >= st) return true;
+        if (now < st - mins * 60000) return false;
+        return !(this.rsvpOnSite(name) && ev.isToday);
+      },
+      // Frozen (attendance verified), or full or closed and not mine to keep: a full class cannot be
+      // joined, but a member holding a place in it can still give it up.
+      // `blockedBy`: periods of the caller's OWN rows in another table during which this is refused -- a
+      // member's pause weeks. { table, from, to, where?, message }. `day` is a YYYY-MM-DD; `to` defaults to
+      // `from` (a one-day block). Read through deriveRows, so `to` may be a computed end. Display-level, as
+      // closeBefore is: it stops the app offering the choice, not a write made around it.
+      blockedOn: function(blk, day) {
+        if (!blk || !blk.table || !day || !SCHEMA[blk.table]) return false;
+        var me = this.currentUserEmail || '', oc = getOwnerCol(blk.table) || 'owner';
+        var rows = this.deriveRows(blk.table, Rows.partitionRows(this.dataCache, blk.table, 'active'));
+        return rows.some(function(r) {
+          if (r[oc] !== me || (blk.where && !condMatches(r, blk.where))) return false;
+          var a = String(r[blk.from] || '').slice(0, 10), b = String(r[blk.to || blk.from] || a).slice(0, 10);
+          return !!a && day >= a && day <= b;
+        });
+      },
+      // What bars the caller from `cfg` on `day`, as the message to show -- or '' when nothing does:
+      // `blockedBy` (a period of their own that refuses, a pause) or `requires` (a period of their own that
+      // must cover the day, an active membership). Staff are not members: `exempt` skips both for them.
+      barredOn: function(cfg, day, exempt) {
+        if (!cfg || exempt) return '';
+        if (!this.currentUserEmail) return this.t('msg.sign_in_respond');   // a visitor: sign in first
+        var msg = function(p) { return p.message ? this.tOr(p.message, p.message) : this.t('rsvp.closed'); }.bind(this);
+        if (cfg.blockedBy && this.blockedOn(cfg.blockedBy, day)) return msg(cfg.blockedBy);
+        if (cfg.requires && !this.blockedOn(cfg.requires, day)) return msg(cfg.requires);
+        return '';
+      },
+      viewRequiresMet: function(v) {
+        if (this.isAdmin || this.currentUserRole === 'editor') return true;
+        return !!this.currentUserEmail && this.blockedOn(v.requires, fmtDate(new Date(this.clockNow)));
+      },
+      // Tables the views' `requires` read: loaded before the first screen is picked, so a member reloading
+      // on a member-only page lands back on it instead of being sent to the first screen.
+      requiresTables: function() {
+        var out = [];
+        Object.keys(VIEWS).forEach(function(n) { var r = VIEWS[n] && VIEWS[n].requires; if (r && r.table && out.indexOf(r.table) < 0) out.push(r.table); });
+        return out;
+      },
+      rsvpBlocked: function(name, ev) { return !!this.rsvpBarred(name, ev); },
+      rsvpBarred: function(name, ev) { return this.barredOn((VIEWS[name] || {}).rsvp, Calendar.toDateStr(ev.date), this.rsvpOrganizer(name)); },
+      rsvpLocked: function(name, ev, now) { return this.rsvpFrozen(name, ev.key) || this.rsvpStarted(ev, now) || (!ev.myHolds && (ev.full || this.rsvpClosed(name, ev, now) || this.rsvpBlocked(name, ev))); },
+      rsvpPlacesShown: function(name, ev, now) { return ev.capacity !== null || this.rsvpStarted(ev, now) || (!ev.myHolds && (this.rsvpClosed(name, ev, now) || this.rsvpBlocked(name, ev))); },
+      rsvpPlacesText: function(name, ev, now) {
+        if (this.rsvpStarted(ev, now)) return this.t('rsvp.started');
+        if (!ev.myHolds && this.rsvpBlocked(name, ev)) return this.rsvpBarred(name, ev);
+        if (!ev.myHolds && this.rsvpClosed(name, ev, now)) return this.t('rsvp.closed');
+        return ev.full ? this.t('rsvp.full') : this.t('rsvp.places_left') + ': ' + Math.max(0, ev.capacity - ev.booked);
+      },
+      rsvpTodayKeys: function(name) {
+        return this.rsvpFor(name).events.filter(function(e) { return e.isToday; }).map(function(e) { return e.key; });
+      },
+      // The claim goes onto each of my responses for today that is not frozen yet.
+      setRsvpCode: function(name, code) {
+        var self = this, v = VIEWS[name], cfg = v && v.rsvp, ci = cfg && cfg.checkin;
+        if (!ci || !ci.codeColumn) return;
+        var table = cfg.responses, ownerCol = getOwnerCol(table) || 'owner', me = this.currentUserEmail || '';
+        var link = this.rsvpLink(cfg).linkColumn, keys = this.rsvpTodayKeys(name), value = String(code || '').trim();
+        (this.dataCache[table] || []).forEach(function(r) {
+          if (r[ownerCol] !== me || keys.indexOf(r[link]) < 0 || self.rsvpFrozen(name, r[link])) return;
+          if (self.barredOn(cfg, fmtDate(new Date()), false)) return;   // paused, or no membership, today: no check-in
+          self.saveField(r, ci.codeColumn, value, table);
+        });
+      },
+      // Returns how many rows it marked, which the button reports: "nobody" is as much an answer as "12".
+      // `codes`: the accepted codes (a rotating code's current and previous). `quiet`: the open QR dialog
+      // stamping by itself every few seconds, which says nothing and records nothing when nobody matched.
+      stampRsvpCheckin: function(name, codes, quiet) {
+        var v = VIEWS[name], cfg = v && v.rsvp, ci = cfg && cfg.checkin;
+        if (!ci || !this.rsvpCanStamp(name)) return 0;
+        var table = cfg.responses, now = new Date().toISOString();
+        var rows = Rsvp.checkinTargets(Rows.partitionRows(this.dataCache, table, 'active'), {
+          codes: codes, linkColumn: this.rsvpLink(cfg).linkColumn, eventKeys: this.rsvpTodayKeys(name), checkinColumn: ci.codeColumn, set: ci.set });
+        if (quiet && !rows.length) return 0;
+        // One press, one undo entry, however many rows: written the way _writeReorder writes, partial and
+        // recorded per row, since saveField's debounced writes would each land as an entry of their own.
+        Undo.action('checkin', function() {
+          rows.forEach(function(r) {
+            var fwd = { id: r.id }, inv = { id: r.id };
+            Object.keys(ci.set).forEach(function(c) { fwd[c] = ci.set[c]; inv[c] = r[c] == null ? '' : r[c]; r[c] = ci.set[c]; });
+            r.updated_at = now;
+            Undo.record({ table: table, part: 'active', forward: { type: 'put', id: r.id, row: fwd }, inverse: { type: 'put', id: r.id, row: inv } });
+            Writes.putRow(table, Object.assign({ updated_at: now }, fwd), 'active');
+          });
+        });
+        this.notify(this.t('msg.checked_in') + ' (' + rows.length + ')');
+        return rows.length;
+      },
+      // The door screen of a `verify` scan view: confirm today's claims on an accepted code, and record
+      // WHICH door -- the catalogue row the screen was set to -- since a changing code names no door. One
+      // undo entry however many rows, written the way stampRsvpCheckin writes. `quiet`: the open QR
+      // stamping by itself, which says nothing when nobody matched.
+      stampScanVerify: function(name, codes, at, quiet) {
+        var v = VIEWS[name], cfg = v && v.scan, vf = cfg && cfg.verify;
+        if (!vf || !this.scanCanVerify(name)) return 0;
+        var table = (v.sources || [])[0], now = new Date();
+        var set = Object.assign({}, vf.set); if (at) set[cfg.column] = at;
+        var rows = Scan.verifyTargets(Rows.partitionRows(this.dataCache, table, 'active'), { codes: codes, claim: vf.claim, set: set, day: fmtDate(now) });
+        if (quiet && !rows.length) return 0;
+        var stamp = now.toISOString();
+        Undo.action('checkin', function() {
+          rows.forEach(function(r) {
+            var fwd = { id: r.id }, inv = { id: r.id };
+            Object.keys(set).forEach(function(c) { fwd[c] = set[c]; inv[c] = r[c] == null ? '' : r[c]; r[c] = set[c]; });
+            r.updated_at = stamp;
+            Undo.record({ table: table, part: 'active', forward: { type: 'put', id: r.id, row: fwd }, inverse: { type: 'put', id: r.id, row: inv } });
+            Writes.putRow(table, Object.assign({ updated_at: stamp }, fwd), 'active');
+          });
+        });
+        if (rows.length) this.notify(this.t('msg.checked_in') + ' (' + rows.length + ')');
+        return rows.length;
+      },
+      // Who may run a door screen: whoever writes the scan's table outright (a grant, not self-service).
+      scanCanVerify: function(name) {
+        var v = VIEWS[name], table = v && (v.sources || [])[0], w = this.userWritableTables;
+        return !!(v && v.scan && v.scan.verify && table && (!w || w.indexOf(table) >= 0));
       },
       // The `form` view: one focused record the member fills in properly, rather than a cell edited in
       // a grid. Everything underneath is the self-service machinery rsvp already uses -- an owner-stamped
@@ -2858,6 +3204,23 @@ function createVueApp() {
       // Create the caller's record if they have none. Returns it either way, so the component can edit
       // through the ordinary data-cell path -- a form field is the same editor as a grid cell, which is
       // how every column type and widget works here for free.
+      // The record as the form judges it: its stored fields plus `form.compute` (an end date from a start
+      // and a plan, a balance looked up from a view), resolved through the same pipeline a view uses.
+      formComputed: function(name, rec) {
+        var v = VIEWS[name], comp = v && v.form && v.form.compute;
+        if (!rec) return rec;
+        var full = v && v.form && v.form.table ? this.deriveRows(v.form.table, [rec])[0] : rec;
+        if (!comp) return full;
+        return resolveComputed([Object.assign({}, full)], comp, { dataCache: this.dataCache, viewRows: this._viewRowsFn() })[0];
+      },
+      // `form.rules`: [{ require: <condition>, message }] -- conditions the record (computed columns
+      // included) must meet before it is submitted. Returns the messages of the ones it fails.
+      formRuleFailures: function(name, rec) {
+        var v = VIEWS[name], rules = (v && v.form && v.form.rules) || [], full = this.formComputed(name, rec), self = this;
+        if (!rec) return [];
+        return rules.filter(function(r) { return r && r.require && !condMatches(full, r.require); })
+          .map(function(r) { return self.tOr(r.message, r.message || self.t('msg.form_incomplete')); });
+      },
       formRecord: function(name) {
         var v = VIEWS[name];
         if (!v || !v.form || !v.form.table) return null;
@@ -2870,11 +3233,22 @@ function createVueApp() {
         return this._createBlankRow(v.form.table);
       },
 
+      // My response to one event has left the state my owner grant reaches (`ownerWritableWhile` -- e.g. an
+      // organizer marked attendance), so the picker must not offer a change the write layers will refuse.
+      // Only where my writes go through self-service: an editor with a grant on the table is not bounded.
+      rsvpFrozen: function(name, eventKey) {
+        var v = VIEWS[name]; if (!v || !v.rsvp) return false;
+        var table = v.rsvp.responses, ownerCol = getOwnerCol(table) || 'owner';
+        var linkColumn = this.rsvpLink(v.rsvp).linkColumn, me = this.currentUserEmail || '';
+        if (!this.canSelfServe(table)) return false;
+        var mine = (this.dataCache[table] || []).find(function(r) { return r[linkColumn] === eventKey && r[ownerCol] === me; });
+        return !!mine && !this.ownerRowWritable(mine, table);
+      },
       // Upsert the current user's response for one event: update my existing owned row, else create one
       // stamped with owner = my email. Self-service — not gated by role (firestore rules enforce ownership).
       setRsvp: function(name, eventKey, status) {
         var v = VIEWS[name]; if (!v || !v.rsvp) return;
-        var cfg = v.rsvp, table = cfg.responses, ownerCol = getOwnerCol(table) || 'owner';
+        var self = this, cfg = v.rsvp, table = cfg.responses, ownerCol = getOwnerCol(table) || 'owner';
         var linkColumn = this.rsvpLink(cfg).linkColumn;
         var me = this.currentUserEmail || '';
         if (!me) { this.notify(this.t('msg.sign_in_respond')); return; }
@@ -2884,10 +3258,23 @@ function createVueApp() {
         if (!this.dataCache[table]) this.dataCache[table] = [];
         var rows = this.dataCache[table];
         var mine = rows.find(function(r) { return r[linkColumn] === eventKey && r[ownerCol] === me; });
+        if (this.rsvpFrozen(name, eventKey)) return;   // verified: no longer mine to change (rsvpFrozen)
+        // A capped event's count moves on this screen at once (the server moves the stored one), and moves
+        // back if the server refuses -- so the number a member sees is never one press behind their own.
+        var cap = this.rsvpCapacity(cfg), evRow = cap && (this.dataCache[cfg.events] || []).find(function(e) { return e.id === eventKey; });
+        var holds = function(st) { return !!cap && st != null && st !== '' && (!cap.holds.length || cap.holds.indexOf(String(st)) >= 0); };
+        var bump = function(d) { if (evRow && d) evRow[cap.count] = (Number(evRow[cap.count]) || 0) + d; };
+        var before = mine ? mine[cfg.statusColumn] : '';
+        var delta = (holds(status) ? 1 : 0) - (holds(before) ? 1 : 0);
+        var refused = function(undo) { return function(e) { undo(); bump(-delta); self.rsvpRefused(e); }; };
         // Removing the vote (toggled off -> empty status): delete my response row rather than leave an
         // empty-status orphan that would show as a blank line in the roster.
         if (!status) {
-          if (mine) { var mi = rows.indexOf(mine); if (mi >= 0) rows.splice(mi, 1); Writes.deleteRow(table, mine.id, 'active'); }
+          if (mine) {
+            var mi = rows.indexOf(mine); if (mi >= 0) rows.splice(mi, 1);
+            bump(delta);
+            Writes.deleteRow(table, mine.id, 'active').catch(refused(function() { rows.push(mine); }));
+          }
           return;
         }
         if (mine) {
@@ -2897,14 +3284,23 @@ function createVueApp() {
           // already correct on the stored row.
           var patch = { id: mine.id, rosterPublic: pub, updated_at: mine.updated_at };
           patch[cfg.statusColumn] = status;
-          Writes.putRow(table, patch, 'active');
+          bump(delta);
+          Writes.putRow(table, patch, 'active').catch(refused(function() { mine[cfg.statusColumn] = before; }));
         } else {
           var row = { id: this.generateId(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
-          getColumns(table).forEach(function(c) { if (!(c in row)) row[c] = ''; });
+          getColumns(table).forEach(function(c) { if (!(c in row) && !Columns.isDerived(SCHEMA, table, c)) row[c] = ''; });   // derived: never stored
+          this._seedDefaults(table, row);
           row[ownerCol] = me; row[linkColumn] = eventKey; row[cfg.statusColumn] = status; row.rosterPublic = pub;
           rows.push(row);
-          Writes.putRow(table, row, 'active');
+          bump(delta);
+          Writes.putRow(table, row, 'active').catch(refused(function() { var i = rows.indexOf(row); if (i >= 0) rows.splice(i, 1); }));
         }
+      },
+      // Why a response did not save. "Full" is the one a member can act on (pick another class), so it
+      // gets its own words; anything else is the generic failure every other write reports.
+      rsvpRefused: function(e) {
+        var m = String((e && (e.error || e.message)) || e || '');
+        this.notify(/is full/.test(m) ? this.t('msg.capacity_full') : this.t('msg.error') + ' ' + m);
       },
       // Doc-view bodies live in a server-side "_pages" collection (not in schema.json).
       // Falls back to the view's schema-defined `markdown` (seed), then caches it.
@@ -2957,6 +3353,11 @@ function createVueApp() {
         // A form writes ONE table, named per-kind rather than in `sources` -- so nothing else
         // derives it, and without this the view would load nothing and show an empty record.
         if (v.form && v.form.table) push(v.form.table);
+        if (v.form) (v.form.compute || []).forEach(function(c) {
+          var lk = c && c.computed && c.computed.lookup;
+          if (lk && lk.table) push(lk.table);
+          if (lk && lk.view) expand(lk.view);
+        });
         // A scan resolves its code against the LOOKUP its target column references. That table is read,
         // never written, so it is not in `sources` -- and without it the view would load the log it
         // writes and nothing to check a code against, reporting every scan as an unknown code.
@@ -2964,6 +3365,15 @@ function createVueApp() {
           var sref = getColumnRef((v.sources || [])[0], v.scan.column);
           if (sref && sref.table) push(sref.table);
         }
+        // `blockedBy` reads the caller's own periods in another table; unloaded, nothing is ever blocked.
+        [v.rsvp, v.scan].forEach(function(c) { if (!c) return; [c.blockedBy, c.requires].forEach(function(p) { if (p && p.table) push(p.table); }); });
+        // A calendar source that books through an rsvp view (`respond`) reads everything that view does.
+        // And a `durationColumn` path (class.type.minutes) reads every table along it.
+        if (v.calendar) Calendar.sources(VIEWS, name).forEach(function(s) {
+          if (s && s.respond) expand(s.respond);
+          var parts = (s && s.durationColumn) ? String(s.durationColumn).split('.') : [];
+          for (var i = 0; i < parts.length - 1; i++) { var pr = getColumnRef(null, parts[i]); if (!pr || !pr.table) break; push(pr.table); }
+        });
         AccessFeatures.viewTables(v).forEach(expand);
         viewImplicitTables(v).forEach(expand);
 
@@ -2979,6 +3389,12 @@ function createVueApp() {
         (v.columns || []).forEach(function(c) {
           if (isEmbed(c)) (c.sources || []).forEach(expand);
           else if (isViewEmbed(c)) expand(c.view);
+        });
+        // A computed lookup that reads a VIEW (`lookup.view`) needs that view's rows, so everything they
+        // are built from -- or the looked-up value is a blank that reads like a real zero.
+        (v.columns || []).concat(v.compute || []).forEach(function(c) {
+          var lk = c && typeof c === 'object' && c.computed && c.computed.lookup;
+          if (lk && lk.view) expand(lk.view);
         });
         return out;
       },
@@ -3007,6 +3423,7 @@ function createVueApp() {
         // pivot.source and rsvp.events may each name a VIEW whose own config wants history -- the same
         // indirection _viewTables expands, and missing it here would fetch nothing while that view
         // silently rendered a short total.
+        if ((v.columns || []).concat(v.compute || []).some(function(c) { var lk = c && typeof c === 'object' && c.computed && c.computed.lookup; return lk && lk.view && self._viewNeedsArchive(lk.view, seen); })) return true;
         if (v.pivot && self._viewNeedsArchive(v.pivot.source, seen)) return true;
         if (v.rsvp && self._viewNeedsArchive(v.rsvp.events, seen)) return true;
 
@@ -3067,7 +3484,54 @@ function createVueApp() {
           viewWithMe: function(v) { return self._viewWithMe(v); },
           anchorForView: function(n) { return self.anchorForView(n); },
           rotationRowsFor: function(n, rv) { return self.rotationRowsFor(n, rv); },
-          rotationColsFor: function(n, rows, cfg) { return self.rotationColsFor(n, rows, cfg); }
+          rotationColsFor: function(n, rows, cfg) { return self.rotationColsFor(n, rows, cfg); },
+          viewRows: self._viewRowsFn()
+        };
+      },
+      // A computed `lookup.view`'s rows: the view's own pipeline (embedRows). Guarded against a view
+      // reached again while its rows are being built -- a lookup cycle validateSchema also refuses -- so
+      // a mistake renders blanks rather than overflowing the stack.
+      // A TABLE's computed columns, filled in on read: copies of the rows, never the cached objects, so
+      // nothing derived is ever written back. Memoized for one tick (a render asks the same table many
+      // times; any edit happens in a later one), and guarded against a table reached again while its
+      // own values are being derived.
+      deriveRows: function(table, rows, cache) {
+        var defs = SCHEMA[table] ? Columns.derivedDefs(SCHEMA[table]) : [];
+        if (!defs.length || !rows || !rows.length) return rows || [];
+        var self = this, memo = this._deriveMemo;
+        if (!memo) { memo = this._deriveMemo = new Map(); Promise.resolve().then(function() { self._deriveMemo = null; }); }
+        var hit = memo.get(rows); if (hit) return hit;
+        var busy = this._deriveBusy || (this._deriveBusy = {});
+        if (busy[table]) return rows;
+        busy[table] = true;
+        try {
+          var out = resolveComputed(rows.map(function(r) { return Object.assign({}, r); }), defs, { dataCache: cache || this.dataCache, viewRows: this._viewRowsFn() });
+          memo.set(rows, out);
+          return out;
+        } finally { delete busy[table]; }
+      },
+      // A reference path from a row: "plan.months" follows the `plan` ref to the row it names and reads
+      // `months` there (derived columns included); any depth. A step that is not a ref, or names no row,
+      // reads as blank.
+      rowPath: function(row, path) {
+        var parts = String(path).split('.'), cur = row;
+        for (var i = 0; i < parts.length - 1; i++) {
+          if (!cur) return '';
+          var ref = getColumnRef(null, parts[i]);
+          if (!ref || !ref.table) return '';
+          var vc = ref.valueCol || 'id', key = cur[parts[i]];
+          var rows = this.deriveRows(ref.table, Rows.partitionRows(this.dataCache, ref.table, 'active'));
+          cur = rows.filter(function(r) { return r[vc] === key; })[0];
+        }
+        var last = parts[parts.length - 1];
+        return cur && cur[last] != null ? cur[last] : '';
+      },
+      _viewRowsFn: function() {
+        var self = this, busy = this._viewRowsBusy || (this._viewRowsBusy = {});
+        return function(name) {
+          if (!VIEWS[name] || busy[name]) return [];
+          busy[name] = true;
+          try { return Embeds.embedRows('view', name, null, self._embedCtx()); } finally { delete busy[name]; }
         };
       },
       buildEmbedBlock: function(type, name, part) { return Embeds.buildEmbedBlock(type, name, part, this._embedCtx()); },
@@ -3094,7 +3558,14 @@ function createVueApp() {
       embedWhenOk: function(ei, item) { return Embeds.embedWhenOk(ei, item); },
       embedVisible: function(ei, item) { return Embeds.embedVisible(ei, item); },
       // Embed row controls — operate on the active partition across the mirror cluster (dataCache is reactive)
-      embedSources: function(type, name) { return type === 'view' && VIEWS[name] ? (VIEWS[name].sources || []) : [name]; },
+      // A form view names its table as `form.table` rather than `sources`; it is still the one table its
+      // cells write, so the self-service gate (embedSelfServeTable) must see it -- or every field of a
+      // member's own form record renders read-only.
+      embedSources: function(type, name) {
+        var v = type === 'view' && VIEWS[name];
+        if (!v) return [name];
+        return v.sources || (v.form && v.form.table ? [v.form.table] : []);
+      },
       // The embed's self-service table, mirroring `selfServeTable` for the top-level grid: a single
       // source with an owner column the viewer holds no WRITE grant on. Without this an embed asked only
       // "may I write the source table?", so a member whose read-only grant makes the table self-service
@@ -3416,7 +3887,8 @@ function createVueApp() {
           if (view.calendar) {
             // One answer to "what does this calendar read", shared with the export path — see
             // Feeds.tablesOf. Built inline here until the two disagreed.
-            self._ensureCached(Feeds.tablesOf(VIEWS, self.currentTable), null, self._viewNeedsArchive(self.currentTable));
+            // Plus what its events book through (`respond`) -- _viewTables follows that.
+            self._ensureCached(Feeds.tablesOf(VIEWS, self.currentTable).concat(self._viewTables(self.currentTable)), null, self._viewNeedsArchive(self.currentTable));
             return;
           }
           // rotationView (third view kind): generate rows from range; no sources to read.
@@ -3439,11 +3911,9 @@ function createVueApp() {
                                null, self._viewNeedsArchive(self.currentTable));
             return;
           }
-          // RSVP view: load the events + responses tables; rsvpFor() builds the list, re-derives on load.
+          // RSVP view: everything it reads (events, responses, `blockedBy`); rsvpFor() re-derives on load.
           if (view.rsvp) {
-            var rsTables = (VIEWS[view.rsvp.events] ? (VIEWS[view.rsvp.events].sources || []) : [view.rsvp.events]).slice();
-            if (view.rsvp.responses) rsTables.push(view.rsvp.responses);
-            self._ensureCached(rsTables, null, self._viewNeedsArchive(self.currentTable));
+            self._ensureCached(self._viewTables(self.currentTable), null, self._viewNeedsArchive(self.currentTable));
             return;
           }
           // Union or join view
@@ -3462,7 +3932,7 @@ function createVueApp() {
           var srcRows = buildRows(vMe, cache, part);
           // One context for the whole pipeline: the computeds resolve their lookups out of it, and a
           // seeded groupBy reads the referenced catalogue's rows from the same cache.
-          var rctx = { dataCache: self.dataCache, rotationAnchor: self.anchorForView(self.currentTable) };
+          var rctx = { dataCache: self.dataCache, rotationAnchor: self.anchorForView(self.currentTable), viewRows: self._viewRowsFn() };
           // Resolve source-row computeds (e.g. a per-row lookup) BEFORE grouping so an aggregate can sum them.
           if (view.compute) srcRows = resolveComputed(srcRows, view.compute, rctx);
           var rows = resolveComputed(aggregateRows(vMe, srcRows, rctx), view.columns, rctx);
@@ -3474,7 +3944,7 @@ function createVueApp() {
             var src2 = buildRows(vMe2, self.dataCache, part);
             // Rebuilt rather than captured: this runs when a LATE table lands, so the cache it reads
             // must be the one that exists then -- including the catalogue a seeded groupBy waits for.
-            var rctx2 = { dataCache: self.dataCache, rotationAnchor: self.anchorForView(self.currentTable) };
+            var rctx2 = { dataCache: self.dataCache, rotationAnchor: self.anchorForView(self.currentTable), viewRows: self._viewRowsFn() };
             if (view.compute) src2 = resolveComputed(src2, view.compute, rctx2);
             self.currentData = resolveComputed(aggregateRows(vMe2, src2, rctx2), view.columns, rctx2);
           };
@@ -3687,6 +4157,19 @@ function createVueApp() {
       // is open stamps `_status` and still writes to the active store, because that is where a row
       // lives under the field model. Creating it in the archive store instead made it invisible to
       // every session that had not loaded that store (boot does not, unless preload_archive is on).
+      // Seeded-on-create columns: a `defaultFrom` token resolved per user, or a literal `default`. Both
+      // stay editable afterwards (unlike owner), and a caller's prefill applied after this overrides them.
+      // Every path that CREATES a row goes through here: an owner-bounded table's write layers compare a
+      // non-owner-writable column against its default at create, so a row born without it is refused --
+      // and a gate column (`ownerWritableWhile`) born blank would freeze the row for its owner at once.
+      _seedDefaults: function(src, row) {
+        var self = this, cols = getColumns(src);
+        getDefaultCols(src).forEach(function(dc) {
+          if (cols.indexOf(dc.name) < 0) return;
+          row[dc.name] = dc.from ? self.defaultFromValue(dc.from, dc.name) : dc.value;
+        });
+        return row;
+      },
       _createBlankRow: function(primary, opts) {
         var self = this, o = opts || {}, part = o.part || 'active', prefill = o.prefill || {};
         var id = this.generateId(), primaryRow = null;
@@ -3697,7 +4180,7 @@ function createVueApp() {
         withMirrors([primary]).forEach(function(src) {
           var row = { id: id, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
           var cols = getColumns(src);
-          cols.forEach(function(c) { if (!row[c]) row[c] = ''; });
+          cols.forEach(function(c) { if (!row[c] && !Columns.isDerived(SCHEMA, src, c)) row[c] = ''; });   // derived: never stored
           // Stamp owner on create, and with it the table's roster policy. rosterPublic has to ride on the
           // ROW because both rules layers are schema-blind (firestore.rules `resource.data.rosterPublic`,
           // supabase app_can_read) — without it an owner-stamped row is readable only by its owner, so a
@@ -3709,12 +4192,7 @@ function createVueApp() {
             row[oc] = self.currentUserEmail || '';
             row.rosterPublic = !(SCHEMA[src] && SCHEMA[src].privateRoster);
           }
-          // Seeded-on-create columns: a `defaultFrom` token resolved per user, or a literal `default`.
-          // Both stay editable afterwards (unlike owner), and an explicit prefill below overrides them.
-          getDefaultCols(src).forEach(function(dc) {
-            if (cols.indexOf(dc.name) < 0) return;
-            row[dc.name] = dc.from ? self.defaultFromValue(dc.from, dc.name) : dc.value;
-          });
+          self._seedDefaults(src, row);
           for (var pc in prefill) { if (cols.indexOf(pc) >= 0) row[pc] = prefill[pc]; }  // only columns the mirror actually has
           if (part !== 'active') row._status = part;
           if (!self.dataCache[src]) self.dataCache[src] = [];
@@ -3841,7 +4319,9 @@ function createVueApp() {
       },
 
       // Column helpers
-      colIsDate: function(col) { return Columns.colIsDate(SCHEMA, col); },
+      // A computed `dateAdd` IS a date, though no table declares it -- so it renders and sorts like one.
+      colIsDate: function(col) { return Columns.colIsDate(SCHEMA, col) || !!computedDateCols()[col]; },
+      colIsDateTime: function(col) { return Columns.colIsDateTime(SCHEMA, col); },
       colIsNumber: function(col) { return Columns.colIsNumber(SCHEMA, col); },
       colIsImage: function(col) { return Columns.colIsImage(SCHEMA, col); },
       colIsUrl: function(col) { return Columns.colIsUrl(SCHEMA, col); },
@@ -3849,6 +4329,7 @@ function createVueApp() {
       toDateStr: function(v) { return toDateStr(v); },
       // A date as displayed, in the app language's locale (calendar.js dateLabel). Display only.
       dateLabel: function(v) { return Calendar.dateLabel(v, this.calLocale()); },
+      dateTimeLabel: function(v) { return Calendar.dateTimeLabel(v, this.calLocale()); },
       // Whether the active backend can store an uploaded file (Firebase Storage). Other backends lack it,
       // so an `image` column degrades to a paste-a-URL text input. See uploadFile.
       canUploadFiles: function() { return !!(typeof backend !== 'undefined' && backend && backend.uploadFile); },
@@ -3866,7 +4347,9 @@ function createVueApp() {
       // free-string list beside it that nothing can score. `translatableLists` already accepts a lookup
       // table name for the same reason. The option VALUE is the lookup's GROUP dimension (see below);
       // the rest of the row is reference data.
-      lookupListValues: function(name, valueCol) {
+      // `where` (a column's `listFilter`) narrows which ROWS contribute -- the picker's concern only; the sort
+      // and the labels call this without it, so a value nothing offers any more still sorts and renders.
+      lookupListValues: function(name, valueCol, where) {
         if (!name || !SCHEMA[name] || !SCHEMA[name].isLookup) return null;
         // An explicit dimension wins over the default below. A catalogue with more than one meaningful
         // column -- an organization, a calling, and the handle naming the pair -- can only be drawn
@@ -3877,6 +4360,7 @@ function createVueApp() {
           // Columns.rowHandle for why the stored value is an override and not the source.
           var def = SCHEMA[name], order = getColumns(name), seen = {}, out = [];
           this._catalogueRows(name).forEach(function(r) {
+            if (where && !condMatches(r, where)) return;
             var v = Columns.rowHandle(def, order, r, valueCol);
             if (!v || seen[v]) return;
             seen[v] = 1; out.push(v);
@@ -3892,7 +4376,7 @@ function createVueApp() {
         // one dimension it has that anyone typed.
         var order = getColumns(name), h = Columns.lookupHierarchy(SCHEMA[name], order);
         var defaultCol = h ? (h.by === 'id' ? h.value : h.parent) : Columns.lookupCols(SCHEMA[name], order)[0];
-        return defaultCol ? this._lookupColumnValues(name, defaultCol) : [];
+        return defaultCol ? this._lookupColumnValues(name, defaultCol, where) : [];
       },
       // A lookup table's rows in CATALOGUE order -- the one answer to "what order is this lookup in",
       // asked by the Lookup editor, the board's ref lane, every picker drawn from a lookup, and the sort
@@ -3918,22 +4402,33 @@ function createVueApp() {
       // One column of a lookup, deduped and in catalogue order, skipping blanks. A blank is how a row says
       // it has no value in THIS dimension -- an ordination is a row of the callings catalogue that names
       // no ward position -- so it must not become an empty option.
-      _lookupColumnValues: function(name, col) {
+      _lookupColumnValues: function(name, col, where) {
         var seen = {}, out = [];
         this._catalogueRows(name).forEach(function(r) {
+          if (where && !condMatches(r, where)) return;
           var v = r[col];
           if (v == null || v === '' || seen[v]) return;
           seen[v] = 1; out.push(v);
         });
         return out;
       },
-      getListOptions: function(col, altList) {
+      // `item`, when given, is the row being edited: under a `listFilter` narrowing its CURRENT value stays
+      // among the options even when the narrowing excludes it. Values are stored as text, so a historical
+      // agenda holds whoever actually presided, and a picker that cannot show the cell's own value is a
+      // cell that silently blanks the next time someone touches it.
+      getListOptions: function(col, altList, item) {
         var self = this;
         var listName = altList || this.colIsList(col);
         // The alternate list of a `listSwitch` is a list of its own, so it never carries the column's
         // lookup dimension -- passing it through would draw the toggle's options from the wrong table.
-        var fromLookup = this.lookupListValues(listName, altList ? null : Columns.colListValueCol(SCHEMA, col));
+        var narrow = altList ? null : Columns.colListFilter(SCHEMA, col);
+        var fromLookup = this.lookupListValues(listName, altList ? null : Columns.colListValueCol(SCHEMA, col), narrow);
         var items = fromLookup || (listName && this.listsCache[listName] ? this.listsCache[listName] : []);
+        if (fromLookup && narrow && item) {
+          var cur = item[col], have = {};
+          items.forEach(function(v) { have[v] = 1; });
+          items = items.concat((Array.isArray(cur) ? cur : [cur]).filter(function(v) { return v != null && v !== '' && !have[v]; }));
+        }
         var result = items.map(function(v) {
           var o = { title: self.listLabel(listName, v), value: v }, role = self.listRole(listName, v);
           if (role) o.subtitle = role;   // a linked position: the person is the title, the role its second line
@@ -4011,9 +4506,21 @@ function createVueApp() {
       // `currentTable` names the host. So a view that asked for abbreviated names printed them in full
       // the moment it was embedded, and the host's own obscureNames array reached across into columns
       // it was never written for.
-      displayValue: function(col, val, nsCol, viewCfg) {
+      // `plain`: no ref label -- what a label's own columns are rendered with, since a label column may share
+      // its name with the ref it labels (claims.reward labelled by ref_rewards.reward) and would recurse.
+      displayValue: function(col, val, nsCol, viewCfg, plain) {
         if (Array.isArray(val)) { var self = this; return val.map(function(x) { return self.displayValue(col, x, nsCol, viewCfg); }).filter(Boolean).join(', '); }
         if (!val) return '';
+        // An owner column holds an account's email; it reads as the person (their profile name).
+        if (!plain && this.colIsOwner(col)) return this.userLabel(val);
+        if (this.colIsDateTime(col)) return this.dateTimeLabel(val);
+        // A labelled ref names the row it points at, not its key ("12 months · 15/01/2026", not an id).
+        var lab = !plain && this.colIsRef(col) && this.refRowLabel(col);
+        if (lab) {
+          var rf = this.colRef(col) || {}, vcol = rf.valueCol || 'id';
+          var hit = (this.dataCache[rf.table] || []).filter(function(r) { return r[vcol] === val; })[0];
+          if (hit) return lab(hit);
+        }
         var out = val;
         // Translation namespace: a list column uses its list name; a `ref` column uses its lookup TABLE name,
         // so ref-backed values (e.g. a board's 2-D ref lane and its group dimension) localize through the same
@@ -4296,6 +4803,8 @@ function createVueApp() {
       // On a self-service table the viewer-role blanket-readonly yields to per-row ownership: I may edit
       // MY rows, others stay read-only (owner/mirror/union-foreign columns are always read-only).
       cellReadonly: function(item, col, ownerId) {
+        var dt = item ? this.getSource(item, ownerId) : null;
+        if (dt && Columns.isDerived(SCHEMA, dt, col)) return true;
         if (this.isReadonlyCell(item, col, ownerId)) return true;
         // A STAMPED column is filled in by the app and rewritten by nobody. Every write layer refuses a
         // change to it from anyone but an admin, so offering an editor here would only produce a refused
@@ -4371,11 +4880,12 @@ function createVueApp() {
       canReachTable: function(table) {
         var allowed = this.userAllowedTables;
         if (!allowed) return true;                 // admin / unrestricted
+        if (typeof SCHEMA !== 'undefined' && SCHEMA[table] && SCHEMA[table].public === true) return true;   // public: anyone, a visitor included
         return allowed.indexOf(table) >= 0 || this.canSelfServe(table);
       },
       // Resolve a column's `defaultFrom` token to the value stamped on a new row. Unknown tokens stamp
       // blank rather than writing the token text, so a typo can't end up looking like data.
-      defaultFromValue: function(token, col) { return token === '@me' ? this.meValueFor(col) : ''; },
+      defaultFromValue: function(token, col) { return token === '@me' ? this.meValueFor(col) : token === '@today' ? fmtDate(new Date()) : ''; },
       // Columns an OWNER-scoped write may touch on a self-service table, per the table's `ownerWritable`
       // (mirrored to _meta/ownerWritable for the rules — see BackendHelpers.ownerWritableOf). null = the
       // table sets no bound, so the owner may write the whole row, which is the historical behaviour.
@@ -4415,7 +4925,7 @@ function createVueApp() {
       // getListOptions unconditionally, which returns [] for a `ref` -- its values live in a lookup
       // TABLE, not a list -- so a multi-valued ref would have rendered an empty picker.
       cellOptions: function(col, item) {
-        return this.colIsRef(col) ? this.getRefOptions(col, item) : this.getListOptions(col);
+        return this.colIsRef(col) ? this.getRefOptions(col, item) : this.getListOptions(col, null, item);
       },
       // Options for a `ref` cell: the lookup's rows, labelled the way every other surface labels them.
       //
@@ -4430,11 +4940,83 @@ function createVueApp() {
       //
       // Values are unaffected: `value` stays the raw key, and so do the `counts`/`seen` maps below --
       // what a row IS is its stored value, and only the title is a display concern.
+      // The cards a `picker: "cards"` ref offers: each option of getRefOptions with its catalogue row and
+      // the columns worth showing on it -- the lookup's own, less the value itself, hidden and bookkeeping
+      // ones. A catalogue is small and its columns ARE the description (price, months, details).
+      refCards: function(col, item) {
+        var ref = this.colRef(col);
+        // A list naming a lookup: the dimension it draws on, as the dropdown resolves it (lookupListValues).
+        if (!ref) {
+          var ln = this.colIsList(col), lo = getColumns(ln), lh = SCHEMA[ln] ? Columns.lookupHierarchy(SCHEMA[ln], lo) : null;
+          ref = { table: ln, valueCol: Columns.colListValueCol(SCHEMA, col) || (lh ? (lh.by === 'id' ? lh.value : lh.parent) : (SCHEMA[ln] ? Columns.lookupCols(SCHEMA[ln], lo)[0] : null)) };
+        }
+        var vc = ref.valueCol || 'id', rows = this.dataCache[ref.table] || [];
+        var skip = { id: 1, created_at: 1, updated_at: 1, position: 1 }; skip[vc] = 1;
+        var defs = Columns.columnDefs(SCHEMA[ref.table] || {});
+        var cols = getColumns(ref.table).filter(function(c) { var d = defs[c]; return !skip[c] && !(d && typeof d === 'object' && d.hidden); });
+        var opts = this.colRef(col) ? this.getRefOptions(col, item) : this.getListOptions(col, null, item);
+        var cards = opts.filter(function(o) { return o.value !== ''; }).map(function(o) {
+          var row = rows.filter(function(r) { return r[vc] === o.value; })[0] || {};
+          return { value: o.value, title: o.title, row: row, cols: cols.filter(function(c) { return row[c] != null && row[c] !== ''; }) };
+        });
+        return this.markEnabled(col, cards);
+      },
+      // A ref column's `label`: a function from a referenced row to the words that name it -- its label
+      // columns, each as a cell would show it, joined. null when the column declares none.
+      refRowLabel: function(col) {
+        var self = this, def = null;
+        for (var t in SCHEMA) { var d = Columns.columnDefs(SCHEMA[t])[col]; if (d && typeof d === 'object' && Array.isArray(d.label)) { def = d; break; } }
+        if (!def) return null;
+        return function(r) { return def.label.map(function(c) { return self.colIsDate(c) ? self.dateLabel(r[c]) : self.displayValue(c, r[c], '', null, true); }).filter(Boolean).join(' · '); };
+      },
+      // A column's `enabledWhen`: which options may be chosen, as a condition over each option's catalogue
+      // row. An operand may be { view, field } -- the first row of a view, e.g. "my coins to spend" -- or
+      // { col } -- another column of the catalogue row. Unmatched options stay on show, disabled: a
+      // reward the member cannot afford yet is still worth seeing. A choice already made is never greyed.
+      markEnabled: function(col, opts) {
+        var when = this._colEnabledWhen(col);
+        if (!when) return opts;
+        var self = this, cond = this.resolveViewOperands(when);
+        var ref = this.colRef(col), lt = ref ? ref.table : this.colIsList(col), vc = ref ? (ref.valueCol || 'id') : null;
+        var rows = this.dataCache[lt] || [];
+        return opts.map(function(o) {
+          var row = o.row || rows.filter(function(r) { return vc ? r[vc] === o.value : Object.keys(r).some(function(k) { return r[k] === o.value; }); })[0] || {};
+          return Object.assign({}, o, { disabled: !condMatches(row, cond) });
+        });
+      },
+      // A column is typed the same wherever it appears (the any-table rule colInfo follows), but the same
+      // NAME can also be a catalogue's own column -- `reward` in ref_rewards -- so look for the def that
+      // declares it rather than the first table that has the name.
+      _colEnabledWhen: function(col) {
+        for (var t in SCHEMA) { var d = Columns.columnDefs(SCHEMA[t])[col]; if (d && typeof d === 'object' && d.enabledWhen) return d.enabledWhen; }
+        return null;
+      },
+      // `{ view, field }` operands resolved to a value: the field of the view's first row ('' when none).
+      resolveViewOperands: function(cond) {
+        var self = this;
+        return (function walk(c) {
+          if (Array.isArray(c)) return c.map(walk);
+          if (!c || typeof c !== 'object') return c;
+          if (typeof c.view === 'string' && typeof c.field === 'string') {
+            // The view's tables may be ones this screen never loads (the picker sits on a form). Ask for
+            // what is missing; the answer re-renders through dataCache when it lands.
+            var need = self._viewTables(c.view).filter(function(t) { return !self.dataCache[t]; });
+            if (need.length) self._ensureCached(need);
+            var r = self.embedRows('view', c.view)[0];
+            return r && r[c.field] != null ? r[c.field] : '';
+          }
+          var out = {}; for (var k in c) out[k] = walk(c[k]); return out;
+        })(cond);
+      },
       getRefOptions: function(col, item) {
         var ref = getColumnRef(null, col);   // memoized any-table scan (see colRef); was the same loop
         if (!ref) return [];
         var self = this, ns = ref.table;
         var rows = this._catalogueRows(ref.table);
+        // `listFilter` narrows a ref's rows exactly as it narrows a lookup-backed list's: the picker only.
+        var narrow = Columns.colListFilter(SCHEMA, col);
+        if (narrow) rows = rows.filter(function(r) { return condMatches(r, narrow); });
+        var labelOf = this.refRowLabel(col);
         if (ref.filterBy) {
           var filterBy = ref.filterBy;
           var hasFilter = false;
@@ -4475,7 +5057,7 @@ function createVueApp() {
         var opts = [];
         rows.forEach(function(r) {
           var v = r[valueCol];
-          if (v && !seen[v]) { seen[v] = true; opts.push({ title: self.listLabel(ns, v), value: v }); }
+          if (v && !seen[v]) { seen[v] = true; opts.push({ title: (labelOf && labelOf(r)) || self.listLabel(ns, v), value: v }); }
         });
         return opts;
       },
@@ -5543,12 +6125,79 @@ function createVueApp() {
       // deliberate press records it. Zero-tap is safe in an in-app scanner, where the person
       // pointing the camera IS the intent; it is not safe for a URL.
       //
-      // `view` is honoured only alongside `scan`, and only when it names a scan view: this is a scan
-      // contract, not a general view-routing parameter that something else may later want.
+      // With `scan`, `view` must name a view that takes a scanned code: a scan view, or an rsvp view with
+      // `checkin` (the organizer's QR). Without it, see _linkedViewFromUrl.
+      // THE SCAN BUTTON. One button for every code the app prints: the camera reads it, and the QR says
+      // where it goes -- the door's QR to the visit log, the room's to class check-in -- so there is no
+      // menu. Where the browser cannot decode (no BarcodeDetector: iPhone Safari, desktop Chrome on
+      // Windows), or the picture held no code, it opens a field to type the code into instead.
+      // Unlike a deep link, an in-app scan SAVES: the person pointing the camera is the intent.
+      fabPress: function() {
+        var f = this.fab; if (!f) return;
+        if (f.kind === 'scan') this.scanPress();
+        else if (f.kind === 'add') this.addRow();
+        else if (f.kind === 'addTo') this.embedAddRow('view', f.target);
+        else if (f.kind === 'open') this.selectTab(f.target);
+      },
+      scanPress: function() {
+        if (typeof BarcodeDetector === 'undefined') { this.openScanDialog(''); return; }
+        var el = document.getElementById('scan-fab-photo'); if (el) el.click();
+      },
+      openScanDialog: function(note) {
+        this.scanNote = note || ''; this.scanTyped = '';
+        this.scanDialog = true;
+      },
+      onScanFabPhoto: function(ev) {
+        var self = this, file = ev.target.files && ev.target.files[0];
+        ev.target.value = '';
+        if (!file) return;
+        decodePhoto(file).then(function(r) { if (r.raw) self.routeScan(r.raw, null); else self.openScanDialog(self.t('scan.' + r.outcome)); });
+      },
+      // `raw`: what the camera read, or what was typed. `view`: the view a TYPED code is for (the dialog
+      // says which); a QR names its own. Only views the schema lists in nav.scan are reachable this way.
+      routeScan: function(raw, view) {
+        var self = this, t = Scan.targetFrom(raw, location.origin);
+        if (!t) { this.openScanDialog(this.t('scan.foreign')); return Promise.resolve(); }
+        if (t.view || view) { this._goScan(t.view || view, t.code); return Promise.resolve(); }
+        // A typed code finds its own way: a printed one by the catalogue that holds it, which the screen
+        // the button was pressed on may not have loaded yet -- so load the catalogues first.
+        var cats = this.scanTargets.map(function(x) { var v = VIEWS[x.view]; return v.scan && !v.scan.verify ? (getColumnRef((v.sources || [])[0], v.scan.column) || {}).table : null; }).filter(Boolean);
+        return Promise.resolve(this._ensureCached(cats)).then(function() {
+          var dest = self.scanTargetForCode(t.code);
+          if (!dest) { self.openScanDialog(self.t('scan.unknown')); return; }
+          self._goScan(dest, t.code);
+        });
+      },
+      _goScan: function(dest, code) {
+        if (!this.scanTargets.some(function(x) { return x.view === dest; })) { this.openScanDialog(this.t('scan.foreign')); return; }
+        this.scanDialog = false;
+        this.pendingScan = { view: dest, code: code, direct: true };
+        this.selectTab(dest, true);
+      },
+      // A typed code's target (Scan.targetForCode): a static catalogue code, or a changing code's tag.
+      scanTargetForCode: function(code) {
+        var self = this;
+        return Scan.targetForCode(code, this.scanTargets.map(function(t, i) {
+          var v = VIEWS[t.view], codes = [];
+          if (v.scan && !v.scan.verify) {
+            var ref = getColumnRef((v.sources || [])[0], v.scan.column) || {};
+            var cc = v.scan.codeCol || ref.valueCol || 'id';
+            codes = (self.dataCache[ref.table] || []).map(function(r) { return r[cc]; });
+          }
+          return { view: t.view, tag: Scan.tagFor(i), codes: codes };
+        }));
+      },
+      // The tag a screen showing changing codes for `view` puts first, so a typed one finds its way back
+      // through the scan button. '' when the view is not one the button reaches.
+      scanTag: function(view) {
+        var list = (this.navConfig && Array.isArray(this.navConfig.scan)) ? this.navConfig.scan : [];
+        return Scan.tagFor(list.indexOf(view));
+      },
       _pendingScanFromUrl: function() {
         var p = new URLSearchParams(location.search);
         var code = p.get('scan'), view = p.get('view');
-        if (!code || !view || SchemaNormalize.viewKind(VIEWS[view]) !== 'scan') return null;
+        var v = VIEWS[view], kind = SchemaNormalize.viewKind(v);
+        if (!code || !view || !(kind === 'scan' || (kind === 'rsvp' && v.rsvp.checkin))) return null;
         // Consume it from the address bar: a reload must not re-arm, and the link should not stay in
         // history with a code in it.
         try {
@@ -5558,10 +6207,29 @@ function createVueApp() {
         } catch (e) {}
         return { view: view, code: code };
       },
+      // A plain `?view=<name>` link: a QR on a gym's tablet that opens the class list on the member's own
+      // phone. Consumed like the scan link, so a reload goes back to ordinary navigation.
+      _linkedViewFromUrl: function() {
+        var p = new URLSearchParams(location.search), view = p.get('view');
+        if (!view || p.get('scan')) return null;
+        try {
+          p['delete']('view');
+          var q = p.toString();
+          history.replaceState(null, '', location.pathname + (q ? '?' + q : '') + location.hash);
+        } catch (e) {}
+        return view;
+      },
       _autoSelectTab: function() {
+        // A tablet locked on a code reopens that screen; the screen itself reopens the locked QR.
+        var kl = this.kioskLock;
+        if (kl && VIEWS[kl.view] && this.canAccessNavId(kl.view)) { this.selectTab(kl.view, true); return; }
         // A deep-linked code names the view it belongs to, so it decides which tab opens.
         var pend = this._pendingScanFromUrl();
         if (pend) { this.pendingScan = pend; this.selectTab(pend.view, true); return; }
+        // A linked view resolves through _screenFor like a history entry: against the access-filtered nav,
+        // so a link to a screen this user is not granted opens the first screen instead of revealing it.
+        var linked = this._linkedViewFromUrl();
+        if (linked) { var lid = this._screenFor(linked); if (lid) this.selectTab(lid, true); return; }
         if (this.currentTable) return;
         // A reload keeps the history entry, and with it the screen it recorded.
         var id = this._screenFor(this._historyScreen());
@@ -5601,9 +6269,13 @@ function createVueApp() {
         }
         if (!self.currentUserEmail) {
           var p = new URLSearchParams(location.search);
-          self.currentUserEmail = p.get('user') || localStorage.getItem('test_user') || 'local@dev';
+          self.currentUserEmail = localDevUser();
         }
-        var done = function() { self.usersLoaded = true; self.loading = false; self.loadMyProfile(); self.loadSharedProfiles(); self._overlayUserLists(); self._autoArchive(); self._autoSelectTab(); };
+        var done = function() {
+          self.usersLoaded = true; self.loading = false; self.loadMyProfile(); self.loadSharedProfiles(); self._overlayUserLists(); self._autoArchive();
+          var req = self.requiresTables().filter(function(t) { return self.canReachTable(t); });
+          Promise.resolve(req.length ? self._ensureCached(req) : null).catch(function() {}).then(function() { self._autoSelectTab(); });
+        };
         // Legacy backends without getMyAccess: keep the full-map path (rules-free local/Drive).
         if (typeof backend_users.getMyAccess !== 'function') {
           backend_users.getUsers().then(function(u) {
@@ -5619,6 +6291,12 @@ function createVueApp() {
           a = a || { registered: false };
           self.selfUnregistered = false;
           if (a.bootstrap) return self._bootstrapAdmin(done);
+          // OPEN SIGN-UP: a signed-in account with no record registers itself with the schema's newUser grant
+          // (the rules accept exactly that), then resolves its access again. Once only, so a refusal cannot loop.
+          if (a.registered === false && self.currentUserEmail && !self._signupTried && BackendHelpers.signupOf(self.schemaData || {}) && backend_users.selfRegister) {
+            self._signupTried = true;
+            return backend_users.selfRegister().then(function() { self.loadUsers(); }, function() { self.selfUnregistered = true; self.userList = []; done(); });
+          }
           if (a.registered === false) { self.selfUnregistered = true; self.userList = []; return done(); }
           var email = (self.currentUserEmail || '').toLowerCase();
           if (a.role === 'admin' || a.tables === 'all') {
@@ -5685,9 +6363,12 @@ function createVueApp() {
       },
       // Approve: register the user (editor, no tables yet -> admin grants access via the chip UI), seed
       // their profile display name from the request (so @me identity works right away), then clear it.
+      // Approving grants the schema's `newUser` access (a gym member: a viewer who reads the schedule), or,
+      // with none declared, an editor with no tables -- whom an admin then gives access by hand.
       approveRequest: function(req) {
         var self = this, email = (req.email || '').toLowerCase(), name = (req.name || '').trim();
-        return backend_users.setUserRole(email, 'editor', email, []).then(function() {
+        var nu = (this.schemaData && this.schemaData.newUser) || {};
+        return backend_users.setUserRole(email, nu.role || 'editor', email, nu.tables || []).then(function() {
           return (name && backend_users.setProfileName) ? backend_users.setProfileName(email, name) : null;
         }).then(function() {
           return backend_users.removeAccessRequest(email);
@@ -6074,8 +6755,15 @@ function createVueApp() {
       //   otherwise     -> my profile display name (the value a `users`-backed list is populated from).
       // Without the first branch, `@me` on a userlink list compared my profile name against a curated
       // value and silently matched nothing whenever the two differed.
-      meValueFor: function(col) {
-        return this.meValueForList(col ? getColumnList(null, col) : null);
+      meValueFor: function(col) { return this._meFor(this._myIdentity(), col); },
+      // What `@me` means under column `col` for `identity`: under an OWNER column, the account's email --
+      // what that column holds -- so a self-service table can be narrowed to a person (a per-person feed
+      // needs that); under any other column, their list value or display name.
+      // Whether `col` is some table's owner column (it holds an account's email).
+      colIsOwner: function(col) { return !!col && Object.keys(SCHEMA).some(function(t) { return getOwnerCol(t) === col; }); },
+      _meFor: function(identity, col) {
+        if (this.colIsOwner(col)) return identity.email || '';
+        return this._listValueOf(identity, col ? getColumnList(null, col) : null);
       },
       // The columns a view's filter compares against `@me` (walking $or/$and, which carry no column of
       // their own — the same traversal resolveMeTokens does).
@@ -6110,7 +6798,7 @@ function createVueApp() {
       // two branches must not exist twice — a copy that drifted would filter one person's calendar by
       // another person's name and still render something plausible.
       _myIdentity: function() {
-        return { email: (this.userEmail || ''), listValues: this.myListValues || {}, displayName: this.myDisplayName };
+        return { email: (this.currentUserEmail || ''), listValues: this.myListValues || {}, displayName: this.myDisplayName };
       },
       // The identity of an arbitrary account, for rendering a feed as that subscriber. Admin-only data
       // (`listUserLinks`), which is why only a full-access client publishes.
@@ -6139,7 +6827,7 @@ function createVueApp() {
       resolveMeTokensAs: function(identity, filter) {
         var self = this;
         return this._resolveMeWith(filter, function(col) {
-          return self._listValueOf(identity, col ? getColumnList(null, col) : null);
+          return self._meFor(identity, col);
         });
       },
       _resolveMeWith: function(filter, valueForCol) {
@@ -6162,12 +6850,63 @@ function createVueApp() {
       // untouched when no @me token is present, to avoid needless churn).
       _viewWithMe: function(view) {
         if (!view) return view;
-        var hasMe = (JSON.stringify(view.filter || null).indexOf('"@me"') >= 0) || (JSON.stringify((view.groupBy && view.groupBy.filter) || null).indexOf('"@me"') >= 0);
-        if (!hasMe) return view;
+        var fs = JSON.stringify([view.filter || null, (view.groupBy && view.groupBy.filter) || null]);
+        var hasMe = fs.indexOf('"@me"') >= 0, hasCal = fs.indexOf('"calendar"') >= 0, narrow = this._pageNarrowing(view);
+        if (!hasMe && !hasCal && !narrow) return view;
+        var self = this, res = function(f) { if (hasMe) f = self.resolveMeTokens(f); return hasCal ? self.resolveCalendarPeriods(f) : f; };
         var v = Object.assign({}, view);
-        if (view.filter) v.filter = this.resolveMeTokens(view.filter);
-        if (view.groupBy) { v.groupBy = Object.assign({}, view.groupBy); if (view.groupBy.filter) v.groupBy.filter = this.resolveMeTokens(view.groupBy.filter); }
+        if (view.filter) v.filter = res(view.filter);
+        if (narrow) v.filter = { $and: [v.filter || {}].concat(narrow) };
+        if (view.groupBy) { v.groupBy = Object.assign({}, view.groupBy); if (view.groupBy.filter) v.groupBy.filter = res(view.groupBy.filter); }
         return v;
+      },
+      // A page's `filters`: the viewer's picks narrow every view embedded on it -- only the rows that HAVE
+      // the column (a visit has a gym but no trainer, so a trainer pick leaves visits alone). Null when the
+      // screen is not such a page, or nothing is picked.
+      _pageNarrowing: function(view) {
+        var cols = this.pageFilterCols; if (!cols.length || view === VIEWS[this.currentTable]) return null;
+        var picked = this.pagePicked, out = [];
+        cols.forEach(function(c) {
+          var vals = picked[c] || []; if (!vals.length) return;
+          var e = {}; e[c] = { empty: true };
+          out.push({ $or: [e].concat(vals.map(function(x) { var o = {}; o[c] = x; return o; })) });
+        });
+        return out.length ? out : null;
+      },
+      setPagePick: function(col, vals) {
+        var n = this.currentTable, p = Object.assign({}, this.pagePicked); p[col] = vals || [];
+        var all = Object.assign({}, this.pagePicks); all[n] = p; this.pagePicks = all;
+        try { localStorage.setItem('page_filter:' + n, JSON.stringify(p)); } catch (e) {}
+      },
+      // A filter column's choices -- a ref's catalogue, a list's values -- and its label: shared by a
+      // calendar's and a page's filters.
+      filterOptionsFor: function(col) { return this.colIsRef(col) ? this.getRefOptions(col, {}).filter(function(o) { return o.value !== ''; }) : this.getListOptions(col); },
+      fieldLabelFor: function(col) { return this.tOr('field.' + col, col); },
+      // The period calendar `name` shows: the one on screen, or -- when it is not mounted -- its default
+      // view around today, which is what it would show when opened.
+      calendarPeriod: function(name) {
+        if (this.calPeriods[name]) return this.calPeriods[name];
+        var c = (VIEWS[name] && VIEWS[name].calendar) || {}, today = fmtDate(new Date(this.clockNow));
+        return Calendar.periodFor(today, c.defaultView || 'month', c.weekStart != null ? Number(c.weekStart) : 1, today);
+      },
+      // `{ col: { within: { calendar: name } } }` -> `{ col: { gte: from, lt: toExclusive } }`: the rows in
+      // the period that calendar shows, so a log or a report below it follows its week / month / year.
+      resolveCalendarPeriods: function(filter) {
+        var self = this;
+        var walk = function(x) {
+          if (Array.isArray(x)) return x.map(walk);
+          if (!x || typeof x !== 'object') return x;
+          var o = {};
+          Object.keys(x).forEach(function(k) {
+            var c = x[k], w = c && typeof c === 'object' && !Array.isArray(c) && c.within;
+            if (w && typeof w === 'object' && w.calendar) {
+              var p = self.calendarPeriod(w.calendar), r = Object.assign({}, c);
+              delete r.within; r.gte = p.from; r.lt = p.toExclusive; o[k] = r;
+            } else o[k] = walk(c);
+          });
+          return o;
+        };
+        return walk(filter);
       },
       // Inject the leaderboard's ‹ › back-offset into bare @period tokens (@month -> @month-<offset>).
       // Offset 0 leaves tokens unchanged; only bare tokens (no existing -N) are rewritten.
@@ -6240,12 +6979,19 @@ function createVueApp() {
         if (selected.indexOf('all') >= 0 && prev.indexOf('all') < 0) return 'all';
         if (selected.indexOf('all') >= 0 && selected.length > 1) return selected.filter(function(s) { return s !== 'all'; });
         if (selected.indexOf('all') >= 0) return 'all';
-        return selected.length ? selected : 'all';
+        // An empty EDIT row is not "unrestricted" by itself: the view row may still hold read-only
+        // grants. _saveGrants falls back to 'all' only when the merged grant is empty.
+        return selected;
       },
       removeUser: function(uid) {
         var self = this;
         if (this._userDraft(uid)) { this.userDrafts = this.userDrafts.filter(function(d) { return d.key !== uid; }); return; }
-        backend_users.removeUser(uid).then(function() { self.loadUsers(); });
+        // The reverse of approving: the grant goes, and so do their links to user-linked lists (a trainer's
+        // name), which would otherwise keep pointing `@me` at an account that no longer exists. Their
+        // calendar feed is revoked by the next publishing pass (publishPerPersonFeed), and their rows stay.
+        var vals = ListUsers.valuesForEmail(this.listUserLinks, String(uid || '').toLowerCase()) || {};
+        var unlink = Object.keys(vals).map(function(l) { return backend_users.setListUser ? backend_users.setListUser(l, vals[l], '') : null; });
+        backend_users.removeUser(uid).then(function() { return Promise.all(unlink); }).then(function() { self.loadUsers(); if (self.loadListUserLinks) self.loadListUserLinks(); });
       },
       // A draft row, written nowhere until it has an email (renameUser). It starts as a VIEWER: access
       // is granted on purpose, not taken back afterwards. Its tables are 'all' because the grant model
@@ -7410,18 +8156,19 @@ function createVueApp() {
           // label sheet fall back to Code 39 rather than print a name with no code under it. Passed in
           // rather than read as a global inside print.js, so the print builders stay pure over ctx and
           // their Node tests need no 56 KB stub.
-          qr: function(text) {
-            if (typeof qrcode === 'undefined' || !text) return null;
-            try {
-              // Type 0 = "the smallest version that fits"; M is the middle error correction, which is
-              // what survives a scuffed label without inflating the module count.
-              var q = qrcode(0, 'M');
-              q.addData(String(text));
-              q.make();
-              return { size: q.getModuleCount(), isDark: function(r, c) { return q.isDark(r, c); } };
-            } catch (e) { return null; }        // too much data for any version -> Code 39 instead
-          }
+          qr: function(text) { return self.qrMatrix(text); }
         };
+      },
+      qrMatrix: function(text) {
+        if (typeof qrcode === 'undefined' || !text) return null;
+        try {
+          // Type 0 = "the smallest version that fits"; M is the middle error correction, which is
+          // what survives a scuffed label without inflating the module count.
+          var q = qrcode(0, 'M');
+          q.addData(String(text));
+          q.make();
+          return { size: q.getModuleCount(), isDark: function(r, c) { return q.isDark(r, c); } };
+        } catch (e) { return null; }        // too much data for any version -> Code 39 instead
       },
       printView: function() {
         var self = this, ctx = this._printCtx();
@@ -7480,15 +8227,15 @@ function createVueApp() {
       // The URL a QR on a label carries: this deployment, this view, this code. `db` rides along because
       // an installed app says which database it is that way (databases.js manifestIdentity), and two
       // databases installed from one origin share a scope -- so without it the wrong one may answer.
-      scanDeepLink: function(view, code) {
+      viewDeepLink: function(view) {
         var base = location.origin + location.pathname;
         var q = [];
         var dbKey = (typeof Databases !== 'undefined' && Databases.activeKey) ? Databases.activeKey() : '';
         if (dbKey) q.push('db=' + encodeURIComponent(dbKey));
         q.push('view=' + encodeURIComponent(view));
-        q.push('scan=' + encodeURIComponent(code));
         return base + '?' + q.join('&');
       },
+      scanDeepLink: function(view, code) { return this.viewDeepLink(view) + '&scan=' + encodeURIComponent(code); },
       // The scan view whose codes these catalogue rows carry, or '' when nothing scans them. This is
       // what puts `Print codes` in the LOOKUP editor: a label belongs to the catalogue row it names,
       // so it is printed where those rows are kept rather than from the view that happens to read
@@ -7587,10 +8334,10 @@ function createVueApp() {
       // Non-admins keep the initial {} exactly as the swallowed rejection left them.
       usersLoaded: function(v) { if (v && this.isAdmin) this.loadListUserLinks(); },
       viewingArchive: function() {
-        // Active tab sorts the default column ascending (today -> future); the archive tab reverses it
-        // (today -> past, most-recently-archived first). Only applies when a defaultSort is set.
+        // Active tab sorts the default column in its own direction (ascending unless defaultSortDesc); the
+        // archive tab reverses it (most-recently-archived first). Only applies when a defaultSort is set.
         var cfg = this.currentConfig || {};
-        if (cfg.defaultSort) { this.sortCol = cfg.defaultSort; this.sortAsc = !this.viewingArchive; }
+        if (cfg.defaultSort) { this.sortCol = cfg.defaultSort; this.sortAsc = !cfg.defaultSortDesc !== this.viewingArchive; }
         this.loadTableData();
       },
       sortedData: function(val) { if (this.currentConfig.collapsed && val.length) this.expandedCard = val[0].id; }
@@ -7599,6 +8346,10 @@ function createVueApp() {
     errorCaptured: function(err) { console.error('Vue error:', err); this.notify(this.t('msg.error') + ' ' + (err.message || err)); return false; },
     mounted: function() {
       var self = this;
+      // Rows.js derives a table's computed columns and follows reference paths through these, since only
+      // the root knows the schema and the cache.
+      setInterval(function() { self.clockNow = Date.now(); }, 30000);
+      Rows.setHooks({ derive: function(t, rows, cache) { return self.deriveRows(t, rows, cache); }, path: function(r, p) { return self.rowPath(r, p); } });
       window.addEventListener('resize', function() { self.mobile = window.innerWidth < 768; self.windowWidth = window.innerWidth; });
       window.addEventListener('popstate', function() { self._onPopState(); });
       // Republish calendar feeds when their data changes. Registered on the write funnel, which is the
@@ -7691,12 +8442,17 @@ function createVueApp() {
         calendarHost: {
           t: function(k) { return vm.t(k); },
           locale: function() { return vm.calLocale(); },
-          isMobile: function() { return vm.mobile; },
           today: function() { return vm._calToday(); },
           config: function(name) { return (VIEWS[name] && VIEWS[name].calendar) || {}; },
           events: function(name, win) { return vm.calEventsFor(name, win); },
           canAdd: function(name) { return vm.canCalendarAdd(name); },
-          addOnDay: function(name, date) { vm.calendarAddOnDay(name, date); }
+          addOnDay: function(name, date) { vm.calendarAddOnDay(name, date); },
+          // A `filters` column's choices: the dropdown's own (a ref's catalogue, a list's values).
+          filterOptions: function(col) { return vm.filterOptionsFor(col); },
+          fieldLabel: function(col) { return vm.tOr('field.' + col, col); },
+          dateLabel: function(v) { return vm.dateLabel(v); },
+          now: function() { return vm.clockNow; },
+          setPeriod: function(name, p) { var o = Object.assign({}, vm.calPeriods); if (p) o[name] = p; else delete o[name]; vm.calPeriods = o; }
         },
         // The shared UI elements (CLAUDE.md "UI conventions"): words, and the clipboard with its notice.
         uiHost: {
@@ -7757,6 +8513,7 @@ function createVueApp() {
     tOr: function(k, f) { return appInstance ? appInstance.tOr(k, f) : f; },
     displayValue: function(c, v, n, vc) { return appInstance ? appInstance.displayValue(c, v, n, vc) : v; },
     colIsDate: function(c) { return appInstance ? appInstance.colIsDate(c) : false; },
+    colIsDateTime: function(c) { return appInstance ? appInstance.colIsDateTime(c) : false; },
     colIsImage: function(c) { return appInstance ? appInstance.colIsImage(c) : false; },
     colIsUrl: function(c) { return appInstance ? appInstance.colIsUrl(c) : false; },
     // Sanitize a user-supplied url/image cell before it goes into an attribute. safeHref (for <a href>)
@@ -7774,6 +8531,8 @@ function createVueApp() {
     // A cell's small picture: the thumbnail the value carries, else the picture itself.
     thumbSrc: function(u) { var s = Images.splitRef(u); return appInstance ? appInstance.assetSrc(s.thumb || s.full) : ''; },
     toDateStr: toDateStr,
+    toLocalInput: Calendar.toLocalInput,
+    fromLocalInput: Calendar.fromLocalInput,
     dateLabel: function(v) { return appInstance ? appInstance.dateLabel(v) : toDateStr(v); }
   };
 
@@ -7797,7 +8556,7 @@ function createVueApp() {
     // Per-embed inline-edit state for doc-view embeds (each embed edits its own page independently),
     // which half of a `@both` embed is showing (per embed: two toggles on one page move independently),
     // and the reader's header sort -- per instance too: one member's callings sorting is not another's.
-    data: function() { return { editing: false, docDraft: '', showArchive: false, sortCol: null, sortAsc: true }; },
+    data: function() { return { editing: false, docDraft: '', showArchive: false, sortCol: null, sortAsc: true, previewOpen: false }; },
     created: function() {
       // A doc-view embed renders the ACCESS-GATED server body, not the world-readable schema seed. Kick
       // off the single-page read (server-filtered) once, but only if the viewer may see it -- a restricted
@@ -7823,7 +8582,11 @@ function createVueApp() {
       denied: function() {
         if (!appInstance) return false;
         var v = this.spec ? this.spec.config : (this.type === 'view' ? VIEWS[this.name] : null);
-        return !appInstance.canAccessPage(v);
+        if (!appInstance.canAccessPage(v)) return true;
+        // A named view or table this person cannot open (no access to what it reads, or a member-only view
+        // without the membership) draws nothing, rather than empty tiles and headers.
+        if (!this.spec && (this.type === 'view' || this.type === 'table') && !appInstance.canAccessNavId(this.name)) return true;
+        return false;
       },
       isCal: function() { return this.type === 'view' && !!(appInstance && appInstance.isCalendarName(this.name)); },
       isRot: function() { return this.type === 'view' && !!(appInstance && appInstance.isRotationName(this.name)); },
@@ -7893,7 +8656,12 @@ function createVueApp() {
       // What a table layout renders: `rows` (already in the embed's defaultSort) until the reader clicks a
       // header, then re-sorted through the same sortByCol the primary grid uses, so a ref or lookup-backed
       // column sorts in catalogue order here too. colCfg lets an aggregate's key inherit its source's order.
-      shown: function() { return this.sortCol ? Rows.sortByCol(this.rows, this.sortCol, this.colCfg, this.sortAsc) : this.rows; },
+      sorted: function() { return this.sortCol ? Rows.sortByCol(this.rows, this.sortCol, this.colCfg, this.sortAsc) : this.rows; },
+      // `preview: N` on the embedded view or table: its first N rows until the reader asks for all of them.
+      previewN: function() { var c = this.spec ? null : (this.type === 'view' ? VIEWS[this.name] : SCHEMA[this.name]); return (c && c.preview > 0) ? c.preview : 0; },
+      previewMore: function() { return this.previewN > 0 && this.rows.length > this.previewN; },
+      shown: function() { return (this.previewMore && !this.previewOpen) ? this.sorted.slice(0, this.previewN) : this.sorted; },
+      previewLabel: function() { return this.previewOpen ? this.t('btn.show_fewer') : this.t('btn.show_all') + ' (' + this.rows.length + ')'; },
       canMutate: function() { return !this.effPart && appInstance && appInstance.canMutateEmbed(this.type, this.name); },
       hasArchive: function() { return !this.effPart && appInstance && appInstance.embedHasArchive(this.type, this.name); },
       layout: function() { return appInstance ? appInstance.embedViewLayout(this.type, this.name) : 'table'; },
@@ -7939,7 +8707,7 @@ function createVueApp() {
     }),
     template: ''
       + '<template v-if="denied"></template>'
-      + '<calendar-view v-else-if="kind===\'calendar\'" :name="calName" :embed="true"></calendar-view>'
+      + '<calendar-view v-else-if="kind===\'calendar\'" :name="calName" :embed="true"><template v-slot:actions><feed-subscribe-menu :name="calName"></feed-subscribe-menu></template></calendar-view>'
       + '<rotation-view v-else-if="kind===\'rotation\'" :name="calName" :embed="true"></rotation-view>'
       + '<pivot-view v-else-if="kind===\'pivot\'" :name="calName" :embed="true"></pivot-view>'
       + '<rsvp-view v-else-if="kind===\'rsvp\'" :name="calName" :embed="true"></rsvp-view>'
@@ -7985,12 +8753,12 @@ function createVueApp() {
       +   '<template v-slot:actions="{ item }"><template v-if="canMutateRow(item)"><confirm-x v-if="hasArchive" :armed="isArchArmed(item)" action="archive" dense @click="archRow(item)"></confirm-x><confirm-x :armed="isDelArmed(item)" dense @click="delRow(item)"></confirm-x></template></template>'
       + '</data-gallery>'
       + '<v-list v-else-if="layout===\'list\'" density="compact" class="my-2">'
-      + '<v-list-item v-for="(item, ri) in rows" :key="item.id || ri" class="px-2">'
+      + '<v-list-item v-for="(item, ri) in shown" :key="item.id || ri" class="px-2">'
       + '<template v-slot:default><span v-for="(col, i) in colsFor(item)" :key="col" style="font-size:0.85rem"><list-value :col="col" :value="item[col]" :view-cfg="obscureCfg"></list-value><span v-if="i < colsFor(item).length - 1" style="opacity:0.3;margin:0 6px">·</span></span></template>'
       + '<template v-slot:append><template v-if="canMutateRow(item)"><confirm-x v-if="hasArchive" :armed="isArchArmed(item)" action="archive" dense @click="archRow(item)"></confirm-x><confirm-x :armed="isDelArmed(item)" dense @click="delRow(item)"></confirm-x></template></template>'
       + '</v-list-item></v-list>'
       + '<div v-else-if="layout===\'card\'" class="my-2">'
-      + '<v-card v-for="(item, ri) in rows" :key="item.id || ri" variant="flat" class="ma-2 pa-2" style="border-bottom:1px solid rgb(var(--v-theme-outline),0.2)">'
+      + '<v-card v-for="(item, ri) in shown" :key="item.id || ri" variant="flat" class="ma-2 pa-2" style="border-bottom:1px solid rgb(var(--v-theme-outline),0.2)">'
       + '<div v-for="col in colsFor(item)" :key="col" class="d-flex align-center mb-1"><span style="min-width:120px;flex-shrink:0;font-size:0.75rem;opacity:0.6;padding-right:8px">{{ t(\'field.\' + col) || col }}</span><span style="opacity:0.8"><list-value :col="col" :value="item[col]" :view-cfg="obscureCfg"></list-value></span></div>'
       + '<div v-if="canMutateRow(item)" style="text-align:right"><confirm-x v-if="hasArchive" :armed="isArchArmed(item)" action="archive" dense @click="archRow(item)"></confirm-x><confirm-x :armed="isDelArmed(item)" dense @click="delRow(item)"></confirm-x></div>'
       + '</v-card></div>'
@@ -8003,7 +8771,10 @@ function createVueApp() {
       + '<confirm-x :armed="isDelArmed(item)" dense @click="delRow(item)"></confirm-x>'
       + '</template></td></tr></tbody>'
       + '</template></v-table>'
+      + '<div class="d-flex flex-wrap align-center">'
       + '<v-btn v-if="canMutate" variant="text" size="small" prepend-icon="mdi-plus" @click="addRow">{{ t(\'btn.add\') || \'Add\' }}</v-btn>'
+      + '<v-btn v-if="previewMore" variant="text" size="small" :prepend-icon="previewOpen ? \'mdi-chevron-up\' : \'mdi-chevron-down\'" :aria-expanded="String(previewOpen)" data-testid="embed-preview" @click="previewOpen = !previewOpen">{{ previewLabel }}</v-btn>'
+      + '</div>'
       + '</div>'
   });
 
@@ -8037,14 +8808,19 @@ function createVueApp() {
       colListSwitch: function(col) { return appInstance.colListSwitch(col); },
       getListOptions: function(col) { return appInstance.getListOptions(col); },
       // A dropdown option's second line: the role under a linked person's name (listRole).
-      optionProps: function(o) { return (o && o.subtitle) ? { subtitle: o.subtitle } : {}; },
+      optionProps: function(o) { var p = {}; if (o && o.subtitle) p.subtitle = o.subtitle; if (o && o.disabled) p.disabled = true; return p; },
       // single-select options: the primary honors the listSwitch alt list; the embed uses the plain list.
       listItems: function(col, item) {
-        if (this.embed) return appInstance.getListOptions(col);
+        if (this.embed) return appInstance.getListOptions(col, null, item);
         var sw = appInstance.colListSwitch(col);
-        return appInstance.getListOptions(col, (sw && appInstance.isAltList(col, item)) ? sw.list : null);
+        return appInstance.getListOptions(col, (sw && appInstance.isAltList(col, item)) ? sw.list : null, item);
       },
       getRefOptions: function(col, item) { return appInstance.getRefOptions(col, item); },
+      refCards: function(col, item) { return appInstance.refCards(col, item); },
+      // Every picker but the dropdown lays out the same options the dropdown offers: a ref's (filterBy
+      // applies) or a list's.
+      hasOptions: function(col) { return !!(appInstance.colIsList(col) || appInstance.colIsRef(col)); },
+      pickerOptions: function(col, item) { return appInstance.markEnabled(col, appInstance.colIsRef(col) ? appInstance.getRefOptions(col, item).filter(function(o) { return o.value !== ''; }) : appInstance.getListOptions(col)); },
       cellOptions: function(col, item) { return appInstance.cellOptions(col, item); },
       isAltList: function(col, item) { return appInstance.isAltList(col, item); },
       toggleListSwitch: function(col, item) { return appInstance.toggleListSwitch(col, item); },
@@ -8100,11 +8876,11 @@ function createVueApp() {
       + '<span v-else-if="!embed && colIsMirrorForTable(col)" style="opacity:0.82"><list-value :col="col" :value="item[col]" :view-cfg="ownerCfg"></list-value></span>'
       + '<v-combobox v-else-if="colIsMultiselect(col) && colAllowNew(col) && !colIsRef(col)" :name="col" multiple chips closable-chips :model-value="item[col] || []" :items="getListOptions(col)" item-title="title" item-value="value" :item-props="optionProps" density="compact" variant="plain" hide-details style="flex:1" @update:model-value="save(item, col, $event)" @blur="addToListOnBlur(item, col)" @keydown.home.stop @keydown.end.stop><template v-slot:chip="{ props }"><v-chip v-bind="props" size="small" color="secondary"></v-chip></template></v-combobox>'
       + '<v-autocomplete v-else-if="colIsMultiselect(col)" :name="col" multiple chips closable-chips :model-value="item[col] || []" :items="cellOptions(col, item)" item-title="title" item-value="value" :item-props="optionProps" density="compact" variant="plain" hide-details style="flex:1" @update:model-value="save(item, col, $event)" @keydown.home.stop @keydown.end.stop><template v-slot:chip="{ props }"><v-chip v-bind="props" size="small" color="secondary"></v-chip></template></v-autocomplete>'
-      + '<v-btn-toggle v-else-if="colIsList(col) && !colIsMultiselect(col) && colPicker(col)===\'toggle\'" :name="col" :model-value="item[col] || \'\'" density="compact" variant="outlined" divided @update:model-value="save(item, col, $event || \'\')">'
-      + '<v-btn v-for="o in getListOptions(col)" :key="o.value" :value="o.value" size="small">{{ o.title }}</v-btn>'
+      + '<v-btn-toggle v-else-if="hasOptions(col) && !colIsMultiselect(col) && colPicker(col)===\'toggle\'" :name="col" :model-value="item[col] || \'\'" density="compact" variant="outlined" divided @update:model-value="save(item, col, $event || \'\')">'
+      + '<v-btn v-for="o in pickerOptions(col, item)" :key="o.value" :value="o.value" :disabled="o.disabled && item[col] !== o.value" size="small">{{ o.title }}</v-btn>'
       + '</v-btn-toggle>'
-      + '<v-chip-group v-else-if="colIsList(col) && !colIsMultiselect(col) && colPicker(col)===\'chips\'" :name="col" :model-value="item[col] || \'\'" @update:model-value="save(item, col, $event || \'\')">'
-      + '<v-chip v-for="o in getListOptions(col)" :key="o.value" :value="o.value" size="small" filter variant="outlined" color="primary">{{ o.title }}</v-chip>'
+      + '<v-chip-group v-else-if="hasOptions(col) && !colIsMultiselect(col) && colPicker(col)===\'chips\'" :name="col" :model-value="item[col] || \'\'" @update:model-value="save(item, col, $event || \'\')">'
+      + '<v-chip v-for="o in pickerOptions(col, item)" :key="o.value" :value="o.value" :disabled="o.disabled && item[col] !== o.value" size="small" filter variant="outlined" color="primary">{{ o.title }}</v-chip>'
       + '</v-chip-group>'
       + '<v-combobox v-else-if="colIsList(col) && colAllowNew(col)" :name="col" :model-value="item[col] || \'\'" :items="listItems(col, item)" item-title="title" item-value="value" :item-props="optionProps" density="compact" variant="plain" hide-details single-line style="flex:1" @update:model-value="save(item, col, $event)" @blur="addToListOnBlur(item, col)" @keydown.home.stop @keydown.end.stop>'
       + '<template v-if="!embed && colListSwitch(col)" v-slot:prepend-inner><v-icon size="x-small" :color="isAltList(col, item) ? \'primary\' : \'\'" @click.stop="toggleListSwitch(col, item)" :title="colListSwitch(col).label || t(\'col.switch_list\')">mdi-swap-horizontal</v-icon></template>'
@@ -8112,6 +8888,16 @@ function createVueApp() {
       + '<v-autocomplete v-else-if="colIsList(col)" :name="col" :model-value="item[col] || \'\'" :items="listItems(col, item)" item-title="title" item-value="value" :item-props="optionProps" density="compact" variant="plain" hide-details single-line style="flex:1" @update:model-value="save(item, col, $event)" @keydown.home.stop @keydown.end.stop>'
       + '<template v-if="!embed && colListSwitch(col)" v-slot:prepend-inner><v-icon size="x-small" :color="isAltList(col, item) ? \'primary\' : \'\'" @click.stop="toggleListSwitch(col, item)" :title="colListSwitch(col).label || t(\'col.switch_list\')">mdi-swap-horizontal</v-icon></template>'
       + '</v-autocomplete>'
+      // `picker: "cards"` on a ref: the catalogue rows themselves, each with its other columns. The same
+      // options the dropdown would offer (getRefOptions, so filterBy narrows both alike); pressing the
+      // chosen card again clears it, as a deselected chip or toggle does.
+      + '<tile-grid v-else-if="hasOptions(col) && !colIsMultiselect(col) && colPicker(col)===\'cards\'" min="170px" :data-testid="\'cards-\' + col">'
+      +   '<v-card v-for="o in refCards(col, item)" :key="o.value" :variant="item[col] === o.value ? \'outlined\' : \'tonal\'" :color="item[col] === o.value ? \'primary\' : undefined"'
+      +     ' class="pa-3" :style="(o.disabled && item[col] !== o.value) ? \'opacity:0.45;cursor:not-allowed\' : \'cursor:pointer\'" role="radio" :aria-checked="item[col] === o.value" :aria-disabled="!!o.disabled" data-testid="pick-card" @click="(o.disabled && item[col] !== o.value) || save(item, col, item[col] === o.value ? \'\' : o.value)">'
+      +     '<div class="d-flex align-center" style="gap:6px"><b style="flex:1">{{ o.title }}</b><v-icon v-if="item[col] === o.value" size="small">mdi-check-circle</v-icon></div>'
+      +     '<div v-for="c in o.cols" :key="c" style="font-size:0.8rem;opacity:0.8"><span style="opacity:0.7">{{ t(\'field.\' + c) || c }}: </span><list-value :col="c" :value="o.row[c]"></list-value></div>'
+      +   '</v-card>'
+      + '</tile-grid>'
       + '<v-autocomplete v-else-if="colIsRef(col)" :name="col" :model-value="item[col] || \'\'" :items="getRefOptions(col, item)" item-title="title" item-value="value" :item-props="optionProps" density="compact" variant="plain" hide-details single-line style="flex:1" @update:model-value="save(item, col, $event)" @keydown.home.stop @keydown.end.stop></v-autocomplete>'
       + '<div v-else-if="colIsImage(col)" class="d-flex align-center" style="gap:6px;min-width:0">'
       +   '<template v-if="noThumb"></template>'
@@ -8136,6 +8922,7 @@ function createVueApp() {
       +   '<input type="url" :value="item[col] || \'\'" @change="save(item, col, $event.target.value)" placeholder="https://…" spellcheck="false" style="border:none;background:transparent;color:inherit;font:inherit;flex:1;min-width:60px">'
       +   '<a v-if="item[col]" :href="safeHref(item[col])" target="_blank" @click.stop><v-icon size="x-small">mdi-open-in-new</v-icon></a>'
       + '</div>'
+      + '<input v-else-if="colIsDateTime(col)" type="datetime-local" :value="toLocalInput(item[col])" @change="save(item, col, fromLocalInput($event.target.value))" style="border:none;background:transparent;color:inherit;font:inherit">'
       + '<input v-else-if="colIsDate(col)" type="date" :value="toDateStr(item[col])" @change="save(item, col, $event.target.value)" style="border:none;background:transparent;color:inherit;font:inherit">'
       + '<span v-else class="editable-cell" contenteditable @blur="save(item, col, $event.target.textContent)" style="min-width:auto">{{ item[col] || \'\' }}</span>'
   });
@@ -8148,7 +8935,7 @@ function createVueApp() {
   // source of truth per element. This is the element-level seam behind "views are parts that combine":
   // to place a different body, register another component under VIEW_PARTS.calendar[<mode>].
   window.VIEW_PARTS = {
-    calendar: { month: 'cal-month', week: 'cal-week', list: 'cal-agenda' },
+    calendar: { month: 'cal-month', week: 'cal-week', year: 'cal-year', list: 'cal-agenda' },
     rotation: { table: 'rotation-table', card: 'rotation-cards', list: 'rotation-list' },
     data: { list: 'data-list', gallery: 'data-gallery', split: 'data-split' }   // card/table editing grids remain inline (deeper refactor)
   };
@@ -8164,12 +8951,33 @@ function createVueApp() {
 
   app.component('cal-event-row', {
     props: { ev: { type: Object, required: true }, compact: { type: Boolean, default: false } },
+    inject: ['calendarHost'],
+    methods: { timeOf: function(v) { var d = new Date(v); return isNaN(d.getTime()) ? '' : new Intl.DateTimeFormat(this.calendarHost.locale(), { hour: '2-digit', minute: '2-digit' }).format(d); } },
     template: ''
       + '<div :style="(compact ? \'padding:3px 0;font-size:0.9rem\' : \'padding:5px 12px;font-size:0.88rem;border-bottom:1px solid rgb(var(--v-theme-outline),0.06)\') + \';display:flex;align-items:center;gap:8px\'">'
       + '<span :style="{ width:\'9px\', height:\'9px\', borderRadius:\'50%\', background: ev.color, flex:\'0 0 auto\' }"></span>'
+      + '<span v-if="ev.at" style="font-variant-numeric:tabular-nums;opacity:0.75" data-testid="cal-event-time">{{ timeOf(ev.at) }}</span>'
+      + '<span v-if="ev.range" style="font-size:0.75rem;opacity:0.7" data-testid="cal-event-range">{{ calendarHost.dateLabel(ev.range[0]) }} – {{ calendarHost.dateLabel(ev.range[1]) }}</span>'
       + '<b style="opacity:0.8">{{ ev.label }}</b> <span style="opacity:0.85">{{ ev.title }}</span>'
       + '<span v-if="ev.readOnly" style="opacity:0.5;font-size:0.7rem">(read-only)</span>'
+      + '<rsvp-event-picker v-if="ev.respond" :view="ev.respond" :event-id="ev.row && ev.row.id" style="margin-left:auto"></rsvp-event-picker>'
       + '</div>'
+  });
+  // A calendar source with `respond: "<rsvp view>"`: each event carries that view's booking control, with
+  // the same rules the booking list applies (rsvpLocked: full, closed, frozen) and the places left. An
+  // event the rsvp view does not list (one already past) gets none.
+  app.component('rsvp-event-picker', {
+    props: { view: String, eventId: String },
+    computed: {
+      a: function() { return appInstance; },
+      ev: function() { var id = this.eventId; return appInstance.rsvpFor(this.view).events.filter(function(e) { return e.id === id; })[0] || null; },
+      picker: function() { return ((VIEWS[this.view] || {}).rsvp || {}).picker || 'dropdown'; }
+    },
+    template: ''
+      + '<span v-if="ev" class="d-inline-flex align-center" style="gap:8px" data-testid="cal-book">'
+      +   '<span v-if="a.rsvpPlacesShown(view, ev)" style="font-size:0.75rem;opacity:0.7">{{ a.rsvpPlacesText(view, ev) }}</span>'
+      +   '<rsvp-picker :options="a.rsvpOptions(view)" :picker="picker" :value="ev.myStatus" :disabled="a.rsvpLocked(view, ev)" @set="a.setRsvp(view, ev.key, $event || \'\')"></rsvp-picker>'
+      + '</span>'
   });
 
   // Shared prop contract for the swappable calendar body parts.
@@ -8188,6 +8996,22 @@ function createVueApp() {
       + '<span :style="c.isToday?\'background:rgb(var(--v-theme-primary));color:rgb(var(--v-theme-on-primary));border-radius:50%;width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;font-weight:600\':\'\'">{{ c.day }}</span>'
       + '<span v-if="c.count" style="position:absolute;top:1px;right:3px;background:rgb(var(--v-theme-primary));color:rgb(var(--v-theme-on-primary));font-size:0.6rem;font-weight:700;line-height:1;padding:1px 4px;border-radius:8px;min-width:12px;text-align:center">{{ c.count }}</span>'
       + '</div></div></div>'
+  });
+
+  // The year: twelve small months side by side, a day with events shaded. A day selects it (the day panel
+  // below lists it); a month's name opens that month.
+  app.component('cal-year', {
+    props: Object.assign({ months: Array }, CAL_BODY_PROPS), emits: ['select', 'month'],
+    template: ''
+      // At most six months a row, never narrower than 92px: three on a phone.
+      + '<div style="padding:8px"><tile-grid min="max(92px, calc((100% - 60px) / 6))">'
+      + '<div v-for="mo in months" :key="mo.first" :data-testid="\'cal-year-\' + mo.first.slice(0, 7)">'
+      +   '<div style="font-size:0.75rem;font-weight:600;cursor:pointer;margin-bottom:2px" @click="$emit(\'month\', mo.first)">{{ mo.label }}</div>'
+      +   '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:1px;font-size:0.55rem;opacity:0.5;text-transform:uppercase"><div v-for="d in dowNames" :key="d" style="text-align:center">{{ d.charAt(0) }}</div></div>'
+      +   '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:1px">'
+      +     '<div v-for="c in mo.cells" :key="c.date" :title="c.inMonth && c.count ? String(c.count) : undefined" :style="{ height:\'18px\', display:\'flex\', alignItems:\'center\', justifyContent:\'center\', borderRadius:\'4px\', fontSize:\'0.62rem\', visibility: c.inMonth?\'visible\':\'hidden\', cursor:\'pointer\', fontWeight: c.isToday?700:400, background: c.count?\'rgba(var(--v-theme-primary),\' + Math.min(0.15 + 0.15 * c.count, 0.6) + \')\':\'transparent\', outline: c.date===selected?\'1px solid rgb(var(--v-theme-primary))\':(c.isToday?\'1px solid rgba(var(--v-theme-on-surface),0.5)\':\'none\') }" @click="$emit(\'select\', c.date)">{{ c.day }}</div>'
+      +   '</div>'
+      + '</div></tile-grid></div>'
   });
 
   app.component('cal-week', {
@@ -8639,6 +9463,29 @@ function createVueApp() {
 
   // A collapsible Settings section's heading, bound to the caller's flag:
   // <section-toggle v-model:collapsed="a.settings._collapseX">. The caller owns where "collapsed" lives.
+  // A whole number set with − and + (walk-ins at the desk). <count-stepper :value="n" @change="…">; never below 0.
+  // Multi-selects a reader narrows something by: one per column, its picks emitted as set(column, values).
+  // A calendar's `filters` and a page's. <pick-filters :cols :picked :items="fn(col)" :label="fn(col)">
+  app.component('pick-filters', {
+    props: { cols: Array, picked: Object, items: Function, label: Function, testPrefix: { type: String, default: 'filter' } },
+    emits: ['set'],
+    template: '<div class="d-flex flex-wrap" style="gap:8px">'
+      + '<v-select v-for="c in cols" :key="c" :model-value="picked[c] || []" :items="items(c)" item-title="title" item-value="value" :label="label(c)" multiple chips closable-chips clearable density="compact" variant="outlined" hide-details style="min-width:200px;max-width:420px" :data-testid="testPrefix + \'-\' + c" @update:model-value="$emit(\'set\', c, $event || [])"></v-select>'
+      + '</div>'
+  });
+
+  app.component('count-stepper', {
+    props: { value: { type: Number, default: 0 } },
+    inject: ['uiHost'],
+    emits: ['change'],
+    methods: { t: function(k) { return this.uiHost.t(k); } },
+    template: '<span class="d-inline-flex align-center" data-testid="count-stepper">'
+      + '<v-btn icon="mdi-minus" variant="text" size="small" :disabled="value <= 0" :title="t(\'btn.decrease\')" :aria-label="t(\'btn.decrease\')" data-testid="count-stepper-minus" @click="$emit(\'change\', value - 1)"></v-btn>'
+      + '<span style="min-width:2ch;text-align:center;font-variant-numeric:tabular-nums" data-testid="count-stepper-value">{{ value }}</span>'
+      + '<v-btn icon="mdi-plus" variant="text" size="small" :title="t(\'btn.increase\')" :aria-label="t(\'btn.increase\')" data-testid="count-stepper-plus" @click="$emit(\'change\', value + 1)"></v-btn>'
+      + '</span>'
+  });
+
   app.component('section-toggle', {
     props: { collapsed: { type: Boolean, default: false }, title: { type: String, default: '' } },
     emits: ['update:collapsed'],
@@ -8748,32 +9595,84 @@ function createVueApp() {
   app.component('calendar-view', {
     props: { name: { type: String, required: true }, embed: { type: Boolean, default: false } },
     inject: ['calendarHost'],
+    watch: { period: { immediate: true, handler: function(p) { this.calendarHost.setPeriod(this.name, p); } } },
+    beforeUnmount: function() { this.calendarHost.setPeriod(this.name, null); },
     data: function() {
       var today = this.calendarHost.today();
-      return { mode: this.calendarHost.config(this.name).defaultView || 'month', anchor: today, sel: today };
+      // `picked`: the reader's `filters` choices, { column: [values] }, kept in THIS browser -- a
+      // convenience of the viewer's, not a setting of the calendar's.
+      var picked = {};
+      try { picked = JSON.parse(localStorage.getItem('cal_filter:' + this.name) || '{}') || {}; } catch (e) { picked = {}; }
+      return { mode: this.calendarHost.config(this.name).defaultView || 'month', anchor: today, sel: today, picked: picked };
     },
     computed: {
       weekStart: function() { var c = this.calendarHost.config(this.name); return c.weekStart != null ? Number(c.weekStart) : 1; },
-      events: function() { return this.calendarHost.events(this.name, Calendar.windowFor(this.anchor, this.mode, this.weekStart, this.calendarHost.today())); },
-      displayMode: function() { return (this.calendarHost.isMobile() && this.mode === 'month') ? 'list' : (this.mode || 'month'); },
+      filters: function() { return this.calendarHost.config(this.name).filters || []; },
+      // The events, narrowed by the reader's picks. A filter narrows only the events whose row HAS that
+      // column: a calendar of classes and workouts filtered by gym still shows the workouts.
+      events: function() {
+        var all = this.calendarHost.events(this.name, Calendar.windowFor(this.anchor, this.mode, this.weekStart, this.calendarHost.today()));
+        var picked = this.picked, cols = this.filters.filter(function(c) { return (picked[c] || []).length; });
+        if (!cols.length) return all;
+        var out = {};
+        Object.keys(all).forEach(function(k) {
+          var kept = all[k].filter(function(ev) {
+            var r = ev.row || {};
+            return cols.every(function(c) { return !(c in r) || picked[c].indexOf(r[c]) >= 0; });
+          });
+          if (kept.length) out[k] = kept;
+        });
+        return out;
+      },
+      // The mode the reader picked, on a phone too: the month grid fits one.
+      displayMode: function() { return this.mode || 'month'; },
       monthCells: function() { var ev = this.events; return Calendar.cellsMonth(this.anchor, this.weekStart, this.calendarHost.today()).map(function(c) { c.count = (ev[c.date] || []).length; return c; }); },
       weekCells: function() { var ev = this.events; return Calendar.cellsWeek(this.anchor, this.weekStart, this.calendarHost.today()).map(function(c) { c.count = (ev[c.date] || []).length; return c; }); },
       dowNames: function() { var loc = this.calendarHost.locale(), ws = this.weekStart, fmt = new Intl.DateTimeFormat(loc, { weekday: 'short' }), out = []; for (var i = 0; i < 7; i++) out.push(fmt.format(new Date(2023, 0, 1 + ((ws + i) % 7)))); return out; },
-      title: function() { var loc = this.calendarHost.locale(); if (this.mode === 'week') { var cs = this.weekCells, f = cs[0].date.split('-'), l = cs[6].date.split('-'); return new Intl.DateTimeFormat(loc, { day: 'numeric', month: 'short' }).format(new Date(+f[0], +f[1] - 1, +f[2])) + ' – ' + new Intl.DateTimeFormat(loc, { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(+l[0], +l[1] - 1, +l[2])); } var p = this.anchor.split('-'); return new Intl.DateTimeFormat(loc, { month: 'long', year: 'numeric' }).format(new Date(+p[0], +p[1] - 1, 1)); },
+      // The period on screen, shared with the views that filter by it (`within: { calendar }`).
+      period: function() { return Calendar.periodFor(this.anchor, this.mode, this.weekStart, this.calendarHost.today()); },
+      title: function() { var loc = this.calendarHost.locale(); if (this.mode === 'year') return this.anchor.slice(0, 4); if (this.mode === 'week') { var cs = this.weekCells, f = cs[0].date.split('-'), l = cs[6].date.split('-'); return new Intl.DateTimeFormat(loc, { day: 'numeric', month: 'short' }).format(new Date(+f[0], +f[1] - 1, +f[2])) + ' – ' + new Intl.DateTimeFormat(loc, { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(+l[0], +l[1] - 1, +l[2])); } var p = this.anchor.split('-'); return new Intl.DateTimeFormat(loc, { month: 'long', year: 'numeric' }).format(new Date(+p[0], +p[1] - 1, 1)); },
       selEvents: function() { return this.events[this.sel] || []; },
       selLabel: function() { if (!this.sel) return ''; var p = this.sel.split('-'); return new Intl.DateTimeFormat(this.calendarHost.locale(), { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date(+p[0], +p[1] - 1, +p[2])); },
-      listDays: function() { var ev = this.events, loc = this.calendarHost.locale(); return Object.keys(ev).filter(function(k) { return k !== '__undated__'; }).sort().map(function(k) { var p = k.split('-'); return { date: k, label: new Intl.DateTimeFormat(loc, { weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(+p[0], +p[1] - 1, +p[2])), events: ev[k] }; }); },
+      // A list reads FORWARD: today and after. The month and week grids are where the past is browsed.
+      // The list reads forward from NOW: past days are left out, and so is an event of today whose start
+      // time has passed. The month and week grids still show the whole day.
+      listDays: function() {
+        var ev = this.events, loc = this.calendarHost.locale(), now = this.calendarHost.now(), today = fmtDate(new Date(now));
+        return Object.keys(ev).filter(function(k) { return k !== '__undated__' && k >= today; }).sort().map(function(k) {
+          var p = k.split('-');
+          var evs = k > today ? ev[k] : ev[k].filter(function(e) { return !e.at || Date.parse(e.at) > now; });
+          return { date: k, label: new Intl.DateTimeFormat(loc, { weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(+p[0], +p[1] - 1, +p[2])), events: evs };
+        }).filter(function(d) { return d.events.length; });
+      },
       undated: function() { return this.events['__undated__'] || []; },
+      // The year: twelve small months, each day carrying its event count.
+      yearMonths: function() {
+        if (this.displayMode !== 'year') return [];
+        var ev = this.events, y = this.anchor.slice(0, 4), ws = this.weekStart, today = this.calendarHost.today();
+        var fmt = new Intl.DateTimeFormat(this.calendarHost.locale(), { month: 'short' }), out = [];
+        for (var m = 1; m <= 12; m++) {
+          var first = y + '-' + String(m).padStart(2, '0') + '-01';
+          out.push({ first: first, label: fmt.format(new Date(+y, m - 1, 1)), cells: Calendar.cellsMonth(first, ws, today).map(function(c) { c.count = (ev[c.date] || []).length; return c; }) });
+        }
+        return out;
+      },
       canAdd: function() { return this.calendarHost.canAdd(this.name); },
       body: function() { return window.viewPartFor('calendar', this.displayMode) || 'cal-agenda'; }
     },
     methods: Object.assign({}, CAL_T, {
-      prev: function() { this.anchor = addIntervals(this.anchor, -1, this.mode === 'week' ? 'weekly' : 'monthly'); },
-      next: function() { this.anchor = addIntervals(this.anchor, 1, this.mode === 'week' ? 'weekly' : 'monthly'); },
+      prev: function() { this.step(-1); },
+      next: function() { this.step(1); },
+      step: function(n) { this.anchor = addIntervals(this.anchor, this.mode === 'year' ? 12 * n : n, this.mode === 'week' ? 'weekly' : 'monthly'); },
       goToday: function() { this.anchor = this.sel = this.calendarHost.today(); },
       setMode: function(m) { this.mode = m; },
+      openMonth: function(first) { this.anchor = first; this.mode = 'month'; },
       addOnDay: function() { this.calendarHost.addOnDay(this.name, this.sel); },
-      selectDay: function(d) { this.sel = d; }
+      selectDay: function(d) { this.sel = d; },
+      setPicked: function(col, vals) {
+        var p = Object.assign({}, this.picked); p[col] = vals || []; this.picked = p;
+        try { localStorage.setItem('cal_filter:' + this.name, JSON.stringify(p)); } catch (e) {}
+      }
     }),
     template: ''
       + '<component :is="embed ? \'div\' : \'v-card\'" :variant="embed ? undefined : \'outlined\'" :class="embed ? \'my-2\' : \'\'" :style="embed ? \'border:1px solid rgb(var(--v-theme-outline),0.2);border-radius:8px\' : \'\'" :data-testid="embed ? undefined : \'cal-view\'">'
@@ -8783,13 +9682,15 @@ function createVueApp() {
       + '<v-btn size="small" variant="text" @click="goToday()">{{ t(\'cal.today\') }}</v-btn>'
       + '<span style="font-weight:600;min-width:150px">{{ title }}</span><v-spacer></v-spacer>'
       + '<v-btn-toggle :model-value="mode" density="compact" variant="outlined" divided mandatory @update:model-value="setMode($event)">'
+      + '<v-btn value="year" size="small" data-testid="cal-mode-year">{{ t(\'cal.year\') }}</v-btn>'
       + '<v-btn value="month" size="small">{{ t(\'cal.month\') }}</v-btn>'
       + '<v-btn value="week" size="small">{{ t(\'cal.week\') }}</v-btn>'
       + '<v-btn value="list" size="small">{{ t(\'cal.list\') }}</v-btn></v-btn-toggle>'
       + '<slot name="actions"></slot></div>'
+      + '<pick-filters v-if="filters.length" class="px-2 pb-2" data-testid="cal-filters" :cols="filters" :picked="picked" :items="calendarHost.filterOptions" :label="calendarHost.fieldLabel" test-prefix="cal-filter" @set="setPicked"></pick-filters>'
       + '<slot name="tools"></slot>'
       + '<v-divider></v-divider>'
-      + '<component :is="body" :cells="displayMode===\'week\'?weekCells:monthCells" :dow-names="dowNames" :days="listDays" :undated="undated" :selected="sel" @select="selectDay"></component>'
+      + '<component :is="body" :cells="displayMode===\'week\'?weekCells:monthCells" :dow-names="dowNames" :days="listDays" :undated="undated" :selected="sel" :months="displayMode===\'year\' ? yearMonths : undefined" @select="selectDay" @month="openMonth"></component>'
       + '<cal-day-panel v-if="displayMode!==\'list\'" :label="selLabel" :events="selEvents" :can-add="canAdd" @add="addOnDay"></cal-day-panel>'
       + '</component>'
   });
@@ -8799,6 +9700,20 @@ function createVueApp() {
   // Those are this app's feeds, backend and admin rules rather than part of a calendar, so they live
   // here and not in the reusable view, and read the root through `a` as the other app screens do.
   // An embedded calendar sits inside someone else's page, where these controls for one block are noise.
+  // A member's Subscribe menu for a per-person feed, on the calendar's toolbar -- the top-level screen's
+  // and an embedded calendar's alike, since a page like My calendar is where the calendar actually lives.
+  app.component('feed-subscribe-menu', {
+    props: { name: String },
+    computed: { show: function() { return Feeds.isPerPerson(window.VIEWS[this.name]) && appInstance.canSubscribeFeed(this.name); } },
+    methods: { t: function(k) { return appInstance.t(k); } },
+    template: ''
+      + '<v-menu v-if="show" :close-on-content-click="false" location="bottom end">'
+      + '<template v-slot:activator="{ props }"><v-btn v-bind="props" icon="mdi-calendar-sync" size="small" variant="text" :title="t(\'feed.subscribe\')" :aria-label="t(\'feed.subscribe\')" data-testid="cal-subscribe-btn"></v-btn></template>'
+      + '<v-card max-width="380" class="pa-3" data-testid="cal-subscribe">'
+      + '<feed-subscription :name="name"></feed-subscription>'
+      + '</v-card></v-menu>'
+  });
+
   app.component('calendar-screen', {
     computed: {
       a: function() { return appInstance; },
@@ -8809,7 +9724,8 @@ function createVueApp() {
       feedPublishing: function() { return appInstance.feedPublishing(this.viewName); },
       // Per-person feeds only: a shared feed's link is one bearer credential for everybody, handed out
       // by whoever publishes it, while a per-person link belongs to the one person it was minted for.
-      canSubscribe: function() { return this.perPerson && appInstance.canSubscribeFeed(this.viewName); },
+      // `export: false` on the calendar: no download button (a public timetable has nothing of yours to take).
+      canExport: function() { return ((window.VIEWS[this.viewName] || {}).calendar || {}).export !== false; },
       win: function() { return appInstance.calendarIcsFor(this.viewName); },
       // Blank first: the default is not a language but a RULE ("whichever the reader is using", and for
       // a feed the deployment default), so it is named rather than left as an empty row.
@@ -8828,7 +9744,7 @@ function createVueApp() {
     }),
     template: ''
       + '<calendar-view :name="viewName"><template v-slot:actions>'
-      + '<v-btn icon="mdi-calendar-export" size="small" variant="text" @click="exportIcs()" :title="t(\'btn.export_ics\')" data-testid="cal-export-ics"></v-btn>'
+      + '<v-btn v-if="canExport" icon="mdi-calendar-export" size="small" variant="text" @click="exportIcs()" :title="t(\'btn.export_ics\')" data-testid="cal-export-ics"></v-btn>'
       // The subscription. Offered only to someone who could publish it, because the URL is a bearer
       // credential -- anyone holding the link reads this calendar -- so it is not put in front of people
       // who have no reason to be handing it out.
@@ -8838,16 +9754,13 @@ function createVueApp() {
       // The subscriber's own control, for a per-person feed: subscribe, their link, its language, and
       // unsubscribe. The link is theirs alone -- it lives in their owner-stamped row, which nobody else
       // reads -- so unlike the publish button above this is offered to every member.
-      + '<v-menu v-if="canSubscribe" :close-on-content-click="false" location="bottom end">'
-      + '<template v-slot:activator="{ props }"><v-btn v-bind="props" icon="mdi-calendar-sync" size="small" variant="text" :title="t(\'feed.subscribe\')" :aria-label="t(\'feed.subscribe\')" data-testid="cal-subscribe-btn"></v-btn></template>'
-      + '<v-card max-width="380" class="pa-3" data-testid="cal-subscribe">'
-      + '<feed-subscription :name="viewName"></feed-subscription>'
-      + '</v-card></v-menu></template>'
+      + '<feed-subscribe-menu :name="viewName"></feed-subscribe-menu></template>'
       + '<template v-slot:tools>'
-      // Export/publish range. Mirrors the rotation toolbar: everyone with view access may change it, only
-      // an admin writes it through. Sits beside the buttons it governs so "how far does this file reach"
+      // Export/publish range. Mirrors the rotation toolbar: only an admin writes it through. Sits beside the buttons it governs so "how far does this file reach"
       // is answered where the file is produced, rather than in a settings screen away from it.
-      + '<div class="px-2 pb-2 d-flex align-center flex-wrap" style="gap:8px" data-testid="cal-window">'
+      // Only to someone who can change it: for anyone else it is a row of greyed-out settings about a file
+      // they did not ask about (the download uses whatever range was saved).
+      + '<div v-if="a.isAdmin" class="px-2 pb-2 d-flex align-center flex-wrap" style="gap:8px" data-testid="cal-window">'
       + '<v-text-field :model-value="win.back" name="cal-window-back" :label="t(\'cal.window_back\')" density="compact" variant="outlined" hide-details style="max-width:130px" :disabled="!a.canMutateCurrent" @update:model-value="setWindow({ back: $event })" data-testid="cal-window-back"></v-text-field>'
       + '<v-text-field :model-value="win.forward" name="cal-window-forward" :label="t(\'cal.window_forward\')" density="compact" variant="outlined" hide-details style="max-width:130px" :disabled="!a.canMutateCurrent" @update:model-value="setWindow({ forward: $event })" data-testid="cal-window-forward"></v-text-field>'
       // Language of the generated file. Blank means "as I see it" for a download and the deployment
@@ -9080,8 +9993,9 @@ function createVueApp() {
       +     '<span v-else>{{ tOr(t.label, t.label) }}</span>'
       +   '</div>'
       +   '<div style="display:flex;align-items:baseline;gap:6px">'
+      +     '<v-icon v-if="t.icon" :icon="t.icon" color="primary" size="26" style="align-self:center" data-testid="stat-icon"></v-icon>'
       +     '<span style="font-size:1.7rem;font-weight:700;line-height:1.1" data-testid="stat-value">{{ fmt(t) }}</span>'
-      +     '<span v-if="t.goal !== null" style="font-size:0.8rem;opacity:0.6">/ {{ t.goal }}</span>'
+      +     '<span v-if="t.goal !== null && !t.relative" style="font-size:0.8rem;opacity:0.6">/ {{ t.goal }}</span>'
       +     '<span v-if="t.tier" data-testid="stat-tier" style="font-size:0.68rem;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;padding:1px 7px;border-radius:10px;background:rgba(var(--v-theme-primary),0.16);color:rgb(var(--v-theme-primary))">{{ tierLabel(t.tier) }}</span>'
       +   '</div>'
       // The bar is drawn only when there is a goal to measure against; a tile without one is a number
@@ -9100,28 +10014,114 @@ function createVueApp() {
   //
   // Every outcome is shown, none is swallowed. A scan that quietly does nothing looks exactly like a
   // scan that never registered, and that is how somebody standing at a door at 3am stops trusting it.
+  // A CODE THAT CHANGES BY ITSELF, shown as a QR on a staff screen, which confirms whoever claimed it.
+  // Shared by class check-in (rsvp-checkin) and the door (scan-view's `verify`): both are "a member
+  // saves the code they were shown, and the screen showing it vouches for the claims that match".
+  // The component supplies `rotateMinutes` and `autoStamp()`, and opens `qrOpen`.
+  //
+  // While the QR is open: stamp every 15 s, and change the code every `rotateMinutes`, stamping once
+  // more first so a claim on the code about to drop out still counts. The current and previous codes
+  // are accepted, so a code lives between one and two periods, and a scan as it changes still counts.
+  // None of it is stored anywhere: being shown the code is what a claim proves.
+  var ROTATING_CODE = {
+    data: function() { return { qrOpen: false, current: '', previous: '', rotatedAt: 0, timer: null, lock: null }; },
+    watch: { qrOpen: function(open) { if (!this.rotateMinutes) return; if (open) this.start(); else this.stop(); } },
+    beforeUnmount: function() { this.stop(); },
+    methods: {
+      start: function() {
+        if (!this.current) this.rotate();
+        if (!this.timer) this.timer = setInterval(this.tick, 15000);
+        var self = this;
+        // Keeps a tablet's screen on while it shows the code. Not everywhere, and refused when hidden.
+        try { if (navigator.wakeLock) navigator.wakeLock.request('screen').then(function(l) { self.lock = l; }, function() {}); } catch (e) {}
+      },
+      stop: function() {
+        if (this.timer) { clearInterval(this.timer); this.timer = null; this.autoStamp(); }
+        if (this.lock) { try { this.lock.release(); } catch (e) {} this.lock = null; }
+      },
+      tick: function() {
+        this.autoStamp();
+        if (Date.now() - this.rotatedAt >= this.rotateMinutes * 60000) this.rotate();
+      },
+      rotate: function() {
+        var ints = new Uint32Array(5);
+        crypto.getRandomValues(ints);
+        this.previous = this.current;
+        this.current = appInstance.scanTag(this.viewName) + Rsvp.checkinCode(ints);
+        this.rotatedAt = Date.now();
+      }
+    }
+  };
+  // Names of computed columns that hold a date (dateAdd), from every table, view and form. Memoized on VIEWS,
+  // which a schema change replaces wholesale.
+  var _cdKey = null, _cdCols = {};
+  function computedDateCols() {
+    if (_cdKey === VIEWS) return _cdCols;
+    _cdKey = VIEWS; _cdCols = {};
+    // A table's own derived columns too.
+    Object.keys(SCHEMA || {}).forEach(function(t) {
+      Columns.derivedDefs(SCHEMA[t]).forEach(function(d) { if (d.computed && d.computed.dateAdd) _cdCols[d.name] = true; });
+    });
+    Object.keys(VIEWS || {}).forEach(function(n) {
+      var v = VIEWS[n] || {};
+      (v.columns || []).concat(v.compute || [], (v.form && v.form.compute) || []).forEach(function(c) {
+        if (c && typeof c === 'object' && c.name && c.computed && c.computed.dateAdd) _cdCols[c.name] = true;
+      });
+    });
+    return _cdCols;
+  }
+  // A photo -> the one code in it, with the browser's own decoder. Both symbologies the app prints: the
+  // sheet's Code 39 and a QR carrying the `?scan=` link. Several codes in one picture is a framing
+  // problem, and choosing one would log a door nobody aimed at. Resolves { raw } or { outcome }.
+  function decodePhoto(file) {
+    return Promise.resolve()
+      .then(function() { return createImageBitmap(file); })
+      .then(function(bmp) { return new BarcodeDetector({ formats: ['code_39', 'qr_code'] }).detect(bmp); })
+      .then(function(found) {
+        if (!found || !found.length) return { outcome: 'no_code_found' };
+        if (found.length > 1) return { outcome: 'several_codes' };
+        return { raw: found[0].rawValue };
+      }, function() { return { outcome: 'camera_failed' }; });
+  }
   app.component('scan-view', {
+    mixins: [ROTATING_CODE],
     props: { name: { type: String, default: null }, embed: { type: Boolean, default: false } },
-    data: function() { return { code: '', last: null, armed: false, reading: false, autoSubmit: false }; },
+    data: function() { return { code: '', last: null, armed: false, reading: false, autoSubmit: false, door: '' }; },
     // A `?scan=` deep link hands its code to the view it names. Taken once -- after that the box is
     // the person's, and `armed` is what makes "something is waiting for you to press" visible.
     //
     // `link: "submit"` logs it with no press at all. The view's tables may still be in flight (selectTab
     // started the fetches a tick ago), so the write waits for `viewLoaded` rather than racing them --
     // the watcher below is what fires when they land, and runPending is a no-op if they already had.
+    // A code from the scan button submits too: there the person pointing the camera is the intent.
     mounted: function() {
-      var p = appInstance.pendingScan;
-      if (!p || p.view !== this.viewName) return;
-      appInstance.pendingScan = null;
-      this.code = p.code;
-      this.armed = true;
-      if (this.cfg.link === 'submit') { this.autoSubmit = true; this.runPending(); }
+      this.takePending();
+      // A tablet locked on this door screen reopens it, at the same gym, behind the PIN.
+      var kl = appInstance.kioskLock;
+      if (kl && kl.view === this.viewName && this.doorScreen) { this.door = kl.door || ''; this.qrOpen = true; }
     },
-    watch: { viewLoaded: function(ready) { if (ready) this.runPending(); } },
+    watch: {
+      viewLoaded: function(ready) { if (ready) this.runPending(); },
+      // Scanned again while this view is open: the view does not remount, so the code is taken here.
+      pending: function() { this.takePending(); }
+    },
     computed: {
       a: function() { return appInstance; },
       viewName: function() { return this.name || appInstance.currentTable; },
       cfg: function() { return (VIEWS[this.viewName] || {}).scan || {}; },
+      pending: function() { return appInstance.pendingScan; },
+      // The DOOR SCREEN (`verify`, staff only): which door it stands at, and the changing code it shows.
+      // The door screen's caption in full screen: the gym it stands at.
+      doorTitle: function() { return this.door ? appInstance.displayValue(this.cfg.column, this.door) : ''; },
+      doorScreen: function() { return !this.embed && appInstance.scanCanVerify(this.viewName); },
+      rotateMinutes: function() { var vf = this.cfg.verify; return vf ? (vf.rotateMinutes || 5) : 0; },
+      doors: function() {
+        var ref = getColumnRef((VIEWS[this.viewName].sources || [])[0], this.cfg.column) || {};
+        var vc = ref.valueCol || 'id';
+        return (appInstance.dataCache[ref.table] || []).map(function(r) { return r[vc]; }).filter(function(x) { return x != null && x !== ''; });
+      },
+      accepted: function() { return [this.current, this.previous]; },
+      qrLink: function() { return appInstance.scanDeepLink(this.viewName, this.current); },
       // The browser's own barcode decoder, or nothing. `BarcodeDetector` is native where it exists and
       // absent on iOS Safari, Firefox and desktop Chrome on Windows -- so the camera is an ENHANCEMENT
       // and the typed box stays the interface everywhere. No button appears rather than a button that
@@ -9150,7 +10150,7 @@ function createVueApp() {
       // printed twice, or a code already logged.
       tone: function() {
         var o = this.last && this.last.outcome;
-        return o === 'created' ? 'success' : o === 'already' ? 'warning' : 'error';
+        return (o === 'created' || o === 'claimed') ? 'success' : o === 'already' ? 'warning' : 'error';
       },
       // Same split as statsFor, and for the same reason: top-level renders the rows loadTableData just
       // built (which carry the period offset), an embed renders its own rows, because currentData
@@ -9198,22 +10198,21 @@ function createVueApp() {
         ev.target.value = '';                 // reset, so re-picking the same photo fires change again
         if (!file) return;
         this.reading = true;
-        var fail = function(outcome) { self.reading = false; self.last = { outcome: outcome, code: '' }; };
-        // Both symbologies the app itself produces: the printed sheet's Code 39, and a QR carrying the
-        // `?scan=` deep link, which `Scan.codeFrom` unwraps rather than navigating to.
-        Promise.resolve()
-          .then(function() { return createImageBitmap(file); })
-          .then(function(bmp) { return new BarcodeDetector({ formats: ['code_39', 'qr_code'] }).detect(bmp); })
-          .then(function(found) {
-            if (!found || !found.length) return fail('no_code_found');
-            // Several codes in one picture is a framing problem, and choosing one of them would log a
-            // door nobody aimed at -- the same reason a duplicated catalogue code refuses.
-            if (found.length > 1) return fail('several_codes');
-            self.reading = false;
-            self.code = Scan.codeFrom(found[0].rawValue);
-            self.submit();
-          })
-          .catch(function() { fail('camera_failed'); });
+        decodePhoto(file).then(function(r) {
+          self.reading = false;
+          if (!r.raw) { self.last = { outcome: r.outcome, code: '' }; return; }
+          self.code = Scan.codeFrom(r.raw);
+          self.submit();
+        });
+      },
+      autoStamp: function() { appInstance.stampScanVerify(this.viewName, this.accepted, this.door, true); },
+      takePending: function() {
+        var p = appInstance.pendingScan;
+        if (!p || p.view !== this.viewName) return;
+        appInstance.pendingScan = null;
+        this.code = p.code;
+        this.armed = true;
+        if (this.cfg.link === 'submit' || p.direct) { this.autoSubmit = true; this.runPending(); }
       },
       submit: function() {
         var self = this;
@@ -9235,17 +10234,26 @@ function createVueApp() {
     }),
     template: ''
       + '<component :is="embed ? \'div\' : \'v-card\'" :variant="embed ? undefined : \'outlined\'" :class="embed ? \'my-2\' : \'pa-4\'" data-testid="scan-view">'
+      // The door screen: pick the door, show its changing code. Staff only, and never embedded.
+      + '<div v-if="doorScreen" class="d-flex align-center mb-3" style="gap:8px" data-testid="scan-door-screen">'
+      +   '<v-select v-model="door" :items="doors" :label="a.t(\'scan.door\')" density="compact" variant="outlined" hide-details style="max-width:260px" data-testid="scan-door"></v-select>'
+      +   '<v-btn icon="mdi-qrcode" size="small" variant="text" :disabled="!door" :title="a.t(\'rsvp.show_code\')" :aria-label="a.t(\'rsvp.show_code\')" data-testid="scan-door-qr" @click="qrOpen = true"></v-btn>'
+      +   '<qr-dialog v-model="qrOpen" :link="qrLink" :caption="current" mono :kiosk="{ view: viewName, door: door || \'\' }" :title="doorTitle"></qr-dialog>'
+      + '</div>'
+      // Below it, a member's own way in -- the camera and the box -- which the door screen has no use for.
+      + '<template v-if="!doorScreen">'
       + '<template v-if="cameraOk">'
       +   '<input type="file" accept="image/*" capture="environment" ref="photo" style="display:none" data-testid="scan-photo" @change="onPhoto($event)">'
       +   '<v-btn block variant="tonal" color="primary" prepend-icon="mdi-camera" class="mb-3" :loading="reading" data-testid="scan-camera" @click="$refs.photo.click()">{{ a.t(\'scan.camera\') }}</v-btn>'
       + '</template>'
-      + '<v-text-field ref="box" v-model="code" :label="a.t(\'scan.code\')" density="compact" variant="outlined" hide-details autofocus autocomplete="off" data-testid="scan-code" @keydown.enter="submit()">'
+      + '<v-text-field ref="box" v-model="code" :label="a.tOr(cfg.label, a.t(\'scan.code\'))" density="compact" variant="outlined" hide-details autofocus autocomplete="off" data-testid="scan-code" @keydown.enter="submit()">'
       +   '<template v-slot:append-inner>'
-      +     '<v-btn size="small" icon="mdi-barcode-scan" :disabled="!code.trim()" :color="armed ? \'primary\' : undefined" :variant="armed ? \'tonal\' : \'text\'" :title="a.t(\'scan.code\')" @click="submit()" data-testid="scan-submit"></v-btn>'
+      +     '<v-btn size="small" icon="mdi-barcode-scan" :disabled="!code.trim()" :color="armed ? \'primary\' : undefined" :variant="armed ? \'tonal\' : \'text\'" :title="a.tOr(cfg.label, a.t(\'scan.code\'))" @click="submit()" data-testid="scan-submit"></v-btn>'
       +   '</template>'
       + '</v-text-field>'
+      + '</template>'
       + '<v-alert v-if="last" :type="tone" density="compact" variant="tonal" class="mt-3" data-testid="scan-outcome" :data-outcome="last.outcome">'
-      +   '<span>{{ a.t(\'scan.\' + last.outcome) }}</span>&nbsp;'
+      +   '<span>{{ last.message || a.t(\'scan.\' + last.outcome) }}</span>&nbsp;'
       // A resolved scan names the CATALOGUE ROW it hit, through the same renderer the grid uses for that
       // column -- so a translated vocabulary reads the same here as everywhere else. A refused one can
       // only echo what was typed, since it resolved to nothing.
@@ -9367,16 +10375,16 @@ function createVueApp() {
   // The current user's status control for one event — the 3 picker variants share this so the rsvp table
   // and card layouts render the same widget. Emits 'set' with the chosen value ('' when deselected).
   app.component('rsvp-picker', {
-    props: { options: { type: Array, default: function() { return []; } }, picker: { type: String, default: 'dropdown' }, value: { default: '' } },
+    props: { options: { type: Array, default: function() { return []; } }, picker: { type: String, default: 'dropdown' }, value: { default: '' }, disabled: Boolean },
     emits: ['set'],
     template: ''
-      + '<v-btn-toggle v-if="picker===\'toggle\'" :model-value="value" density="compact" variant="outlined" divided @update:model-value="$emit(\'set\', $event)" data-testid="rsvp-toggle">'
+      + '<v-btn-toggle v-if="picker===\'toggle\'" :model-value="value" :disabled="disabled" density="compact" variant="outlined" divided @update:model-value="$emit(\'set\', $event)" data-testid="rsvp-toggle">'
       + '<v-btn v-for="o in options" :key="o.value" :value="o.value" size="small">{{ o.title }}</v-btn>'
       + '</v-btn-toggle>'
-      + '<v-chip-group v-else-if="picker===\'chips\'" :model-value="value" @update:model-value="$emit(\'set\', $event)" data-testid="rsvp-toggle">'
+      + '<v-chip-group v-else-if="picker===\'chips\'" :model-value="value" :disabled="disabled" @update:model-value="$emit(\'set\', $event)" data-testid="rsvp-toggle">'
       + '<v-chip v-for="o in options" :key="o.value" :value="o.value" size="small" filter variant="outlined" color="primary">{{ o.title }}</v-chip>'
       + '</v-chip-group>'
-      + '<v-select v-else :model-value="value" :items="options" item-title="title" item-value="value" density="compact" variant="outlined" hide-details clearable placeholder="…" style="min-width:130px;max-width:170px" @update:model-value="$emit(\'set\', $event)" data-testid="rsvp-toggle"></v-select>'
+      + '<v-select v-else :model-value="value" :disabled="disabled" :items="options" item-title="title" item-value="value" density="compact" variant="outlined" hide-details clearable placeholder="…" style="min-width:130px;max-width:170px" @update:model-value="$emit(\'set\', $event)" data-testid="rsvp-toggle"></v-select>'
   });
 
   // RSVP / signup view — name/embed parameterized. Lists upcoming events (from rsvpFor) each with the
@@ -9405,7 +10413,10 @@ function createVueApp() {
       item: function() { return this.built.record; },
       signedIn: function() { return !!appInstance.currentUserEmail; },
       missing: function() { return this.built.missing; },
-      canSubmit: function() { return this.built.complete && this.built.editable; },
+      canSubmit: function() { return this.built.complete && this.built.editable && !this.ruleFailures.length; },
+      full: function() { return appInstance.formComputed(this.viewName, this.item); },
+      // Shown once the required fields are in: a rule over a half-filled record would only nag.
+      ruleFailures: function() { return this.built.complete ? appInstance.formRuleFailures(this.viewName, this.item) : []; },
       // Once the state gate has closed, say so. The rules would refuse the write anyway; a dead editor
       // that fails on save is the version that looks like a bug.
       locked: function() { return this.built.submitted && !this.built.editable; },
@@ -9416,13 +10427,17 @@ function createVueApp() {
       label: function(col) { return appInstance.tOr("field." + col, col); },
       isMissing: function(col) { return this.touched && this.missing.indexOf(col) >= 0; },
       isRequired: function(col) { return this.built.required.indexOf(col) >= 0; },
+      isComputed: function(col) { return (this.cfg.compute || []).some(function(c) { return c && c.name === col; }) || Columns.isDerived(SCHEMA, this.cfg.table, col); },
       start: function() { appInstance.formRecord(this.viewName); },
       submit: function() {
         this.touched = true;
+        if (this.ruleFailures.length) { appInstance.notify(this.ruleFailures[0]); return; }
         if (!this.canSubmit) { appInstance.notify(appInstance.t("msg.form_incomplete")); return; }
         var col = this.cfg.submitColumn;
         if (col && this.item) {
-          appInstance.saveField(this.item, col, this.cfg.submitValue === undefined ? "submitted" : this.cfg.submitValue);
+          // The form's table, named: without it saveField writes to the screen that is open -- the page the
+          // form is embedded in, or the form view itself -- and the server refuses a table that is neither.
+          appInstance.saveField(this.item, col, this.cfg.submitValue === undefined ? "submitted" : this.cfg.submitValue, this.cfg.table);
         }
         appInstance.notify(appInstance.t("msg.form_submitted"));
       }
@@ -9436,37 +10451,230 @@ function createVueApp() {
       +       '<div v-for="(b, i) in doneText" :key="i" v-html="b.html"></div>'
       +       '<v-alert v-if="!doneText.length" type="success" variant="tonal" density="compact">{{ a.t("msg.form_submitted") }}</v-alert>'
       +     '</div>'
-      +     '<v-btn v-else-if="!item" color="primary" @click="start">{{ a.tOr(cfg.startLabel, a.t("btn.add")) }}</v-btn>'
+      +     '<v-btn v-else-if="!item" color="primary" data-testid="form-start" @click="start">{{ a.tOr(cfg.startLabel, a.t("btn.add")) }}</v-btn>'
       +     '<div v-else>'
       +       '<div v-for="(sec, si) in built.sections" :key="si" class="mb-4">'
       +         '<div v-if="sec.title" class="text-subtitle-2 mb-2" style="opacity:0.85">{{ a.tOr(sec.title, sec.title) }}</div>'
       +         '<div v-for="col in sec.columns" :key="col" class="mb-3">'
       +           '<div class="text-caption" style="opacity:0.75">{{ label(col) }}<span v-if="isRequired(col)" style="opacity:0.6"> *</span></div>'
-      +           '<data-cell :item="item" :col="col" :owner="viewName"></data-cell>'
+      +           '<span v-if="isComputed(col)" data-testid="form-computed" :data-col="col"><list-value :col="col" :value="full[col]"></list-value><span v-if="!full[col]" style="opacity:0.5">—</span></span>'
+      +           '<data-cell v-else :item="item" :col="col" :owner="viewName"></data-cell>'
       +           '<div v-if="isMissing(col)" class="text-caption text-error">{{ a.t("msg.form_required") }}</div>'
       +         '</div>'
       +       '</div>'
-      +       '<v-btn color="primary" data-testid="form-submit" @click="submit">{{ a.tOr(cfg.submitLabel, a.t("btn.save")) }}</v-btn>'
+      +       '<v-alert v-for="(m, mi) in ruleFailures" :key="mi" type="warning" variant="tonal" density="compact" class="mb-3" data-testid="form-rule">{{ m }}</v-alert>'
+      +       '<v-btn color="primary" data-testid="form-submit" :disabled="ruleFailures.length > 0" @click="submit">{{ a.tOr(cfg.submitLabel, a.t("btn.save")) }}</v-btn>'
       +     '</div>'
       +   '</template>'
       + '</v-card>'
   });
 
+  // A link as a large QR, for a phone's own camera to open -- iOS has no BarcodeDetector, but every camera
+  // app offers to open a link it finds in a QR. The caption goes under it for anyone who cannot scan: the
+  // check-in code (`mono`), or the page's name. With no encoder (offline, /vendor missing) only the
+  // caption shows. Drawn on open, since the link may change while the dialog is closed.
+  //
+  // `kiosk` ({ view, door }) -- a changing code a tablet shows at a door or a room: it may go FULL SCREEN
+  // (no menus behind it, and the browser's own full screen when allowed) and be LOCKED with a PIN chosen
+  // there and then, so a customer cannot close it. The lock is this tablet's (root kioskLock, in its
+  // browser storage, the PIN only as a hash) and outlives a reload: the app reopens straight into the
+  // locked code. The tablet's own pinning (Guided Access, app pinning) is what stops leaving the browser.
+  app.component('qr-dialog', {
+    props: { modelValue: Boolean, link: { type: String, default: '' }, caption: { type: String, default: '' }, mono: Boolean,
+             kiosk: { type: Object, default: null }, title: { type: String, default: '' } },
+    emits: ['update:modelValue'],
+    data: function() { return { svg: '', full: false, locked: false, choosing: false, pin: '', pinError: '' }; },
+    computed: { a: function() { return appInstance; } },
+    watch: {
+      modelValue: { immediate: true, handler: function(open) {
+        if (open && this.kiosk && appInstance.kioskLockMatches(this.kiosk)) { this.full = true; this.locked = true; }
+        if (open) this.draw();
+      } },
+      link: function() { if (this.modelValue) this.draw(); },
+      full: function() { if (this.modelValue) this.draw(); }
+    },
+    methods: {
+      draw: function() {
+        var self = this, link = this.link;
+        appInstance._ensureQrEncoder().then(function() {
+          var m = appInstance.qrMatrix(link);
+          var px = self.full ? Math.max(200, Math.min(window.innerWidth - 48, window.innerHeight - 220))
+                             : Math.max(160, Math.min(480, window.innerWidth - 96, window.innerHeight - 260));
+          self.svg = m ? Print.qrSvg(m, px) : '';
+        });
+      },
+      close: function(v) { if (!v && this.locked) return; this.$emit('update:modelValue', v); if (!v) this.leaveFull(); },
+      goFull: function() {
+        this.full = true;
+        try { var el = document.documentElement; if (el.requestFullscreen && !document.fullscreenElement) el.requestFullscreen().catch(function() {}); } catch (e) {}
+      },
+      leaveFull: function() {
+        if (this.locked) return;
+        this.full = false; this.choosing = false;
+        try { if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(function() {}); } catch (e) {}
+      },
+      lock: function() {
+        var self = this, pin = String(this.pin || '').trim();
+        if (!/^[0-9]{4,}$/.test(pin)) { this.pinError = appInstance.t('kiosk.pin_short'); return; }
+        return appInstance.setKioskLock(this.kiosk, pin).then(function() { self.locked = true; self.choosing = false; self.pin = ''; self.pinError = ''; });
+      },
+      unlock: function() {
+        var self = this;
+        return appInstance.kioskPinOk(String(this.pin || '').trim()).then(function(ok) {
+          self.pin = '';
+          if (!ok) { self.pinError = appInstance.t('kiosk.wrong_pin'); return; }
+          appInstance.clearKioskLock(); self.locked = false; self.pinError = ''; self.choosing = false;
+        });
+      }
+    },
+    template: ''
+      + '<v-dialog :model-value="modelValue" @update:model-value="close($event)" :fullscreen="full" :persistent="locked" max-width="560">'
+      +   '<v-card class="pa-4 text-center" :class="full ? \'d-flex flex-column justify-center\' : \'\'" data-testid="qr-dialog" :data-kiosk="full ? (locked ? \'locked\' : \'full\') : undefined">'
+      +     '<div class="d-flex align-center" style="gap:4px">'
+      +       '<span v-if="full && title" style="font-size:1.4rem;font-weight:600" data-testid="qr-dialog-title">{{ title }}</span><v-spacer></v-spacer>'
+      // Unlocked: full screen, lock (asks for a PIN), close. Locked: only the way back in, behind the PIN.
+      +       '<template v-if="!locked">'
+      +         '<v-btn v-if="kiosk && !full" icon="mdi-fullscreen" size="small" variant="text" :title="a.t(\'kiosk.fullscreen\')" :aria-label="a.t(\'kiosk.fullscreen\')" data-testid="qr-fullscreen" @click="goFull()"></v-btn>'
+      +         '<v-btn v-if="kiosk && full" icon="mdi-lock-outline" size="small" variant="text" :title="a.t(\'kiosk.lock\')" :aria-label="a.t(\'kiosk.lock\')" data-testid="qr-lock" @click="choosing = true; pin = \'\'; pinError = \'\'"></v-btn>'
+      +         '<v-btn v-if="full" icon="mdi-fullscreen-exit" size="small" variant="text" :title="a.t(\'kiosk.exit\')" :aria-label="a.t(\'kiosk.exit\')" data-testid="qr-exit-full" @click="leaveFull()"></v-btn>'
+      +         '<v-btn icon="mdi-close" size="small" variant="text" :title="a.t(\'btn.close\')" :aria-label="a.t(\'btn.close\')" @click="close(false)"></v-btn>'
+      +       '</template>'
+      +       '<v-btn v-else icon="mdi-lock" size="small" variant="text" :title="a.t(\'kiosk.unlock\')" :aria-label="a.t(\'kiosk.unlock\')" data-testid="qr-unlock" @click="choosing = !choosing; pin = \'\'; pinError = \'\'"></v-btn>'
+      +     '</div>'
+      +     '<div v-if="choosing" class="d-flex justify-center align-center flex-wrap my-2" style="gap:8px" data-testid="qr-pin-form">'
+      +       '<v-text-field v-model="pin" type="password" inputmode="numeric" autocomplete="off" :label="a.t(\'kiosk.pin\')" density="compact" variant="outlined" hide-details style="max-width:180px" data-testid="qr-pin" @keydown.enter="locked ? unlock() : lock()"></v-text-field>'
+      +       '<v-btn color="primary" variant="flat" data-testid="qr-pin-go" @click="locked ? unlock() : lock()">{{ locked ? a.t(\'kiosk.unlock\') : a.t(\'kiosk.lock\') }}</v-btn>'
+      +       '<div v-if="pinError" class="text-error text-body-2" style="flex-basis:100%" data-testid="qr-pin-error">{{ pinError }}</div>'
+      +     '</div>'
+      // The SVG is built from the module matrix alone -- numbers, no text from anyone -- so v-html is safe.
+      +     '<div v-if="svg" v-html="svg" class="d-flex justify-center"></div>'
+      +     '<div class="mt-3" :style="mono ? (\'font-family:monospace;letter-spacing:0.1em;word-break:break-all;font-size:\' + (full ? \'4rem\' : \'2.5rem\')) : \'font-size:1.5rem\'" data-testid="qr-dialog-caption">{{ caption }}</div>'
+      +   '</v-card>'
+      + '</v-dialog>'
+  });
+  // Today's check-in controls, once above the list: the code is the day's, not one event's. The organizer
+  // types the real code, can show it as a QR for the room, and stamps every event of today; a member types
+  // (or is handed, by that QR) the code they were shown, which lands on each event they reserved today.
+  // `mine`: the member's reserved events today.
+  app.component('rsvp-checkin', {
+    mixins: [ROTATING_CODE],
+    // `rotateMinutes`: the view's `checkin.rotateMinutes` -- the code changes by itself while the QR is open.
+    // `autoClaim`: `checkin.link: "submit"` -- a code that arrives by link is saved with no press.
+    // `hideClaim`: the scan button reaches this view, so a member has no use for a box of their own. The
+    // component stays (it is what saves a code that arrives by link); only the box goes, unless a code is
+    // waiting for a press nobody could otherwise make.
+    props: { viewName: String, mine: { type: Array, default: function() { return []; } }, canStamp: Boolean, armed: { type: String, default: '' }, rotateMinutes: { type: Number, default: 0 }, autoClaim: Boolean, hideClaim: Boolean },
+    emits: ['claimed'],
+    // `code`: what the organizer typed. `current`/`previous`/`rotatedAt`: the rotating code and the one
+    // before it, which is still accepted. None of it is stored anywhere.
+    data: function() { return { code: '' }; },
+    computed: {
+      a: function() { return appInstance; },
+      frozen: function() { var self = this; return this.mine.every(function(e) { return appInstance.rsvpFrozen(self.viewName, e.key); }); },
+      // From the events still open: a member back for a later class has a frozen morning row carrying the
+      // code, and showing it would leave a retyped identical code with no change to save.
+      myCode: function() {
+        var self = this, open = this.mine.filter(function(e) { return !appInstance.rsvpFrozen(self.viewName, e.key); });
+        var e = (open.length ? open : this.mine).find(function(x) { return x.myCode; });
+        return e ? e.myCode : '';
+      },
+      typed: function() { return String(this.code || '').trim(); },
+      // The code on show: the rotating one, or what was typed.
+      shown: function() { return this.rotateMinutes ? this.current : this.typed; },
+      accepted: function() { return this.rotateMinutes ? [this.current, this.previous] : [this.typed]; },
+      // Drawn on this screen only.
+      qrLink: function() { return appInstance.scanDeepLink(this.viewName, this.shown); }
+    },
+    watch: {
+      frozen: function(f) { if (!f) this.autoClaimNow(); },
+      mine: function() { this.autoClaimNow(); },
+      armed: function() { this.autoClaimNow(); }
+    },
+    // For a member this renders once their own responses for today are known (rsvp-view's checkinShown),
+    // so the wait the scan view's auto-submit does for itself is already done. With nothing booked today
+    // (rsvp-view's pickToday) it mounts with `mine` empty, which reads as frozen: the code shows,
+    // disabled, while they book a class below -- and the booking unfreezes it, so the claim follows the
+    // booking rather than needing a second scan.
+    mounted: function() {
+      this.autoClaimNow();
+      if (this.canStamp && this.rotateMinutes && appInstance.kioskLockMatches({ view: this.viewName, door: '' })) this.qrOpen = true;   // a locked tablet
+    },
+    methods: {
+      stamp: function() { appInstance.stampRsvpCheckin(this.viewName, this.accepted); },
+      autoStamp: function() { appInstance.stampRsvpCheckin(this.viewName, this.accepted, true); },
+      // The code is the one the link brought, or -- once claimed -- the one already on today's rows. Only
+      // written while some open event of today lacks it, so it never re-saves an unchanged code.
+      autoClaimNow: function() {
+        var self = this, code = this.armed || this.myCode;
+        if (!this.autoClaim || !code || this.canStamp || this.frozen) return;
+        if (this.mine.some(function(e) { return !appInstance.rsvpFrozen(self.viewName, e.key) && e.myCode !== code; })) this.claim(code);
+      },
+      claim: function(value) { appInstance.setRsvpCode(this.viewName, value); this.$emit('claimed'); }
+    },
+    template: ''
+      + '<div class="d-flex align-center flex-wrap pa-2" style="gap:8px" data-testid="rsvp-checkin">'
+      + '<template v-if="canStamp">'
+      +   '<v-text-field v-if="!rotateMinutes" v-model="code" :label="a.t(\'rsvp.checkin_code\')" density="compact" variant="outlined" hide-details autocomplete="off" style="max-width:200px" data-testid="rsvp-checkin-real"></v-text-field>'
+      +   '<v-btn icon="mdi-qrcode" size="small" variant="text" :disabled="!rotateMinutes && !typed" :title="a.t(\'rsvp.show_code\')" :aria-label="a.t(\'rsvp.show_code\')" data-testid="rsvp-checkin-qr" @click="qrOpen = true"></v-btn>'
+      // A changing code stamps by itself (every 15 s while shown, and as the QR closes): no button to press.
+      +   '<v-btn v-if="!rotateMinutes" size="small" variant="text" class="text-none" :disabled="!shown" :title="a.t(\'rsvp.checkin\')" :aria-label="a.t(\'rsvp.checkin\')" data-testid="rsvp-checkin-stamp" @click="stamp()"><v-icon icon="mdi-account-check"></v-icon><span class="d-none d-sm-inline ml-2">{{ a.t(\'rsvp.checkin\') }}</span></v-btn>'
+      +   '<qr-dialog v-model="qrOpen" :link="qrLink" :caption="shown" mono :kiosk="canStamp ? { view: viewName, door: \'\' } : null" :title="a.tOr(\'view.\' + viewName, viewName)"></qr-dialog>'
+      + '</template>'
+      + '<v-text-field v-else-if="!hideClaim || (armed && !autoClaim)" :model-value="armed || myCode" @change="e => claim(e.target.value)" :disabled="frozen" :label="a.t(\'rsvp.checkin_code\')" density="compact" variant="outlined" hide-details autocomplete="off" :autofocus="!!armed" style="max-width:200px" data-testid="rsvp-checkin-claim">'
+      // A code from a link is ARMED, not written: one press saves it, because a link is something anyone
+      // can send you.
+      +   '<template v-if="armed" v-slot:append-inner>'
+      +     '<v-btn icon="mdi-check" size="small" color="primary" variant="tonal" :disabled="frozen" :title="a.t(\'rsvp.checkin\')" :aria-label="a.t(\'rsvp.checkin\')" data-testid="rsvp-checkin-claim-save" @click="claim(armed)"></v-btn>'
+      +   '</template>'
+      + '</v-text-field>'
+      + '</div>'
+  });
   app.component('rsvp-view', {
     props: { name: { type: String, default: null }, embed: { type: Boolean, default: false } },
     // Sort is component-local: rsvp renders its own event list (from the rsvp.js engine), not the root's
     // currentData, so the root sortCol/sortAsc the data grid uses would sort a list nobody displays.
     // null = the engine's own order (chronological, upcoming first) -- the view's natural default.
-    data: function() { return { sortCol: null, sortAsc: true }; },
+    // `pageQr`: the organizer's "QR code for this page" dialog, for a tablet or a printout at the venue.
+    // `now`: ticks every 30 s, so an event closes on screen when its booking window does.
+    data: function() { return { sortCol: null, sortAsc: true, pageQr: false }; },
     computed: {
       a: function() { return appInstance; },
       viewName: function() { return this.name || appInstance.currentTable; },
       cfg: function() { return (VIEWS[this.viewName] && VIEWS[this.viewName].rsvp) || {}; },
       data: function() { return appInstance.rsvpFor(this.viewName); },
+      canStamp: function() { return appInstance.rsvpCanStamp(this.viewName); },
+      // The response table's `capacity.reserved` (walk-ins), which staff set where their own response would be.
+      reservedCol: function() { var c = appInstance.rsvpCapacity(this.cfg); return (c && c.reserved) || ''; },
+      walkIns: function() { return !!this.reservedCol && this.organizer; },
+      organizer: function() { return appInstance.rsvpOrganizer(this.viewName); },
+      pageLink: function() { return appInstance.viewDeepLink(this.viewName); },
+      pageTitle: function() { return appInstance.t('view.' + this.viewName) || this.viewName; },
+      // Check-in happens AT the venue, so it is offered only on a day with events: to the organizer, and
+      // to a member who reserved at least one of them.
+      todayMine: function() { return ((this.data && this.data.events) || []).filter(function(e) { return e.isToday && e.myRowId; }); },
+      checkinShown: function() {
+        if (!this.cfg.checkin) return false;
+        return this.canStamp ? ((this.data && this.data.events) || []).some(function(e) { return e.isToday; }) : (this.todayMine.length > 0 || this.pickToday);
+      },
+      // A member who scanned the venue's code with nothing booked today: the list narrows to today's
+      // events so they can pick one there and then, and booking it carries the code on (rsvp-checkin).
+      // At the venue: arrived by the venue's check-in link, or already checked in today. Being here is
+      // what reopens today's events after `closeBefore`.
+      onSite: function() { return appInstance.rsvpOnSite(this.viewName); },
+      pickToday: function() {
+        if (!this.cfg.checkin || !this.armed || this.canStamp || this.todayMine.length) return false;
+        return ((this.data && this.data.events) || []).some(function(e) { return e.isToday; });
+      },
+      // A code that arrived by the organizer's QR (`?view=&scan=`). It stays on the root until the member
+      // presses, rather than being taken into this component: opening the link re-renders the view.
+      armed: function() { var p = appInstance.pendingScan; return p && p.view === this.viewName ? p.code : ''; },
+      byScanButton: function() { var n = this.viewName; return appInstance.scanTargets.some(function(t) { return t.view === n; }); },
+      armedDirect: function() { var p = appInstance.pendingScan; return !!(p && p.view === this.viewName && p.direct); },
       // The rendered rows: engine order until a header is clicked, then Rows.compareValues -- the same
       // comparator the data grid and embeds use, so blanks-last/numeric ordering all agree.
       events: function() {
         var evs = (this.data && this.data.events) || [];
+        if (this.pickToday) evs = evs.filter(function(e) { return e.isToday; });
         if (!this.sortCol) return evs;
         var col = this.sortCol, asc = this.sortAsc;
         // "Your response" is a status value: order it by the configured status order, not alphabetically
@@ -9477,11 +10685,7 @@ function createVueApp() {
       },
       // Status choices as { value, title } — from the view's inline `statuses`, else the status column's
       // list. Titles are translated (see statusLabel).
-      options: function() {
-        var self = this;
-        var vals = this.cfg.statuses || (appInstance.getListOptions(this.cfg.statusColumn) || []).map(function(o) { return o.value; });
-        return vals.map(function(v) { return { value: v, title: self.statusLabel(v) }; });
-      },
+      options: function() { return appInstance.rsvpOptions(this.viewName); },
       // UI element for choosing a status: 'toggle' (segmented buttons, default) | 'chips' | 'dropdown'.
       picker: function() { return this.cfg.picker || 'dropdown'; },
       // Whether to show WHO registered (names), per the view's `roster` setting: 'all' -> everyone,
@@ -9491,11 +10695,19 @@ function createVueApp() {
     },
     methods: Object.assign({}, SORT_UI, {
       set: function(key, status) { appInstance.setRsvp(this.viewName, key, status || ''); },
+      claimed: function() { appInstance.pendingScan = null; },
+      // Frozen (attendance verified), or full and not mine to keep: a full class cannot be joined, but a
+      // member holding a place in it can still give it up.
+      // The rules are the root's (rsvpLocked & co.), shared with a calendar that books; `now` ticks here.
+      locked: function(ev) { return appInstance.rsvpLocked(this.viewName, ev); },
+      closed: function(ev) { return appInstance.rsvpClosed(this.viewName, ev); },
+      placesText: function(ev) { return appInstance.rsvpPlacesText(this.viewName, ev); },
+      placesShown: function(ev) { return appInstance.rsvpPlacesShown(this.viewName, ev); },
       toDateStr: toDateStr,
       // Translated label for a status VALUE, keyed by `list.<statusList||statusColumn>.<value>` (falls back
       // to the raw value). `statusList` lets the view name a translation namespace distinct from the column
       // — whose name may resolve to another table's list under the per-column-name list resolver.
-      statusLabel: function(v) { var list = this.cfg.statusList || appInstance.colIsList(this.cfg.statusColumn) || this.cfg.statusColumn; return appInstance.tOr('list.' + list + '.' + v, v); },
+      statusLabel: function(v) { return appInstance.rsvpStatusLabel(this.viewName, v); },
       tallyText: function(ev) { var self = this; return Object.keys(ev.tally).sort().map(function(s) { return self.statusLabel(s) + ': ' + ev.tally[s]; }).join('  ·  '); },
       // A participant's display label under the profile-privacy rule: a shared (named) member shows their
       // name; an admin additionally sees the raw email for members who haven't shared; a non-admin gets ''
@@ -9511,7 +10723,7 @@ function createVueApp() {
         ev.participants.forEach(function(p) {
           var name = self.ownerName(p.owner);
           if (!name) return;   // unshared member seen by a non-admin -> hidden
-          (groups[p.status] || (groups[p.status] = [])).push({ email: p.owner, name: name });
+          (groups[p.status] || (groups[p.status] = [])).push({ email: p.owner, name: name, id: p.id, arrived: p.arrived });
         });
         var keys = Object.keys(groups).sort(function(a, b) { var ia = order.indexOf(a), ib = order.indexOf(b); return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib); });
         return keys.map(function(s) { return { status: s, label: self.statusLabel(s), people: groups[s] }; });
@@ -9519,33 +10731,41 @@ function createVueApp() {
     }),
     template: ''
       + '<component :is="embed ? \'div\' : \'v-card\'" :variant="embed ? undefined : \'outlined\'" :class="embed ? \'my-2\' : \'\'" data-testid="rsvp-view">'
+      // Top-level only: embedded, the view is a part of another page, whose own link that would not be.
+      + '<div v-if="organizer && !embed" class="d-flex px-2 pt-1"><v-spacer></v-spacer>'
+      +   '<v-btn icon="mdi-qrcode" size="small" variant="text" :title="a.t(\'rsvp.page_qr\')" :aria-label="a.t(\'rsvp.page_qr\')" data-testid="rsvp-page-qr" @click="pageQr = true"></v-btn>'
+      +   '<qr-dialog v-model="pageQr" :link="pageLink" :caption="pageTitle"></qr-dialog>'
+      + '</div>'
+      + '<rsvp-checkin v-if="checkinShown" :view-name="viewName" :mine="todayMine" :can-stamp="canStamp" :armed="armed" :rotate-minutes="cfg.checkin.rotateMinutes || 0" :auto-claim="cfg.checkin.link === \'submit\' || armedDirect" :hide-claim="byScanButton" @claimed="claimed()"></rsvp-checkin>'
       + '<v-table v-if="!a.mobile" density="compact">'
       + '<thead><tr>'
       + '<th class="text-left" style="cursor:pointer" @click="toggleSort(\'date\')" :aria-sort="ariaSort(\'date\')" data-testid="rsvp-sort-date">{{ a.t(\'rsvp.date\') }}</th>'
       + '<th class="text-left" style="cursor:pointer" @click="toggleSort(\'title\')" :aria-sort="ariaSort(\'title\')">{{ a.t(\'rsvp.title\') }}</th>'
-      + '<th class="text-left" style="cursor:pointer" @click="toggleSort(\'myStatus\')" :aria-sort="ariaSort(\'myStatus\')">{{ a.t(\'rsvp.your_response\') }}</th>'
+      + '<th v-if="walkIns" class="text-left">{{ a.tOr(\'field.\' + reservedCol, reservedCol) }}</th><th v-else class="text-left" style="cursor:pointer" @click="toggleSort(\'myStatus\')" :aria-sort="ariaSort(\'myStatus\')">{{ a.t(\'rsvp.your_response\') }}</th>'
       + '<th v-if="cfg.showCounts" class="text-left" style="cursor:pointer" @click="toggleSort(\'total\')" :aria-sort="ariaSort(\'total\')">{{ a.t(\'rsvp.responses\') }}</th>'
       // "Who" is a status-grouped name roster, not a single value -- nothing coherent to order by.
       + '<th v-if="showRoster" class="text-left">{{ a.t(\'rsvp.who\') }}</th>'
       + '</tr></thead>'
       + '<tbody>'
       + '<tr v-for="ev in events" :key="ev.id">'
-      + '<td style="white-space:nowrap">{{ a.dateLabel(ev.date) }}</td>'
-      + '<td>{{ ev.title }}</td>'
-      + '<td><rsvp-picker :options="options" :picker="picker" :value="ev.myStatus" @set="set(ev.key, $event)"></rsvp-picker></td>'
+      + '<td style="white-space:nowrap">{{ a.dateTimeLabel(ev.date) }}</td>'
+      + '<td>{{ ev.title }}<div v-if="placesShown(ev)" style="font-size:0.8rem;opacity:0.7" data-testid="rsvp-places">{{ placesText(ev) }}</div></td>'
+      + '<td><count-stepper v-if="walkIns" :value="ev.reserved" @change="a.setRsvpReserved(viewName, ev, $event)"></count-stepper><rsvp-picker v-else :options="options" :picker="picker" :value="ev.myStatus" :disabled="locked(ev)" @set="set(ev.key, $event)"></rsvp-picker>'
+      + '</td>'
       + '<td v-if="cfg.showCounts" style="font-size:0.82rem;opacity:0.75;white-space:nowrap">{{ tallyText(ev) }}</td>'
-      + '<td v-if="showRoster" style="font-size:0.82rem" data-testid="rsvp-roster"><div v-for="g in rosterGroups(ev)" :key="g.status" class="rsvp-roster-group"><span style="opacity:0.6">{{ g.label }}:</span> <user-ref v-for="p in g.people" :key="p.email" :email="p.email" :name="p.name" :size="20" class="rsvp-person"></user-ref></div></td>'
+      + '<td v-if="showRoster" style="font-size:0.82rem" data-testid="rsvp-roster"><div v-for="g in rosterGroups(ev)" :key="g.status" class="rsvp-roster-group"><span style="opacity:0.6">{{ g.label }}:</span> <template v-for="p in g.people" :key="p.email"><v-chip v-if="canStamp && cfg.checkin && cfg.checkin.set" size="small" variant="tonal" class="rsvp-person mr-1 mb-1" :color="p.arrived ? \'success\' : undefined" :prepend-icon="p.arrived ? \'mdi-check-circle\' : \'mdi-circle-outline\'" :aria-pressed="String(p.arrived)" data-testid="rsvp-arrive" @click="a.setRsvpArrived(viewName, p.id, !p.arrived)">{{ p.name }}</v-chip><user-ref v-else :email="p.email" :name="p.name" :size="20" class="rsvp-person"></user-ref></template></div></td>'
       + '</tr>'
       + '<tr v-if="!events.length"><td colspan="5" style="opacity:0.6">{{ a.t(\'rsvp.none\') }}</td></tr>'
       + '</tbody>'
       + '</v-table>'
       + '<div v-else class="pa-1">'
       + '<v-card v-for="ev in events" :key="ev.id" variant="tonal" class="mb-2 pa-3">'
-      + '<div>{{ a.dateLabel(ev.date) }}</div>'
-      + '<div v-if="ev.title" class="mb-2" style="font-size:0.9rem;opacity:0.7">{{ ev.title }}</div>'
-      + '<rsvp-picker :options="options" :picker="picker" :value="ev.myStatus" @set="set(ev.key, $event)"></rsvp-picker>'
+      + '<div>{{ a.dateTimeLabel(ev.date) }}</div>'
+      + '<div v-if="ev.title" class="mb-2" style="font-size:0.9rem;opacity:0.7">{{ ev.title }}<div v-if="placesShown(ev)" style="font-size:0.8rem" data-testid="rsvp-places">{{ placesText(ev) }}</div></div>'
+      + '<div v-if="walkIns" class="d-flex align-center" style="gap:6px"><span style="font-size:0.85rem">{{ a.tOr(\'field.\' + reservedCol, reservedCol) }}</span><count-stepper :value="ev.reserved" @change="a.setRsvpReserved(viewName, ev, $event)"></count-stepper></div>'
+      + '<rsvp-picker v-else :options="options" :picker="picker" :value="ev.myStatus" :disabled="locked(ev)" @set="set(ev.key, $event)"></rsvp-picker>'
       + '<div v-if="cfg.showCounts && ev.total" class="mt-2" style="font-size:0.8rem;opacity:0.7">{{ tallyText(ev) }}</div>'
-      + '<div v-if="showRoster && ev.participants.length" class="mt-1" style="font-size:0.82rem" data-testid="rsvp-roster"><div v-for="g in rosterGroups(ev)" :key="g.status" class="rsvp-roster-group"><span style="opacity:0.6">{{ g.label }}:</span> <user-ref v-for="p in g.people" :key="p.email" :email="p.email" :name="p.name" :size="20" class="rsvp-person"></user-ref></div></div>'
+      + '<div v-if="showRoster && ev.participants.length" class="mt-1" style="font-size:0.82rem" data-testid="rsvp-roster"><div v-for="g in rosterGroups(ev)" :key="g.status" class="rsvp-roster-group"><span style="opacity:0.6">{{ g.label }}:</span> <template v-for="p in g.people" :key="p.email"><v-chip v-if="canStamp && cfg.checkin && cfg.checkin.set" size="small" variant="tonal" class="rsvp-person mr-1 mb-1" :color="p.arrived ? \'success\' : undefined" :prepend-icon="p.arrived ? \'mdi-check-circle\' : \'mdi-circle-outline\'" :aria-pressed="String(p.arrived)" data-testid="rsvp-arrive" @click="a.setRsvpArrived(viewName, p.id, !p.arrived)">{{ p.name }}</v-chip><user-ref v-else :email="p.email" :name="p.name" :size="20" class="rsvp-person"></user-ref></template></div></div>'
       + '</v-card>'
       + '<div v-if="!events.length" class="pa-2" style="opacity:0.6">{{ a.t(\'rsvp.none\') }}</div>'
       + '</div>'
@@ -9732,11 +10952,22 @@ function createVueApp() {
         if (!this.canEdit || this.dragId == null) return;
         var id = this.dragId, self = this;
         var item = (appInstance.currentData || []).find(function(r) { return r.id === id; });
-        if (item && String(item[self.laneCol] || '') !== laneKey) appInstance.saveField(item, self.laneCol, laneKey, self.viewName);
+        if (item && String(item[self.laneCol] || '') !== laneKey) self.moveTo(item, laneKey, true);
         this.onDragEnd();
       },
+      // `board.laneWhen: { <lane>: <condition> }` -- a card may enter that lane only while its row (computed
+      // columns included) matches: "handed over" only while the member can afford it. Refused with a
+      // word rather than snapping back unexplained; the move menu greys the lane out.
+      laneAllowed: function(item, laneKey) {
+        var w = ((this.cfg || {}).laneWhen || {})[laneKey];
+        return !w || condMatches(item, w);
+      },
       // --- mobile / a11y fallback: move via menu ---
-      moveTo: function(item, laneKey) { if (this.canEditCard(item) && this.canMoveCards && String(item[this.laneCol] || '') !== laneKey) appInstance.saveField(item, this.laneCol, laneKey, this.viewName); },
+      moveTo: function(item, laneKey, dropped) {
+        if (!(dropped || (this.canEditCard(item) && this.canMoveCards)) || String(item[this.laneCol] || '') === laneKey) return;
+        if (!this.laneAllowed(item, laneKey)) { appInstance.notify(appInstance.t('board.lane_blocked')); return; }
+        appInstance.saveField(item, this.laneCol, laneKey, this.viewName);
+      },
       laneMenuItems: function() { var self = this; return this.laneOrder.map(function(k) { return { value: k, title: self.laneLabel(k) }; }); },
       addInLane: function(laneKey) { appInstance.boardAddInLane(this.viewName, laneKey); },
       // Per-card row controls (mirror the grid's row-append buttons): archive files the card to the archive
@@ -9798,7 +11029,7 @@ function createVueApp() {
       // tooltip, and every item in it is a lane, so the header only restated the question. `board.move_to`
       // stays in use as that tooltip.
       + '            <v-list density="compact">'
-      + '            <v-list-item v-for="opt in laneMenuItems()" :key="opt.value" @click="moveTo(item, opt.value)" :active="String(item[laneCol]||\'\')===opt.value">'
+      + '            <v-list-item v-for="opt in laneMenuItems()" :key="opt.value" @click="moveTo(item, opt.value)" :active="String(item[laneCol]||\'\')===opt.value" :disabled="!laneAllowed(item, opt.value)">'
       + '              <v-list-item-title>{{ opt.title }}</v-list-item-title></v-list-item></v-list></v-menu>'
       + '        </div>'
       // Field face (both modes): one <v-field> per column — the SAME component v-text-field wraps its
@@ -9829,9 +11060,12 @@ function createVueApp() {
       + '<v-btn size="small" variant="text" density="comfortable" :icon="a.pageEditing ? \'mdi-eye\' : \'mdi-pencil\'" :title="a.pageEditing ? a.t(\'btn.preview\') : a.t(\'btn.edit\')" @click="a.togglePageEdit()" data-testid="page-edit"></v-btn>'
       + '<v-btn v-if="a.pageEditing" size="small" color="primary" prepend-icon="mdi-content-save" @click="a.savePage()" class="ml-2">{{ a.t(\'btn.save\') }}</v-btn></div>'
       + '<v-textarea v-if="a.pageEditing" :model-value="a.pageEditText" @update:model-value="a.pageEditText = $event" auto-grow variant="outlined" density="compact" placeholder="# Markdown — embed views with {{view:name}} or {{table:name}}"></v-textarea>'
-      + '<template v-else v-for="(blk, bi) in a.pageBlocks" :key="bi">'
+      + '<template v-else>'
+      + '<pick-filters v-if="a.pageFilterCols.length" class="mb-3" data-testid="page-filters" :cols="a.pageFilterCols" :picked="a.pagePicked" :items="a.filterOptionsFor" :label="a.fieldLabelFor" test-prefix="page-filter" @set="a.setPagePick"></pick-filters>'
+      + '<template v-for="(blk, bi) in a.pageBlocks" :key="bi">'
       + '<div v-if="blk.html" v-html="blk.html"></div>'
       + '<embed-view v-else :type="blk.embedType" :name="blk.embedName" :part="blk.embedPart" :both="blk.embedBoth"></embed-view>'
+      + '</template>'
       + '</template>'
       + '</v-card>'
   });

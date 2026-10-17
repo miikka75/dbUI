@@ -20,7 +20,6 @@
   var H = isNode ? require('./backend-helpers') : root.BackendHelpers;
   var LA = isNode ? require('./list-access') : root.ListAccess;
   var AF = isNode ? require('./access-features') : root.AccessFeatures;
-  var Cols = isNode ? require('./columns') : root.Columns;
   var LU = isNode ? require('./list-users') : root.ListUsers;
 
   // S: the storage adapter (storage-supabase.js / storage-pglite.js) — get/put/delete/getAll/getMeta/
@@ -52,7 +51,7 @@
         // backend-firebase.js — the two must mirror the SAME set or the rules layers diverge.
         return Promise.all([
           S.setMeta('schema', schema),
-          S.setMeta('ownerTables', { tables: H.ownerTablesOf(schema) }),
+          S.setMeta('ownerTables', H.ownerTablesMirror(schema)),
           S.setMeta('pageAccess', H.pageAccessOf(schema)),
           S.setMeta('ownerWritable', H.ownerWritableOf(schema)),
           S.setMeta('stamped', H.stampedOf(schema)),
@@ -149,7 +148,6 @@
       getLists: function () {
         var self = this;
         return self._myTables().then(function (tabs) {
-          if (tabs !== null && !tabs.length) return {};
           if (tabs === null) {
             return S._all('_lists').then(function (rows) {
               if (rows && rows.length) { var o = {}; rows.forEach(function (row) { var v = row.value; o[v.name || row.key] = v.items || []; }); return o; }
@@ -160,21 +158,15 @@
               });
             });
           }
-          // restricted: read each accessible list row by name (single-row reads authorized by RLS). Candidate
-          // names are exactly the lists referenced by the user's accessible tables' columns.
-          return S.getMeta('schema').then(function (sd) {
-            var parsed = H.unwrapSchemaDoc(sd) || {};
-            var schemaTables = parsed.tables || {};
-            var wanted = {};
-            tabs.forEach(function (t) {
-              Cols.columnDefList(schemaTables[t]).forEach(function (d) {
-                if (d && typeof d === 'object') {
-                  if (d.list) wanted[d.list] = 1;
-                  if (d.listSwitch && d.listSwitch.list) wanted[d.listSwitch.list] = 1;
-                }
-              });
-            });
-            var names = Object.keys(wanted);
+          // restricted: read each list the caller may read by name (single-doc reads are what the rules
+          // authorize). The candidates are LA.accessibleListNames: the lists of their granted tables, plus
+          // those of every self-service table, which a member writes with no grant. A caller with no grants
+          // still asks, because self-service needs none; a refused schema read means nothing to ask for.
+          return S.getMeta('schema').catch(function () { return null; }).then(function (sd) {
+            var schemaTables = (H.unwrapSchemaDoc(sd) || {}).tables || {};
+            // A public table's lists are everyone's, a visitor's included.
+            var pubT = Object.keys(schemaTables).filter(function (t) { return schemaTables[t] && schemaTables[t].public === true; });
+            var names = LA.accessibleListNames(schemaTables, tabs.concat(pubT), Object.keys(LA.listOwnershipMap(schemaTables)), true);
             if (!names.length) return {};
             return Promise.all(names.map(function (name) {
               return S.get('_lists', name)
@@ -374,6 +366,16 @@
         ]);
       },
       // --- Membership requests (self-service; admin approves) ---
+      // OPEN SIGN-UP: write my own record with exactly the schema's newUser grant; the policy checks it.
+      selfRegister: function () {
+        var email = P.myEmail();
+        if (!email) return Promise.reject(new Error('not signed in'));
+        return S.getMeta('schema').then(function (sd) {
+          var nu = H.signupOf(H.unwrapSchemaDoc(sd) || {});
+          if (!nu) throw new Error('sign-up is closed');
+          return S._replace('_users', email, H.userGrantDoc(email, nu.role, email, nu.tables));
+        });
+      },
       requestAccess: function (name, note) {
         var email = P.myEmail();
         if (!email) return Promise.reject(new Error('not signed in'));

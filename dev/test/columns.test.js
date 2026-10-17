@@ -454,3 +454,69 @@ describe('a lookup addressed through more than one of its dimensions', () => {
     assert.equal(Columns.lookupIdentityCol(split, 'ref_callings'), null);
   });
 });
+
+describe('Columns.pickerErrors — one picker vocabulary, and what each widget needs from its column', () => {
+  const C = require('../../columns');
+  const tables = {
+    cat: { isLookup: true, columns: [{ name: 'x' }] },
+    t: { columns: [
+      { name: 'ok_drop', list: 'l', picker: 'dropdown' }, { name: 'ok_ref', type: 'ref', table: 'cat', valueCol: 'x', picker: 'toggle' },
+      { name: 'ok_cards', list: 'cat', picker: 'cards' },
+      { name: 'bad', picker: 'wheel' }, { name: 'text', type: 'text', picker: 'chips' }, { name: 'many', list: 'l', multiple: true, picker: 'toggle' },
+      { name: 'typed', list: 'l', allowNew: true, picker: 'chips' }, { name: 'plaincards', list: 'l', picker: 'cards' }
+    ] }
+  };
+  const errs = C.pickerErrors(tables);
+  it('accepts dropdown, chips/toggle on a ref, and cards on a lookup-backed list', () => {
+    for (const c of ['ok_drop', 'ok_ref', 'ok_cards']) assert.ok(!errs.some((e) => e.includes('"' + c + '"')), c);
+  });
+  it('names an unknown widget, one with no options, a multiple, an allowNew, and cards over a plain list', () => {
+    for (const c of ['bad', 'text', 'many', 'typed', 'plaincards']) assert.ok(errs.some((e) => e.includes('"' + c + '"')), c);
+    assert.equal(errs.length, 5);
+  });
+  it('an explicit dropdown reads as the default', () => {
+    assert.equal(C.colPicker({ t: { columns: { a: { list: 'l', picker: 'dropdown' } } } }, 'a'), null);
+  });
+});
+
+describe('Columns.vocabularyErrors — a ref\'s label and listFilter', () => {
+  const C = require('../../columns');
+  const tables = {
+    m: { columns: [{ name: 'plan' }, { name: 'start_on', type: 'date' }] },
+    p: { columns: [
+      { name: 'ok', type: 'ref', table: 'm', valueCol: 'id', label: ['plan', 'start_on'], listFilter: { plan: { ne: '' } } },
+      { name: 'badlabel', type: 'ref', table: 'm', valueCol: 'id', label: ['nope'] },
+      { name: 'notref', list: 'x', label: ['plan'] },
+      { name: 'badfilter', type: 'ref', table: 'm', valueCol: 'id', listFilter: { nope: 1 } }
+    ] }
+  };
+  const errs = C.vocabularyErrors(tables);
+  it('accepts a label and a listFilter naming the referenced table\'s columns', () => assert.ok(!errs.some((e) => e.includes('"ok"'))));
+  it('names a label or filter column the table lacks, and a label on a non-ref', () => {
+    for (const c of ['badlabel', 'notref', 'badfilter']) assert.ok(errs.some((e) => e.includes('"' + c + '"')), c);
+  });
+});
+
+describe('Columns — a table\'s computed (derived) columns', () => {
+  const C = require('../../columns');
+  const tables = {
+    memberships: { columns: [{ name: 'plan', type: 'ref', table: 'plans', valueCol: 'plan' },
+      { name: 'used', computed: { count: 'pauses', on: 'membership' } }, { name: 'end', computed: { dateAdd: { from: 'start' } } }] },
+    pauses: { columns: [{ name: 'membership', type: 'ref', table: 'memberships', valueCol: 'id' }, { name: 'until', computed: { dateAdd: { from: 'start' } } }] },
+    plans: { isLookup: true, columns: [{ name: 'plan' }] }
+  };
+  it('lists them, and knows one', () => {
+    assert.deepEqual(C.derivedDefs(tables.memberships).map((d) => d.name), ['used', 'end']);
+    assert.equal(C.isDerived(tables, 'memberships', 'end'), true);
+    assert.equal(C.isDerived(tables, 'memberships', 'plan'), false);
+  });
+  it('dependencies follow derived tables, through a cycle, each once', () => {
+    assert.deepEqual(C.tableDeps(tables, 'pauses').sort(), ['memberships', 'plans']);
+    assert.deepEqual(C.tableDeps(tables, 'memberships').sort(), ['pauses', 'plans']);
+  });
+  it('an owner bound never locks a derived column, since it is never sent', () => {
+    const H = require('../../backend-helpers');
+    const b = H.ownerWritableOf({ tables: { t: { ownerWritable: ['a'], columns: [{ name: 'owner', type: 'owner' }, { name: 'a' }, { name: 'd', computed: { dateAdd: { from: 'a' } } }] } } });
+    assert.deepEqual(Object.keys(b.t.locked), []);
+  });
+});

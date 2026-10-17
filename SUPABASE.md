@@ -8,7 +8,7 @@ per-row Row-Level-Security (RLS) policy.
 
 | File | Role |
 |------|------|
-| `backend-supabase.js` | Backend + `backend_users` + Google auth. Classic script (globals `backend` / `backend_users` / `triggerOAuth`), mirroring `backend-firebase.js`. |
+| `backend-supabase.js` | Backend + `backend_users` + sign-in (Google, and an emailed link/code). Classic script (globals `backend` / `backend_users` / `triggerOAuth` / `authEmailStart` / `authEmailVerify`), mirroring `backend-firebase.js`. |
 | `storage-supabase.js` | Storage adapter over the `kv` table (`createSupabaseStorage(sb)`, mirrors `storage-firestore.js`). Also `module.exports` for the Node test. |
 | `supabase-schema.sql` | Postgres `kv` table + RLS mirroring `firestore.rules`. Run once in Supabase. |
 | `.github/workflows/deploy-pages.yml` | Deploy the static site to GitHub Pages on push to `main`. |
@@ -33,6 +33,7 @@ global `window.supabase`), exactly like the Firebase compat SDK — no ES module
    - **Authorized redirect URI**: `https://<project-ref>.supabase.co/auth/v1/callback` (shown on the
      Supabase provider page).
    - Paste the client ID + secret into Supabase.
+   **Email sign-in (optional, no password)** — see [Email sign-in](#email-sign-in): one command sets it up.
 3. **Authentication → URL Configuration → Redirect URLs**: add your site URL, e.g.
    `https://dbui.ddns.net/` (and `http://localhost:*` for local dev). It must match what the app
    sends as `redirectTo` — `location.origin + location.pathname`, so the *deployed* origin, not the
@@ -94,7 +95,10 @@ npm run supabase:setup -- --project-ref <project-ref>
 | 3 | checks the token functions exist |
 | 4 | deploys the `csp-report` Edge Function with `--no-verify-jwt` |
 | 5 | creates the collector's read token **if there is none**, and prints it once |
-| 6 | runs `check-supabase.mjs` against the site (`--site <url>`; default `https://dbui.ddns.net`) |
+| 6 | email sign-in — runs `npm run supabase:auth` (asked; `--auth` / `--no-auth` to decide up front). See [Email sign-in](#email-sign-in) |
+| 7 | runs `check-supabase.mjs` against the site (`--site <url>`; default `https://dbui.ddns.net`) |
+
+Run in a terminal, it asks for the project ref if you leave it out.
 
 **Running it again is safe.** The SQL and the deploy repeat harmlessly. The token is the exception,
 since replacing it locks out every admin holding the old one, so it is created only when neither a
@@ -109,6 +113,86 @@ reports**, and press **Rotate token** there if the terminal is not somewhere a t
 First sign-in, while no members exist, acts as **admin** (bootstrap). Import a schema
 (Settings → Import from JSON), then add yourself under **Settings → User Access**. From then on only
 registered users have access.
+
+
+## Email sign-in
+
+Beside Google, the app signs people in with an emailed **link and 6-digit code** (one email carries both).
+Neither needs a password, and both prove the person owns the address — an unconfirmed address counts for
+nothing in the policies (`app_email_verified`), whatever is switched on here. Three things make it work:
+
+1. **The email templates** carry the code: `{{ .Token }}` in **Magic Link** *and* **Confirm signup** (a
+   first-time address gets the signup one), beside the link `{{ .ConfirmationURL }}`.
+2. **A mail server (SMTP).** Supabase's own mailer is for trying things out: it sends only a few emails an
+   hour, and only to the project's team members — real people would never get their code. Connect a
+   sending service:
+
+   | Service | Host / port | Username | Password | Free tier |
+   |---|---|---|---|---|
+   | [Resend](https://resend.com) | `smtp.resend.com` / 465 | `resend` | an API key (`re_…`) | 3,000 a month, 100 a day |
+   | [Brevo](https://brevo.com) | `smtp-relay.brevo.com` / 587 | your Brevo login | an SMTP key | 300 a day |
+
+3. **Your sender domain, verified with that service** — DNS records it shows you (SPF/DKIM), added at your
+   domain's registrar. Until then it refuses to send. A dynamic-DNS name (`*.ddns.net`) usually cannot
+   take those records, so this means a domain of your own.
+
+### By script (recommended)
+
+```bash
+cd dev
+npm run supabase:auth                      # asks for everything it needs
+```
+
+It asks for the project ref, an access token, the site URL, the name to show in the emails, the mail
+service (Resend, Brevo, your own, or none) and its details, then shows what it will set (password hidden),
+applies it through the Management API and reads it back. Re-running is safe. To answer up front:
+
+```bash
+export SUPABASE_ACCESS_TOKEN=sbp_...       # supabase.com/dashboard/account/tokens
+export SMTP_PASS=re_...                    # never a flag: it stays out of the shell history
+npm run supabase:auth -- --project-ref <ref> --site https://gym.example.fi/ --app-name "Fitness Club" \
+  --smtp resend --smtp-from noreply@gym.example.fi --rate-limit 100 [--dry-run] [--yes]
+```
+
+`npm run supabase:setup` offers to run it too, after the schema.
+
+### By hand, with curl
+
+The same settings, as one request (keep the file out of git — it holds the SMTP password):
+
+```bash
+cat > auth-config.json <<'EOF'
+{
+  "external_email_enabled": true,
+  "mailer_autoconfirm": false,
+  "site_url": "https://gym.example.fi/",
+  "uri_allow_list": "https://gym.example.fi/,http://localhost:3000/",
+  "mailer_subjects_magic_link": "Fitness Club sign-in code",
+  "mailer_templates_magic_link_content": "<h2>Sign in</h2><p>Your code: <strong>{{ .Token }}</strong></p><p>Or <a href=\"{{ .ConfirmationURL }}\">open this link</a>.</p>",
+  "mailer_subjects_confirmation": "Fitness Club sign-in code",
+  "mailer_templates_confirmation_content": "<h2>Welcome</h2><p>Your code: <strong>{{ .Token }}</strong></p><p>Or <a href=\"{{ .ConfirmationURL }}\">open this link</a>.</p>",
+  "smtp_host": "smtp.resend.com",
+  "smtp_port": "465",
+  "smtp_user": "resend",
+  "smtp_pass": "re_your_api_key",
+  "smtp_admin_email": "noreply@gym.example.fi",
+  "smtp_sender_name": "Fitness Club",
+  "rate_limit_email_sent": 100
+}
+EOF
+curl -X PATCH "https://api.supabase.com/v1/projects/<ref>/config/auth" \
+  -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" -H "Content-Type: application/json" -d @auth-config.json
+```
+
+Only the fields in the file change. Keep `"mailer_autoconfirm": false` — that is confirmation staying on.
+
+### By hand, in the dashboard
+
+- **Authentication → Sign In / Providers → Email**: on, with **Confirm email** on.
+- **Authentication → Emails → Templates**: `{{ .Token }}` into **Magic Link** and **Confirm signup**.
+- **Authentication → Emails → SMTP Settings**: the service's host, port, username, password and sender.
+- **Authentication → Rate Limits**: raise the email limit once your own SMTP is in.
+- **Authentication → URL Configuration**: the site URL and redirect URLs (also needed for Google).
 
 ## Self-hosted (Docker)
 
