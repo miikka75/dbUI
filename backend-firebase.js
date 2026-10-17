@@ -593,10 +593,13 @@ function _startFirebase(config) {
     if (user) { appInstance.currentUserEmail = user.email; init(); return; }
     // Signed out. A database with public tables lets a visitor in (its schema is then readable with no
     // account); any other asks them to sign in, exactly as before.
+    // The answer is ignored if someone signed in meanwhile: a probe that resolves after a sign-in would
+    // otherwise switch the signed-in session into visitor mode (and the next sign-in would reload the page).
     _db.collection('_meta').doc('schema').get().then(function(d) {
+      if (_auth.currentUser) return;
       if (!d.exists) throw new Error('no public schema');
       appInstance.currentUserEmail = ''; appInstance.visitorMode = true; init();
-    }).catch(function() { appInstance.needsReauth = true; appInstance.loading = false; });
+    }).catch(function() { if (_auth.currentUser) return; appInstance.needsReauth = true; appInstance.loading = false; });
   });
 }
 

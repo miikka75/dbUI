@@ -165,10 +165,12 @@ function _startSupabase(config) {
     } else if (!_sbAuthInited) {
       // Signed out. A database with public tables lets a visitor in (anon may read its schema then);
       // any other asks them to sign in, exactly as before.
+      // Ignored if someone signed in meanwhile (see backend-firebase.js): the session is theirs, not a visitor's.
       StorageSupabase.get('_meta', 'schema').then(function(sd) {
+        if (_sbUser || _sbAuthInited) return;
         if (!sd) throw new Error('no public schema');
         _sbAuthInited = true; appInstance.currentUserEmail = ''; appInstance.visitorMode = true; init();
-      }).catch(function() { appInstance.needsReauth = true; appInstance.loading = false; });
+      }).catch(function() { if (_sbUser || _sbAuthInited) return; appInstance.needsReauth = true; appInstance.loading = false; });
     } else {
       appInstance.needsReauth = true; appInstance.loading = false;
     }
