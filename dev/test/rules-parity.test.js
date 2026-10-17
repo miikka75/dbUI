@@ -71,7 +71,7 @@ describe('rules parity — ownerWritableWhile (the owner-branch state gate)', ()
   it('firestore.rules gates owner UPDATE and DELETE on it', () => {
     assert.match(RULES, /function ownerStateOk\(coll\)/, 'firestore.rules needs ownerStateOk');
     assert.match(RULES, /ownerStateOk\(coll\)[\s\S]{0,200}?affectedKeys/, 'ownerUpdateOk must consult ownerStateOk');
-    assert.match(RULES, /selfServiceTable\(collection\) && ownerStateOk\(collection\)\) \|\| \/\/ delete/,
+    assert.match(RULES, /selfServiceTable\(collection\) && ownerStateOk\(collection\)( && capDeleteOk\(collection, doc\))?\) \|\| \/\/ delete/,
       'the owner DELETE branch must consult ownerStateOk');
   });
   it('supabase-schema.sql gates owner UPDATE and DELETE on it', () => {
@@ -324,7 +324,9 @@ describe('rules parity — a calendar feed is published by full access only, on 
     assert.ok(i > 0, 'storage.rules has no feeds/ block');
     const body = STORAGE_RULES.slice(i, STORAGE_RULES.indexOf('allow create', i) + 400);
     assert.match(STORAGE_RULES, /u\.get\('role', ''\) == 'admin' \|\| u\.get\('tables', ''\) == 'all'/);
-    assert.match(body, /allow create, update: if request\.auth != null\s+&& hasFullAccess\(/);
+    // signedIn(): a verified email (see storage.rules), not merely any token.
+    assert.match(body, /allow create, update: if signedIn\(\)\s+&& hasFullAccess\(/);
+    assert.match(STORAGE_RULES, /function signedIn\(\) \{ return request\.auth != null && request\.auth\.token\.get\('email_verified', false\) == true; \}/);
     assert.match(body, /file\.matches\('\^\[A-Za-z0-9_-\]\{1,64\}\[\.\]ics\$'\)/);
     assert.match(body, /contentType\.matches\('text\/calendar\.\*'\)/);
     assert.doesNotMatch(body, /delete/);

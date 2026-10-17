@@ -83,3 +83,6 @@ dev/tmp-*.mjs
 supabase/.temp/
 # Agent worktrees (EnterWorktree / isolated subagents) live inside the repo; never commit them.
 .claude/worktrees/
+
+# Supabase auth settings for the curl route in SUPABASE.md: holds the SMTP password
+auth-config.json

@@ -1,10 +1,26 @@
 <div id="vue-app" v-cloak>
   <v-app :theme="theme">
     <!-- Reauth Dialog -->
-    <v-dialog v-model="needsReauth" persistent max-width="340">
-      <v-card>
-        <v-card-text class="text-center pa-6">
-          <v-btn color="primary" prepend-icon="mdi-google" @click="triggerOAuth(); needsReauth = false; loading = true">Sign in to continue</v-btn>
+    <!-- Sign in: Google, or an emailed code / link where the backend offers it. The same dialog asks before
+         boot (needsReauth: no translations are loaded yet, so English, as the old dialog was) and from a visitor's Sign in. -->
+    <v-dialog :model-value="needsReauth || signInOpen" :persistent="needsReauth" max-width="380" @update:model-value="signInOpen = $event">
+      <v-card data-testid="sign-in-dialog">
+        <v-card-text class="pa-6">
+          <v-btn v-if="!authLinkPending" block color="primary" variant="flat" prepend-icon="mdi-google" data-testid="sign-in-google" @click="triggerOAuth(); needsReauth = false; signInOpen = false; loading = true">{{ (needsReauth ? 'Sign in with Google' : t('auth.with_google')) }}</v-btn>
+          <template v-if="hasEmailSignIn()">
+            <div v-if="!authLinkPending" class="text-center text-medium-emphasis my-3">{{ (needsReauth ? 'or' : t('auth.or')) }}</div>
+            <v-text-field v-model="authEmail" type="email" autocomplete="email" :label="(needsReauth ? 'Email' : t('auth.email'))" density="compact" variant="outlined" hide-details data-testid="sign-in-email"></v-text-field>
+            <v-btn v-if="authLinkPending" block color="primary" variant="flat" class="mt-2" :disabled="!authEmailValid" :loading="authBusy" data-testid="sign-in-finish" @click="verifySignInCode()">{{ (needsReauth ? 'Sign in' : t('auth.sign_in')) }}</v-btn>
+            <v-btn v-else block variant="outlined" class="mt-2" prepend-icon="mdi-email-outline" :disabled="!authEmailValid" :loading="authBusy && !authSent" data-testid="sign-in-send" @click="sendSignInEmail()">{{ (needsReauth ? 'Email me a sign-in link' : t('auth.send_email')) }}</v-btn>
+            <template v-if="authSent">
+              <div class="text-body-2 mt-3" data-testid="sign-in-sent">{{ authCodeAllowed ? (needsReauth ? 'Check your email: open the link, or type the code from it here.' : t('auth.check_email_code')) : (needsReauth ? 'Check your email and open the link.' : t('auth.check_email')) }}</div>
+              <template v-if="authCodeAllowed">
+                <v-text-field v-model="authCode" inputmode="numeric" autocomplete="one-time-code" :label="(needsReauth ? 'Code' : t('auth.code'))" density="compact" variant="outlined" hide-details class="mt-2" data-testid="sign-in-code" @keydown.enter="authCode.trim() && verifySignInCode()"></v-text-field>
+                <v-btn block color="primary" variant="flat" class="mt-2" :disabled="!authCode.trim()" :loading="authBusy" data-testid="sign-in-verify" @click="verifySignInCode()">{{ (needsReauth ? 'Sign in' : t('auth.sign_in')) }}</v-btn>
+              </template>
+            </template>
+            <div v-if="authError" class="text-error text-body-2 mt-2" data-testid="sign-in-error">{{ authError }}</div>
+          </template>
         </v-card-text>
       </v-card>
     </v-dialog>
@@ -263,6 +279,7 @@
       </v-tabs>
       <v-spacer v-else></v-spacer>
       <v-select v-if="languages.length > 1" v-model="currentLang" name="current-lang" :items="langItems" density="compact" variant="plain" hide-details style="max-width:120px" class="mr-2" @update:model-value="switchLanguage"></v-select>
+      <v-btn v-if="isVisitor" variant="text" prepend-icon="mdi-login" class="mr-2" data-testid="visitor-sign-in" @click="signIn()">{{ t('auth.sign_in') }}</v-btn>
       <user-avatar v-if="usersLoaded && !isUnregisteredUser" :email="currentUserEmail" :name="myProfile.name" :size="32" :title="myProfile.name || currentUserEmail" class="mr-2"></user-avatar>
       <!-- Undo/redo hold the slot refresh used to. There is no refresh button any more: every backend
            subscribes to its tables, and for a dropped subscription a browser reload refetches strictly
@@ -303,7 +320,7 @@
       <v-container fluid class="pa-4">
         <!-- Access notice: signed-in user matches no _meta/users record -> all reads are denied by
              rules. Hardcoded English (translations aren't loaded for an unregistered user). -->
-        <v-alert v-if="isUnregisteredUser" type="warning" variant="tonal" density="compact" class="mb-3" icon="mdi-account-alert">
+        <v-alert v-if="isUnregisteredUser && !isVisitor" type="warning" variant="tonal" density="compact" class="mb-3" icon="mdi-account-alert">
           <div>Your account (<strong>{{ currentUserEmail }}</strong>) is not registered for this database, so no data can load.</div>
           <div v-if="!accessRequested" class="d-flex align-center flex-wrap mt-2" style="gap:8px">
             <v-text-field v-model="accessRequestName" :label="t('access.your_name')" :rules="[v => !!(v && v.trim()) || '']" density="compact" hide-details variant="outlined" style="max-width:240px"></v-text-field>
@@ -377,8 +394,29 @@
         </v-container>
     </v-main>
 
-    <!-- FAB: floating add button on mobile -->
-    <v-btn v-if="mobile && canAddRows && isDataView" icon="mdi-plus" color="primary" size="large" style="position:fixed; bottom:72px; right:16px; z-index:100" elevation="4" @click="addRow"></v-btn>
+    <!-- The corner button (fab): ONE per screen, and the screen says what it does -- add a row
+         (the default, on a phone), or scan a code (nav.scan). -->
+    <v-btn v-if="fab && !fab.extended" :icon="fab.icon" color="primary" :size="fab.kind === 'scan' ? 'x-large' : 'large'" elevation="4"
+      :title="tOr(fab.label, fab.label)" :aria-label="tOr(fab.label, fab.label)" :data-testid="fab.kind === 'scan' ? 'scan-fab' : 'add-fab'"
+      :style="'position:fixed; right:16px; z-index:100; bottom:' + (mobile ? 72 : 24) + 'px'" @click="fabPress()"></v-btn>
+    <!-- A labelled one ("Add workout", "Buy"): the words say which activity, so they stay on a phone. -->
+    <v-btn v-if="fab && fab.extended" :prepend-icon="fab.icon" color="primary" size="large" rounded="pill" elevation="4" class="text-none" data-testid="action-fab"
+      :style="'position:fixed; right:16px; z-index:100; bottom:' + (mobile ? 72 : 24) + 'px'" @click="fabPress()">{{ tOr(fab.label, fab.label) }}</v-btn>
+
+    <!-- What scanning needs, when the corner button can scan: the camera's file input and the typing dialog. -->
+    <template v-if="scanTargets.length && !loading">
+      <input type="file" accept="image/*" capture="environment" id="scan-fab-photo" style="display:none" @change="onScanFabPhoto($event)">
+      <v-dialog v-model="scanDialog" max-width="420">
+        <v-card class="pa-4" data-testid="scan-dialog">
+          <v-alert v-if="scanNote" type="warning" density="compact" variant="tonal" class="mb-3">{{ scanNote }}</v-alert>
+          <v-text-field v-model="scanTyped" :label="t('scan.code')" autofocus autocomplete="off" density="compact" variant="outlined" hide-details data-testid="scan-typed" @keydown.enter="scanTyped.trim() && routeScan(scanTyped, null)"></v-text-field>
+          <div class="d-flex mt-4" style="gap:8px"><v-spacer></v-spacer>
+            <v-btn @click="scanDialog = false">{{ t('btn.cancel') }}</v-btn>
+            <v-btn variant="flat" color="primary" :disabled="!scanTyped.trim()" data-testid="scan-typed-go" @click="routeScan(scanTyped, null)">{{ t('rsvp.checkin') }}</v-btn>
+          </div>
+        </v-card>
+      </v-dialog>
+    </template>
 
     <!-- Bottom navigation for mobile -->
     <v-bottom-navigation v-if="mobile && !loading && navLayout === 'drawer'" :model-value="currentTable" @update:model-value="selectTab($event)" grow>
@@ -386,14 +424,16 @@
         <v-icon>{{ tab.icon || 'mdi-view-list' }}</v-icon>
         <span style="font-size:0.6rem; max-width:64px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">{{ tab.title }}</span>
       </v-btn>
-      <v-btn v-if="bottomNavTabs.length > 5" size="small" @click.stop="openMoreDrawer()">
+      <v-btn v-if="bottomNavMore" size="small" data-testid="bottom-more" @click.stop="openMoreDrawer()">
         <v-icon>mdi-dots-horizontal</v-icon>
         <span style="font-size:0.6rem">{{ t('btn.more') }}</span>
       </v-btn>
     </v-bottom-navigation>
 
     <!-- Snackbar -->
-    <v-snackbar v-model="snackbar" :timeout="2000" location="bottom">{{ snackText }}</v-snackbar>
+    <!-- At the top while a corner button shows: at the bottom it covers the button on a phone, so a
+         second "Add workout" in a row could not be pressed until the message went away. -->
+    <v-snackbar v-model="snackbar" :timeout="2000" :location="fab ? 'top' : 'bottom'">{{ snackText }}</v-snackbar>
   </v-app>
 </div>
 
@@ -1240,11 +1280,19 @@
                  everyone is admin, and a link handed out then would hand out full access with it. -->
             <p class="text-body-2 font-weight-medium mb-2">{{ a.t('settings.share') }}</p>
             <copy-field class="mb-4" :value="a.shareLink" name="share-link"></copy-field>
+            <!-- Hundreds of members and tens of trainers: narrow by a search, by role, or by the list a user is
+                 linked to (a trainer is a viewer like a member; the link is what tells them apart). -->
+            <div class="d-flex flex-wrap align-center mb-2" style="gap:8px" data-testid="users-filter">
+              <v-text-field v-model="a.userFilter.q" density="compact" variant="outlined" hide-details clearable prepend-inner-icon="mdi-magnify" :label="a.t('btn.search')" style="max-width:240px" data-testid="users-search"></v-text-field>
+              <v-select v-model="a.userFilter.roles" :items="a.roleItems" item-title="title" item-value="value" :label="a.t('settings.role')" multiple chips closable-chips clearable density="compact" variant="outlined" hide-details style="min-width:160px;max-width:300px" data-testid="users-roles"></v-select>
+              <v-select v-if="a.userLinkListItems.length" v-model="a.userFilter.lists" :items="a.userLinkListItems" item-title="title" item-value="value" :label="a.t('settings.linked_list')" multiple chips closable-chips clearable density="compact" variant="outlined" hide-details style="min-width:160px;max-width:300px" data-testid="users-lists"></v-select>
+              <span class="text-caption text-medium-emphasis" data-testid="users-count">{{ a.shownUserList.length }} / {{ a.sortedUserList.length }}</span>
+            </div>
             <v-table v-if="a.userList.length" density="compact">
               <template v-slot:default>
               <thead><tr><th>{{ a.t('settings.user_id') }}</th><th>{{ a.t('settings.name') }}</th><th>{{ a.t('settings.role') }}</th><th>{{ a.t('settings.tables') }}</th><th>{{ a.t('settings.tables_view') }}</th><th></th></tr></thead>
               <tbody>
-                <tr v-for="u in a.sortedUserList" :key="u.key">
+                <tr v-for="u in a.shownUserList" :key="u.key">
                   <td><span class="editable-cell" contenteditable data-testid="user-email-cell" @keydown.home.stop @keydown.end.stop @blur="a.renameUser(u, $event.target.textContent.trim())">{{ u.key.indexOf('_new_') === 0 ? '' : u.key }}</span></td>
                   <td><div class="d-flex align-center" style="gap:8px"><user-avatar :email="u.key" :name="a.userDisplayName(u)" :size="28"></user-avatar><span class="editable-cell" contenteditable @keydown.home.stop @keydown.end.stop @blur="a.renameUserProfile(u, $event.target.textContent)">{{ a.userDisplayName(u) }}</span></div></td>
                   <td><v-select :model-value="u.role" :name="'role-' + u.key" :items="a.roleItems" item-title="title" item-value="value" density="compact" variant="plain" hide-details style="max-width:120px" @update:model-value="a.setUserRole(u.key, $event, u.addr, u.tables)"></v-select></td>

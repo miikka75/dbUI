@@ -356,3 +356,33 @@ describe('backend-helpers - ownerRowInState (the shared while-gate predicate)', 
   });
 });
 
+
+describe('capacityOf / ownerTablesMirror (the _meta/ownerTables document both rules layers read)', () => {
+  const H = require('../../backend-helpers');
+  const schema = { tables: {
+    classes: { columns: [{ name: 'capacity', type: 'number' }, { name: 'booked', type: 'number' }] },
+    bookings: { columns: [{ name: 'owner', type: 'owner' }, { name: 'class', type: 'ref', table: 'classes', valueCol: 'id' }, { name: 'booking' }],
+                capacity: { link: 'class', status: 'booking', column: 'capacity', count: 'booked', holds: ['booked'] } },
+    broken: { columns: [{ name: 'owner', type: 'owner' }, { name: 'x' }], capacity: { link: 'x', status: 'x', column: 'c', count: 'n' } }
+  } };
+  it('maps each capped response table to its events table, and back', () => {
+    assert.deepEqual(H.capacityOf(schema), {
+      responses: { bookings: { events: 'classes', link: 'class', status: 'booking', capacity: 'capacity', count: 'booked', reserved: '', holds: ['booked'] } },
+      events: { classes: 'bookings' }
+    });
+  });
+  it('leaves out a config that does not resolve, rather than half-enforcing it', () => {
+    assert.equal(H.capacityOf(schema).responses.broken, undefined);
+  });
+  it('rides in the ownerTables document beside the self-service tables', () => {
+    const m = H.ownerTablesMirror(schema);
+    assert.deepEqual(m.tables, ['bookings', 'broken']);
+    assert.deepEqual(Object.keys(m.capacity.responses), ['bookings']);
+  });
+  it('holds: any non-empty status by default, else only the listed ones', () => {
+    assert.equal(H.capacityHolds({ holds: [] }, 'maybe'), true);
+    assert.equal(H.capacityHolds({ holds: [] }, ''), false);
+    assert.equal(H.capacityHolds({ holds: ['booked'] }, 'maybe'), false);
+    assert.equal(H.capacityHolds({ holds: ['booked'] }, 'booked'), true);
+  });
+});

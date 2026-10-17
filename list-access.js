@@ -45,20 +45,34 @@
     });
     return out;
   }
+  // The tables whose lists a caller may READ: their grants, plus -- for a registered caller -- every
+  // self-service table (one that declares an `owner` column). A member writes their own rows there with
+  // no grant at all, so without this the vocabulary of the very column they fill in (an rsvp's status
+  // list) never reached them. Reading a list reveals no rows. Mirrors listAllowed in firestore.rules and
+  // app_list_allowed in supabase-schema.sql, both of which read the same set from _meta/ownerTables.
+  function listReaderTables(schemaTables, allowedTables, selfService) {
+    if (!selfService) return allowedTables;
+    var out = allowedTables.slice();
+    Object.keys(schemaTables || {}).forEach(function(t) {
+      if (Cols.ownerColOf(schemaTables[t]) && out.indexOf(t) < 0) out.push(t);
+    });
+    return out;
+  }
   // Filter list names to those a user may access. allowedTables===null => unrestricted (admin) => all.
-  function accessibleListNames(schemaTables, allowedTables, allListNames) {
+  // `selfService` is true for a registered caller (see listReaderTables).
+  function accessibleListNames(schemaTables, allowedTables, allListNames, selfService) {
     if (!allowedTables) return (allListNames || []).slice();
+    var readable = listReaderTables(schemaTables, allowedTables, selfService);
     return (allListNames || []).filter(function(name) {
-      return listOwningTables(schemaTables, name).some(function(t) { return allowedTables.indexOf(t) >= 0; });
+      return listOwningTables(schemaTables, name).some(function(t) { return readable.indexOf(t) >= 0; });
     });
   }
   // Filter a {name: items} lists map to the entries the user may access (the server-side read filter).
-  function filterLists(allLists, schemaTables, allowedTables) {
+  function filterLists(allLists, schemaTables, allowedTables, selfService) {
     if (!allowedTables) return allLists;
+    var keep = accessibleListNames(schemaTables, allowedTables, Object.keys(allLists || {}), selfService);
     var out = {};
-    Object.keys(allLists || {}).forEach(function(name) {
-      if (listOwningTables(schemaTables, name).some(function(t) { return allowedTables.indexOf(t) >= 0; })) out[name] = allLists[name];
-    });
+    keep.forEach(function(name) { out[name] = allLists[name]; });
     return out;
   }
 

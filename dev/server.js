@@ -251,6 +251,12 @@ function userRecordFor(email) {
   return Object.values(backend._users).find(v => v.user === email)
     || backend._users[email] || backend._users[(email || '').toLowerCase()];
 }
+// The caller's readable tables plus the PUBLIC ones (`public: true`), which everyone reads. null stays null.
+function withPublic(allowed, schemaTables) {
+  if (allowed === null) return null;
+  const pub = Object.keys(schemaTables || {}).filter(t => schemaTables[t] && schemaTables[t].public === true);
+  return allowed.concat(pub.filter(t => allowed.indexOf(t) < 0));
+}
 function allowedTablesFor(email) {
   if (!backend._users) return null;            // no users = no restrictions
   const u = userRecordFor(email);
@@ -344,7 +350,9 @@ const server = http.createServer(async (req, res) => {
     // binds to 127.0.0.1 (see server.listen below), so it is unreachable off the local machine. This is
     // NOT the production access model — that is Firestore security rules (firestore.rules), which key on
     // the real, unspoofable request.auth.token.email. Never expose this server to a network.
-    const userEmail = req.headers['x-user'] || 'local@dev';
+    // An EMPTY X-User is a signed-out visitor (Postgres runs it as `anon`); a missing header stays the
+    // default dev user, so curl and the seed script keep working without one.
+    const userEmail = req.headers['x-user'] !== undefined ? String(req.headers['x-user']) : 'local@dev';
     // Hand the caller to the storage layer BEFORE any read or write. Under --pg this becomes
     // request.jwt.claims inside Postgres, so the policies judge this request as this user. Set per
     // request, never once at startup: the identity is connection state and the previous request's
@@ -460,9 +468,20 @@ const server = http.createServer(async (req, res) => {
     // what it receives as that row's new state — handing it the patch would be fine for the columns it
     // names and silently wrong about nothing else, but re-reading costs a dev-server map lookup and
     // removes the question entirely.
+    // A response to a CAPACITY-capped table moves its event's count -- in Postgres, by the trigger, which
+    // no route sees. Announce the event row too, as Supabase realtime would, or every open screen goes on
+    // showing the place as free.
+    async function broadcastCapacity(tableId, tab, row) {
+      if ((tab || 'active') !== 'active' || !row) return;
+      const cfg = (BackendHelpers.capacityOf(await backend.getSchema() || {}).responses || {})[BackendHelpers.tableOf(tableId)];
+      const ev = cfg && row[cfg.link];
+      if (ev) await broadcast(_store(cfg.events, 'active'), ev, await _rowById(cfg.events, 'active', ev) || null);
+    }
     async function putOk(b) {
       const id = b.data && b.data.id;
-      if (id) await broadcast(_store(b.tableId, b.tab), id, await _rowById(b.tableId, b.tab, id) || b.data);
+      const stored = id ? await _rowById(b.tableId, b.tab, id) : null;
+      if (id) await broadcast(_store(b.tableId, b.tab), id, stored || b.data);
+      await broadcastCapacity(b.tableId, b.tab, stored);
       return json(res, { ok: true });
     }
     // Admin-only API surface, checked in ONE place so the list is auditable rather than scattered
@@ -504,7 +523,7 @@ const server = http.createServer(async (req, res) => {
         await backend.initSchema(tablesB);   // creates the tables/files; ids ARE names
         const languagesB = await backend.getAvailableLanguages();
         const allowedB = getAllowedTables(); // null => unrestricted (admin / no users)
-        const listsB = filterLists(await backend.getLists(), tablesB, allowedB);
+        const listsB = filterLists(await backend.getLists(), tablesB, withPublic(allowedB, tablesB), !!userRecord());
         // Boot sends NO table data -- see the note in backend-firebase.js. A view loads its own tables
         // when it opens, through app-core's _ensureCached, and the dev server keeps the same boot shape
         // as the two production backends so a bug can still only exist in one of the three.
@@ -608,6 +627,7 @@ const server = http.createServer(async (req, res) => {
         const delOk = async () => {
           const deleted = await backend.deleteRow(body.tableId, body.id, body.tab);
           await broadcast(_store(body.tableId, body.tab), body.id, null, prior);
+          await broadcastCapacity(body.tableId, body.tab, prior);
           return json(res, { deleted });
         };
         if (pagesTable(body.tableId)) {
@@ -629,10 +649,12 @@ const server = http.createServer(async (req, res) => {
       case 'deleteLanguage': await backend.deleteLanguage(body.code); return json(res, { ok: true });
       case 'renameLanguage': await backend.renameLanguage(body.code, body.name); return json(res, { ok: true });
       case 'getLists': {
-        // Per-list access: return only lists owned by a table the user can access (admin: all).
-        const allowed = getAllowedTables();          // null => unrestricted (admin/no users)
+        // Per-list access: return only lists owned by a table the user can access, or by a self-service
+        // table when they are registered (admin: all). See ListAccess.listReaderTables. A public table's
+        // lists are everyone's, a visitor's included.
         const schemaTables = (await backend.getSchema() || {}).tables || {};
-        return json(res, filterLists(await backend.getLists(), schemaTables, allowed));
+        const allowed = withPublic(getAllowedTables(), schemaTables);          // null => unrestricted (admin/no users)
+        return json(res, filterLists(await backend.getLists(), schemaTables, allowed, !!userRecord()));
       }
       case 'saveLists': {
         // Which lists this caller may write is the policies' question (userWritableLists -> the _lists
@@ -725,6 +747,20 @@ const server = http.createServer(async (req, res) => {
       // missing, so an admin adjusting a grant would re-open "log a chore as somebody else".
       case 'setUserRole': { if (!backend._users) backend._users = {}; var _prevGrant = backend._users[body.uid] || {}; backend._users[body.uid] = BackendHelpers.userGrantDoc(body.uid, body.role, body.user || '', body.tables, _prevGrant.identity); saveUsers(); return json(res, { ok: true }); }
       case 'removeUser': { if (backend._users) delete backend._users[body.uid]; saveUsers(); return json(res, { ok: true }); }
+      // OPEN SIGN-UP: the caller writes their OWN record, as themselves, so the policy (app_signup_ok)
+      // judges it exactly as Supabase would -- the grant must equal the schema's newUser, for their email.
+      case 'selfRegister': {
+        const em = String(userEmail || '').toLowerCase();
+        const nuS = BackendHelpers.signupOf(await backend.getSchema() || {});
+        if (!em || !nuS || userRecord()) return json(res, { error: 'Sign-up is closed' }, 403);
+        const recS = BackendHelpers.userGrantDoc(em, nuS.role, em, nuS.tables);
+        if (USE_PG && backend._storage) {
+          try { await backend._storage.put('_users', em, recS); } catch (e) { return json(res, { error: 'Access denied' }, 403); }
+        }
+        if (!backend._users) backend._users = {};
+        backend._users[em] = recS; saveUsers();
+        return json(res, { ok: true });
+      }
       case 'requestAccess': {
         if (!backend._accessRequests) backend._accessRequests = {};
         const rk = (userEmail || '').toLowerCase();

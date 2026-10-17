@@ -6383,7 +6383,7 @@ test.describe('calendar view', () => {
       return errs.join(' | ');
     });
     expect(joined).toContain('cal_bad1');
-    expect(joined.toLowerCase()).toContain('must be a date column');
+    expect(joined.toLowerCase()).toContain('must be a date or datetime column');
     expect(joined).toContain('non-existent table');
   });
 
@@ -6974,7 +6974,7 @@ test.describe('demo schema (examples/demo-schema.json) is valid v3', () => {
     expect(r.before).toEqual(['', '']);                          // no response from me yet
     expect(r.myStatusAfter).toBe('coming');                      // my response recorded
     expect(r.tally).toEqual({ coming: 1, maybe: 1 });            // me coming + the other's maybe
-    expect(r.roster).toEqual([                                   // public roster shows WHO (sorted by status)
+    expect(r.roster.map((p) => ({ owner: p.owner, status: p.status }))).toEqual([   // public roster shows WHO (sorted by status)
       { owner: 'me@x.com', status: 'coming' },
       { owner: 'you@x.com', status: 'maybe' }
     ]);
@@ -6988,7 +6988,7 @@ test.describe('demo schema (examples/demo-schema.json) is valid v3', () => {
     // Removing my vote deletes my row (no empty-status orphan) -> I disappear from the roster/tally.
     expect(r.afterRemoveMyStatus).toBe('');
     expect(r.myRowCountAfterRemove).toBe(0);                     // row deleted, not left blank
-    expect(r.afterRemoveRoster).toEqual([{ owner: 'you@x.com', status: 'maybe' }]); // no blank "me@x.com" line
+    expect(r.afterRemoveRoster.map((p) => ({ owner: p.owner, status: p.status }))).toEqual([{ owner: 'you@x.com', status: 'maybe' }]); // no blank "me@x.com" line
     expect(r.afterRemoveTally).toEqual({ maybe: 1 });
     await expect(page.locator('[data-testid="rsvp-view"]')).toBeVisible();
     // A non-admin viewer must not see an unshared member in the roster at all — neither name nor email
