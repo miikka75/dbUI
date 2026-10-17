@@ -1357,8 +1357,8 @@ account, sign up on their own, buy, and only then see the member pages. Four pie
    whose tables are all public, with a Sign in button; a Book button says to sign in.
 2. **Open sign-up** — `newUser.open: true`: a signed-in account with no user record registers itself
    with exactly the `newUser` grant, no approval. The rules check that the record it writes equals the
-   mirrored grant, so nobody can sign themselves up for more. The grant must name its tables (an empty
-   grant reads as unrestricted).
+   mirrored grant, so nobody can sign themselves up for more. The grant names its tables (the rules read
+   an empty one as none; only the Settings grant editor turns an empty selection into full access).
 3. **Member-only pages** — `requires` on a VIEW (the shape rsvp and scan already use): hidden from the
    menu until the person has a covering row today (an active membership). My calendar, Rewards, Coach
    and Personal training appear once a membership is active, and go away when it lapses.
