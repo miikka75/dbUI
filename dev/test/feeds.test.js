@@ -677,3 +677,15 @@ describe('Feeds.languageFor: which language a subscriber\'s file is rendered in'
     assert.equal(Feeds.languageFor('fi', [], 'en'), 'fi');
   });
 });
+
+describe('feeds.js — a source marked `feed: false` stays out of the file, so it needs no @me', () => {
+  const SCHEMA = { subs: { columns: { owner: { type: 'owner' }, lang: 'text', url: 'text', fid: 'text', active: 'text' },
+                           ownerWritable: ['lang', 'active'], ownerWritableWhile: { active: 'yes' }, privateRoster: true },
+                   events: { columns: {} }, visits: { columns: {} } };
+  const SUBS = { table: 'subs', langColumn: 'lang', urlColumn: 'url', idColumn: 'fid', activeColumn: 'active' };
+  it('accepts an unfiltered source left out of the feed', () => {
+    const v = { calendar: { sources: [{ table: 'events', dateColumn: 'on', filter: { owner: '@me' } }, { table: 'visits', dateColumn: 'on', feed: false }] },
+                feed: 'per-person', feedSubscribers: SUBS };
+    assert.deepEqual(Feeds.configErrors({ x: v }, 'x', v, SCHEMA), []);
+  });
+});

@@ -148,7 +148,7 @@
         for (var c2 in defs) {
           var d2 = defs[c2];
           if (list.indexOf(c2) >= 0 || SYSTEM.indexOf(c2) >= 0) continue;
-          if (d2 && typeof d2 === 'object' && (d2.type === 'owner' || d2.defaultFrom)) continue;
+          if (d2 && typeof d2 === 'object' && (d2.type === 'owner' || d2.defaultFrom || d2.computed)) continue;   // computed: derived on read, never written
           locked[c2] = (d2 && typeof d2 === 'object' && d2['default'] !== undefined) ? d2['default'] : '';
         }
         // `ownerWritableWhile` is a one-key map; extra keys are rejected at load (validateSchema), and
@@ -335,6 +335,72 @@
       var tables = (schema && schema.tables) || {}, out = [];
       for (var t in tables) { if (Cols().ownerColOf(tables[t])) out.push(t); }
       return out.sort();
+    },
+
+    // The _meta/ownerTables document: the self-service tables, and the CAPACITY config beside them. The
+    // two share a document because the rules path that needs capacity (a member writing their own
+    // response) already reads this one, and Firestore allows ten document reads per write: a separate
+    // _meta/capacity was the read that ran out. See THE ACCESS-CALL BUDGET in firestore.rules.
+    ownerTablesMirror: function(schema) {
+      return { tables: H.ownerTablesOf(schema), capacity: H.capacityOf(schema), public: H.publicOf(schema), signup: H.signupOf(schema) };
+    },
+    // PUBLIC tables (`"public": true`): readable with no account, read-only -- a schedule, a price list.
+    // Mirrored with the lists their columns name, which a visitor needs to read those rows. Both rules
+    // layers also open the schema and the translations once this lists any table, since a visitor's app
+    // cannot draw a public table without them; nothing else becomes readable.
+    publicOf: function(schema) {
+      var tables = (schema && schema.tables) || {}, out = { tables: [], lists: [] };
+      Object.keys(tables).forEach(function(t) {
+        if (!tables[t] || tables[t].public !== true) return;
+        out.tables.push(t);
+        var defs = Cols().columnDefs(tables[t]);
+        Object.keys(defs).forEach(function(c) { var d = defs[c], l = d && typeof d === 'object' && typeof d.list === 'string' && d.list; if (l && out.lists.indexOf(l) < 0) out.lists.push(l); });
+      });
+      return out;
+    },
+    // OPEN SIGN-UP (`newUser.open: true`): the exact grant document a signed-in account with no record may
+    // write for itself -- role, tables, rwTables, as userGrantDoc builds them -- or null when sign-up is
+    // closed. Both rules layers compare the self-written record against this, field by field.
+    signupOf: function(schema) {
+      var nu = schema && schema.newUser;
+      if (!nu || nu.open !== true) return null;
+      var d = H.userGrantDoc('', nu.role || 'viewer', '', nu.tables || []);
+      delete d.user;
+      return d;
+    },
+
+    // CAPACITY: a response table declaring `capacity: { link, status, column, count, holds? }` caps how
+    // many of its rows may hold a place in one event. The count lives ON the event row (`count`), kept by
+    // the server -- a member cannot count bookings they are not allowed to read -- and mirrored (as the
+    // `capacity` field of _meta/ownerTables, see ownerTablesMirror) as
+    //   { responses: { <table>: { events, link, status, capacity, count, holds } }, events: { <events>: <table> } }
+    // so both schema-blind rules layers can find the config from either side of the write. `events` is
+    // the table the link column refers to; `holds` = the statuses that take a place ([] = any non-empty).
+    // A table whose config does not resolve (no such ref, no such columns) is left out: validateSchema
+    // names it, and enforcing half a config would refuse writes for a reason nobody can see.
+    capacityOf: function(schema) {
+      var tables = (schema && schema.tables) || {}, out = { responses: {}, events: {} };
+      for (var t in tables) {
+        var cap = tables[t] && tables[t].capacity;
+        if (!cap || typeof cap !== 'object') continue;
+        var defs = Cols().columnDefs(tables[t]), ld = defs[cap.link];
+        var ev = ld && typeof ld === 'object' && ld.type === 'ref' && ld.table;
+        if (!ev || !tables[ev] || !defs[cap.status] || out.events[ev]) continue;
+        var edefs = Cols().columnDefs(tables[ev]);
+        if (!edefs[cap.column] || !edefs[cap.count]) continue;
+        // `reserved`: places taken that are not responses (walk-ins signed in at the desk), a number on the
+        // event row. Blank when none, so both rules layers can test for it without a missing-key branch.
+        out.responses[t] = { events: ev, link: cap.link, status: cap.status, capacity: cap.column, count: cap.count,
+                             reserved: (cap.reserved && edefs[cap.reserved]) ? cap.reserved : '',
+                             holds: Array.isArray(cap.holds) ? cap.holds.map(String) : [] };
+        out.events[ev] = t;
+      }
+      return out;
+    },
+    // Whether a response's status takes a place, under one capacityOf entry.
+    capacityHolds: function(cfg, status) {
+      if (status == null || status === '') return false;
+      return !cfg.holds.length || cfg.holds.indexOf(String(status)) >= 0;
     },
 
     // Per-page access map for RESTRICTED doc-views: { pageName: [tables...] } for every markdown view

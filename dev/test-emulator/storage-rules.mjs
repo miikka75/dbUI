@@ -39,9 +39,9 @@ await testEnv.withSecurityRulesDisabled(async (ctx) => {
 });
 
 // Signed-in users (note mixed-case email -> the rule lowercases it) + an anonymous visitor.
-const alice = testEnv.authenticatedContext('alice-uid', { email: 'Alice@Example.com' });
-const bob = testEnv.authenticatedContext('bob-uid', { email: 'bob@example.com' });
-const carol = testEnv.authenticatedContext('carol-uid', { email: 'carol@example.com' });
+const alice = testEnv.authenticatedContext('alice-uid', { email: 'Alice@Example.com', email_verified: true });
+const bob = testEnv.authenticatedContext('bob-uid', { email: 'bob@example.com', email_verified: true });
+const carol = testEnv.authenticatedContext('carol-uid', { email: 'carol@example.com', email_verified: true });
 const anon = testEnv.unauthenticatedContext();
 
 const gif = new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x39, 0x61]); // "GIF89a"
@@ -80,8 +80,8 @@ await ok('unauthenticated read is denied', assertFails(getBytes(ref(anon.storage
 
 // 5. Calendar feeds: feeds/<id>.ics, written and listed only by a FULL-access member (admin, or a grant
 // of every table) -- the client's canPublishFeeds. Subscribers read through the download URL's token.
-const erin = testEnv.authenticatedContext('erin-uid', { email: 'erin@example.com' });
-const frank = testEnv.authenticatedContext('frank-uid', { email: 'frank@example.com' });
+const erin = testEnv.authenticatedContext('erin-uid', { email: 'erin@example.com', email_verified: true });
+const frank = testEnv.authenticatedContext('frank-uid', { email: 'frank@example.com', email_verified: true });
 const ics = new TextEncoder().encode('BEGIN:VCALENDAR' + String.fromCharCode(13, 10) + 'END:VCALENDAR' + String.fromCharCode(13, 10));
 const icsMeta = { contentType: 'text/calendar' };
 const feedPath = 'feeds/0123456789abcdef0123456789abcdef.ics';

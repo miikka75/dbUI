@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // setup-supabase.mjs — everything after the dashboard work, in one re-runnable command.
 //
-//   cd dev && npm run supabase:setup -- --project-ref <ref> [--csp-only] [--new-token] [--site <url>] [--no-check]
+//   cd dev && npm run supabase:setup -- --project-ref <ref> [--csp-only] [--new-token] [--site <url>] [--auth|--no-auth] [--no-check]
+//
+// Run in a terminal, it asks for the project ref when it is missing, and whether to set up email sign-in.
 //
 // What it does, in order, against the hosted project (Management API, so `npx supabase@latest login`
 // once and no database password):
@@ -12,7 +14,8 @@
 //   3. checks that both token functions exist -- a 204 from the collector proves nothing, see SUPABASE.md
 //   4. deploys the csp-report Edge Function, --no-verify-jwt
 //   5. the read token: created only when there is none, printed ONCE
-//   6. dev/check-supabase.mjs against the deployed site
+//   6. email sign-in (setup-supabase-auth.mjs: the code-and-link emails, the mail server) -- asked, or --auth
+//   7. dev/check-supabase.mjs against the deployed site
 //
 // What it cannot do is the dashboard half: creating the project, the Google OAuth client, the redirect
 // URLs, copying the URL and key into the app. SUPABASE.md steps 1-3 and 5.
@@ -32,13 +35,14 @@ import { writeFileSync, rmSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { asker } from './ask.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 // --- the pure half, tested in dev/test/setup-supabase.test.js -------------------------------------
 
 export function parseArgs(argv) {
-  const o = { ref: '', cspOnly: false, newToken: false, site: 'https://dbui.ddns.net', check: true, errors: [] };
+  const o = { ref: '', cspOnly: false, newToken: false, site: 'https://dbui.ddns.net', check: true, auth: null, errors: [] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--project-ref') o.ref = argv[++i] || '';
@@ -46,6 +50,8 @@ export function parseArgs(argv) {
     else if (a === '--new-token') o.newToken = true;
     else if (a === '--site') o.site = argv[++i] || '';
     else if (a === '--no-check') o.check = false;
+    else if (a === '--auth') o.auth = true;
+    else if (a === '--no-auth') o.auth = false;
     else o.errors.push('unknown argument: ' + a);
   }
   if (!/^[a-z0-9]{20}$/.test(o.ref)) o.errors.push('--project-ref <ref> is required: the 20-character id in the project URL');
@@ -99,6 +105,12 @@ function step(n, text) { console.log('\n[' + n + '] ' + text); }
 
 async function main() {
   const o = parseArgs(process.argv.slice(2));
+  const a = asker();
+  // In a terminal, a missing project ref is asked for rather than refused.
+  if (a.interactive && !/^[a-z0-9]{20}$/.test(o.ref)) {
+    o.errors = o.errors.filter((e) => e.indexOf('--project-ref') < 0);
+    while (!/^[a-z0-9]{20}$/.test(o.ref)) o.ref = await a.ask('Project ref (the 20-character id in supabase.com/dashboard/project/<ref>)');
+  }
   if (o.errors.length) { console.error(o.errors.join('\n') + '\n\nusage: npm run supabase:setup -- --project-ref <ref> [--csp-only] [--new-token] [--site <url>] [--no-check]'); process.exit(2); }
 
   if (!o.cspOnly) { step(1, 'App schema (supabase-schema.sql)'); query(o.ref, join(ROOT, 'supabase-schema.sql'), { isFile: true }); console.log('    applied'); }
@@ -136,8 +148,16 @@ async function main() {
     console.log('    then press Rotate token there if this terminal is not somewhere a token should live.');
   }
 
-  if (!o.check) { console.log('\n[6] Check: skipped (--no-check)'); return; }
-  step(6, 'Checking the deployment (' + o.site + ')');
+  const auth = o.auth !== null ? o.auth : await a.confirm('\nSet up email sign-in (the sign-in emails and their mail server) now', true);
+  a.close();
+  if (auth) {
+    step(6, 'Email sign-in (setup-supabase-auth.mjs)');
+    const ra = spawnSync(process.execPath, [join(ROOT, 'dev', 'setup-supabase-auth.mjs'), '--project-ref', o.ref, '--site', o.site], { cwd: ROOT, stdio: 'inherit' });
+    if (ra.status !== 0) process.exit(ra.status || 1);
+  } else console.log('\n[6] Email sign-in: skipped (npm run supabase:auth sets it up later)');
+
+  if (!o.check) { console.log('\n[7] Check: skipped (--no-check)'); return; }
+  step(7, 'Checking the deployment (' + o.site + ')');
   const r = spawnSync(process.execPath, [join(ROOT, 'dev', 'check-supabase.mjs'), o.site], {
     cwd: ROOT, stdio: 'inherit', env: Object.assign({}, process.env, token ? { DBUI_CSP_REPORT_TOKEN: token } : {})
   });

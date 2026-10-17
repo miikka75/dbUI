@@ -121,7 +121,8 @@
       await db.exec('reset role');
       await q('select set_config($1, $2, false)',
               ['request.jwt.claims', JSON.stringify(email ? { email: email } : {})]);
-      await db.exec('set role authenticated');
+      // No email is a visitor: Supabase's `anon` role, which reads only what app_public_read allows.
+      await db.exec(email ? 'set role authenticated' : 'set role anon');
     }
     const leave = () => db.exec('reset role');
 

@@ -50,16 +50,30 @@
                                             // calendar obscures by its own config, not by the page it sits on
     Calendar.sources(ctx.views, name).forEach(function(s) {
       if (!s || !s.table || !s.dateColumn) return;
+      if (ctx.forFeed && s.feed === false) return;   // `feed: false`: on screen, not in a published file
       if (!ctx.canReachTable(s.table)) return;
-      var rows = Rows.filterRows(ctx.dataCache[s.table] || [], ctx.resolveMeTokens(s.filter));
+      // The table's computed columns too (a booking dated by its class), via the root's derivation.
+      var raw = ctx.dataCache[s.table] || [];
+      var rows = Rows.filterRows(ctx.deriveRows ? ctx.deriveRows(s.table, raw) : raw, ctx.resolveMeTokens(s.filter));
       var tag = s.label || ctx.t('tab.' + s.table);
       rows.forEach(function(r) {
         var title = (s.titleColumns || []).map(function(c) { return ctx.displayValue(c, r[c], '', calCfg); }).filter(Boolean).join(' — ');
         var d = Calendar.toDateStr(r[s.dateColumn]);
-        var key = d || '__undated__';                 // an undated row is still the user's row: bucket it
+        // `endColumn`: a row that lasts (a pause week) is on every day from its date to its end, each
+        // carrying the whole range. Capped at 92 days, so a mistyped end cannot flood the grid.
+        var e = s.endColumn ? Calendar.toDateStr(r[s.endColumn]) : '';
+        var days = [d];
+        if (d && e && e > d) { days = []; for (var cur = d, n = 0; cur <= e && n < 92; n++) { days.push(cur); var p = cur.split('-'); cur = Calendar.fmtDate(new Date(+p[0], +p[1] - 1, +p[2] + 1)); } }
+        days.forEach(function(day) {
+        var key = day || '__undated__';                 // an undated row is still the user's row: bucket it
         (out[key] = out[key] || []).push({            // rather than dropping it silently
-          id: s.table + ':' + s.dateColumn + ':' + r.id, title: title || tag, label: tag,
-          color: ctx.hashColor(s.label || s.table), table: s.table, dateCol: s.dateColumn, row: r
+          id: s.table + ':' + s.dateColumn + ':' + r.id + (days.length > 1 ? ':' + day : ''), title: title || tag, label: tag, range: days.length > 1 ? [d, e] : null,
+          color: ctx.hashColor(s.label || s.table), table: s.table, dateCol: s.dateColumn, row: r, respond: s.respond || null,
+          // A datetime's instant: orders a day's events by when they start, and shows the time.
+          at: String(r[s.dateColumn] || '').length > 10 ? String(r[s.dateColumn]) : '',
+          // `durationColumn` (a column or a reference path): how long a timed event lasts, for the .ics.
+          minutes: s.durationColumn ? (Number(ctx.rowPath ? ctx.rowPath(r, s.durationColumn) : r[s.durationColumn]) || 0) : 0
+        });
         });
       });
     });
@@ -133,7 +147,8 @@
     if (win) rotationEvents(name, win, ctx, out);
     // One stable order per day, so two renders of the same data agree and a print matches the screen.
     Object.keys(out).forEach(function(k) {
-      out[k].sort(function(a, b) { return (a.label + a.title).localeCompare(b.label + b.title); });
+      // Timed events by their time (untimed ones first, as all-day), then by label and title.
+      out[k].sort(function(a, b) { return String(a.at || '').localeCompare(String(b.at || '')) || (a.label + a.title).localeCompare(b.label + b.title); });
     });
     return out;
   }

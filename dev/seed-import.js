@@ -46,6 +46,9 @@ const DATA = path.join(EXAMPLES, BUNDLE + '-data.json');
 // opposite of the feature.
 const CHORES_MEMBER = { chore_log: 'rw', reward_claim: 'rw', home_shopping: 'rw',
                         ref_duties: 'r', ref_chores: 'r', ref_rewards: 'r' };
+// A member's access is the gym schema's own `newUser` grant -- what approving a request gives -- so a
+// seeded member and an approved one read exactly the same tables.
+const GYM_MEMBER = require('../examples/gym-schema.json').newUser.tables;
 const SEED = {
   demo: {
     users: [
@@ -85,16 +88,53 @@ const SEED = {
       { list: 'members', value: 'Dan',  email: 'dan@dev' }
     ],
     hint: '?user=ann@dev (one duty column, logs her own chores) | ?user=local@dev (the parent, approves)'
+  },
+  // Members book, check in and log through self-service (owner columns), which needs no role: they are
+  // VIEWERS, since an editor may edit every page, the front page included. The grant is read-only
+  // reference data. The front desk (local@dev) runs the schedule, memberships and PT requests.
+  gym: {
+    users: [
+      { email: 'local@dev', role: 'admin',  tables: 'all' },
+      { email: 'aino@dev',  role: 'viewer', tables: GYM_MEMBER },
+      { email: 'eero@dev',  role: 'viewer', tables: GYM_MEMBER },
+      // A trainer: a member's reading, plus the PT requests -- which name the trainer they are for.
+      { email: 'mikko@dev', role: 'viewer', tables: Object.assign({ pt_sessions: 'r' }, GYM_MEMBER) }
+    ],
+    profiles: [
+      { email: 'local@dev', name: 'Front desk', shared: true },
+      { email: 'aino@dev',  name: 'Aino',       shared: true },
+      { email: 'eero@dev',  name: 'Eero',       shared: true },
+      { email: 'mikko@dev', name: 'Mikko',      shared: true }
+    ],
+    links: [
+      { list: 'trainers', value: 'Mikko', email: 'mikko@dev' }
+    ],
+    hint: '?user=aino@dev (a member: books, checks in, logs training) | ?user=mikko@dev (a trainer: their classes and PT clients on My calendar) | ?user=local@dev (front desk)'
   }
 };
 
 const seed = SEED[BUNDLE] || { users: [], profiles: [], links: [], hint: '' };
 const USERS = seed.users, PROFILES = seed.profiles, LINKS = seed.links;
 
-const post = (action, body) => fetch(BASE + action, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }).then(r => r.json());
-const postAs = (email, action, body) => fetch(BASE + action, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-user': email }, body: JSON.stringify(body || {}) }).then(r => r.json());
+// Every call is checked. A refused one used to be read as a success, so a database somebody else had
+// already claimed (a browser tab opened as ?user=ann@dev registers Ann as its first admin) took the rows
+// and silently dropped the users and links -- leaving the one account the seed is built around locked out.
+const call = (email, action, body) => fetch(BASE + action, { method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, email ? { 'x-user': email } : {}), body: JSON.stringify(body || {}) })
+  .then(r => r.json().then(j => {
+    if (r.ok) return j;
+    const who = email || 'local@dev';
+    throw new Error(action + ' was refused for ' + who + ' (' + ((j && j.error) || r.status) + '). '
+      + (r.status === 403 ? 'This database already has an admin who is not ' + who + ' -- usually a browser tab opened it first as'
+        + ' ?user=<someone>, and an empty database makes its first visitor admin. Seed a fresh APP_DB, or make'
+        + ' local@dev an admin from that account first.' : ''));
+  }));
+const post = (action, body) => call(null, action, body);
+const postAs = (email, action, body) => call(email, action, body);
 
 (async () => {
+  // The seed's own admin first: on an empty database this closes bootstrap with local@dev as its admin
+  // before anything else can claim it -- a browser tab left open on another ?user= included.
+  for (const u of USERS.filter(x => x.role === 'admin')) await post('setUserRole', { uid: u.email, user: u.email, role: u.role, tables: u.tables });
   const bundle = JSON.parse(fs.readFileSync(DATA, 'utf8'));
   const schema = JSON.parse(fs.readFileSync(path.join(EXAMPLES, BUNDLE + '-schema.json'), 'utf8'));
   // The whole schema, not just its tables: views, nav and list config are what make the example an APP.
@@ -107,7 +147,14 @@ const postAs = (email, action, body) => fetch(BASE + action, { method: 'POST', h
   for (const f of fs.readdirSync(EXAMPLES).filter(n => langRe.test(n))) {
     const pack = JSON.parse(fs.readFileSync(path.join(EXAMPLES, f), 'utf8'));
     bundle.languages.push(...(pack.languages || []));
-    Object.assign(bundle.translations, pack.translations || {});
+    // The app's own UI text in the same language (app-lang-<code>.json), first, so the bundle's labels
+    // win where both name a key -- what the example picker installs. Without it every button and
+    // heading shows its raw key (`rsvp.checkin_code`).
+    for (const [code, map] of Object.entries(pack.translations || {})) {
+      const app = path.join(EXAMPLES, 'app-lang-' + code + '.json');
+      const ui = fs.existsSync(app) ? (JSON.parse(fs.readFileSync(app, 'utf8')).translations || {})[code] : null;
+      bundle.translations[code] = Object.assign({}, ui || {}, map);
+    }
   }
 
   // 1) Ensure tables exist (idempotent), then apply the bundle's DATA on top of the schema.

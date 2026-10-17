@@ -1,7 +1,11 @@
 // dev-client.js -- Shared dev-server client helpers (_post + backend_users).
 // Loaded before backend-local-client.js. Dev-server only.
 function _devUser() {
-  return (new URLSearchParams(location.search)).get('user') || localStorage.getItem('test_user') || 'local@dev';
+  // `?user=` (empty) or an empty test_user is a signed-out visitor; nothing set is the default dev user.
+  var p = new URLSearchParams(location.search);
+  if (p.has('user')) return p.get('user');
+  var t = localStorage.getItem('test_user');
+  return t !== null ? t : 'local@dev';
 }
 
 function _post(route, body) {
@@ -82,6 +86,7 @@ var backend_users = {
   setUserRole: function(uid, role, user, tables) { return _post('setUserRole', { uid: uid, role: role, user: user, tables: tables }); },
   removeUser: function(uid) { return _post('removeUser', { uid: uid }); },
   requestAccess: function(name, note) { return _post('requestAccess', { name: name, note: note }); },
+  selfRegister: function() { return _post('selfRegister', {}); },
   getAccessRequests: function() { return _post('getAccessRequests', {}); },
   removeAccessRequest: function(email) { return _post('removeAccessRequest', { email: email }); },
   getMyProfile: function() { return _post('getMyProfile', {}); },

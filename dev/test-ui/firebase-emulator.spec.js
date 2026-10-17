@@ -425,3 +425,56 @@ test('a viewed table is read ONCE: the listener first snapshot is the load, not 
   expect(fetched, 'notes was fetched as well as subscribed — the table was read twice').not.toContain('notes');
   expect(await page.evaluate(() => backend.subscribeLoads)).toBe(true);
 });
+
+test('capacity: a booking travels with the class count, and the last place goes to one member only', async ({ page, browser }) => {
+  // The client half of the capacity batch (backend-firebase _capacityWrite) against the real rules:
+  // members hold no grant on the class, yet move its count by one with each booking they make or cancel.
+  test.setTimeout(90000);
+  const CAP_SCHEMA = {
+    defaultLanguage: 'en',
+    tables: {
+      classes: { columns: [{ name: 'title', type: 'text' }, { name: 'capacity', type: 'number' }, { name: 'booked', type: 'number' }] },
+      bookings: {
+        ownerWritable: ['class', 'booking'],
+        capacity: { link: 'class', status: 'booking', column: 'capacity', count: 'booked', holds: ['booked'] },
+        columns: [{ name: 'owner', type: 'owner' }, { name: 'class', type: 'ref', table: 'classes', valueCol: 'id' }, { name: 'booking', type: 'text' }]
+      }
+    },
+    views: [],
+    nav: { items: [{ table: 'classes' }] }
+  };
+  await seed(page);
+  await page.goto('/');
+  await signIn(page, 'admin@test.com');
+  await page.waitForFunction(() => appInstance.isAdmin === true);
+  await page.evaluate((schema) => backend.saveSchema(schema), CAP_SCHEMA);
+  await page.evaluate(() => backend.putRow('classes', { id: 'c1', title: 'Spin', capacity: 1, booked: 0 }, 'active'));
+  for (const m of ['ann@test.com', 'bob@test.com']) await page.evaluate((e) => backend_users.setUserRole(e, 'editor', e, { classes: 'r' }), m);
+  const booked = async () => { const d = await fsDoc('classes__active/c1'); return Number((d.fields.booked || {}).integerValue || 0); };
+
+  const member = async (email) => {
+    const ctx = await browser.newContext({ baseURL: new URL(page.url()).origin });
+    const p = await ctx.newPage();
+    await seed(p);
+    await p.goto('/');
+    await signIn(p, email);
+    await p.waitForFunction(() => window.appInstance && !appInstance.loading, null, { timeout: 30000 });
+    return { ctx, p };
+  };
+  const ann = await member('ann@test.com');
+  const bob = await member('bob@test.com');
+  try {
+    const put = (who, id, email) => who.p.evaluate(([i, e]) => backend.putRow('bookings', { id: i, owner: e, class: 'c1', booking: 'booked', rosterPublic: false }, 'active').then(() => 'ok', (x) => String(x.message || x)), [id, email]);
+    expect(await put(ann, 'a1', 'ann@test.com')).toBe('ok');
+    expect(await booked()).toBe(1);
+    expect(await put(bob, 'b1', 'bob@test.com')).toContain('is full');
+    expect(await booked()).toBe(1);
+    // Ann cancels; the place is free again, and Bob takes it.
+    expect(await ann.p.evaluate(() => backend.deleteRow('bookings', 'a1', 'active').then(() => 'ok', (x) => String(x.message || x)))).toBe('ok');
+    expect(await booked()).toBe(0);
+    expect(await put(bob, 'b1', 'bob@test.com')).toBe('ok');
+    expect(await booked()).toBe(1);
+  } finally {
+    await ann.ctx.close(); await bob.ctx.close();
+  }
+});

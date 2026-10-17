@@ -28,14 +28,35 @@ alter table public.kv force row level security;
 
 -- Base grants: RLS (below) is the real gate. anon (unauthenticated) gets nothing.
 revoke all on public.kv from anon, authenticated;
+-- A visitor may select, and the kv_select_public policy decides what: the public tables, nothing else.
+grant select on public.kv to anon;
 grant select, insert, update, delete on public.kv to authenticated;
 
 -- ---------- Helper functions (SECURITY DEFINER so they read kv WITHOUT triggering RLS recursion) ------
 -- Each mirrors a function in firestore.rules. STABLE + definer-owned; search_path pinned for safety.
 
+-- The caller's email counts only once VERIFIED. Every policy keys on it, so an unverified address (email +
+-- password with confirmation off, say) must count for nothing, or anyone could sign up under the admin's
+-- address. Verified = the provider said so (user_metadata.email_verified), or the sign-in itself proved
+-- the mailbox (an emailed code or link, or OAuth), or auth.users records the confirmation. Without an
+-- auth schema (the dev server's PGlite) the caller is the dev server's trusted header, as before.
+create or replace function public.app_email_verified()
+returns boolean language plpgsql stable security definer set search_path = public as $$
+declare j jsonb := auth.jwt(); ok boolean;
+begin
+  if coalesce(j ->> 'email', '') = '' then return false; end if;
+  if coalesce(j -> 'user_metadata' ->> 'email_verified', '') = 'true' then return true; end if;
+  if exists (select 1 from jsonb_array_elements(case when jsonb_typeof(j -> 'amr') = 'array' then j -> 'amr' else '[]'::jsonb end) a
+             where a ->> 'method' in ('otp', 'magiclink', 'oauth')) then return true; end if;
+  if to_regclass('auth.users') is null then return true; end if;
+  execute 'select email_confirmed_at is not null from auth.users where id::text = $1' into ok using (j ->> 'sub');
+  return coalesce(ok, false);
+end
+$$;
+
 create or replace function public.app_email()
 returns text language sql stable as $$
-  select lower(nullif(auth.jwt() ->> 'email', ''))
+  select case when public.app_email_verified() then lower(nullif(auth.jwt() ->> 'email', '')) end
 $$;
 
 -- Bootstrap: no members configured yet -> the first signed-in Google account acts as admin. Matches
@@ -122,9 +143,14 @@ returns boolean language sql stable security definer set search_path = public as
     when public.app_is_admin() then true
     when public.app_user_data() is null then false
     when public.app_user_data() -> 'tables' = '"all"'::jsonb then true
+    -- A grant on an owning table, or an owning table that is SELF-SERVICE (_meta/ownerTables): a member
+    -- writes their own rows there with no grant, so the column's vocabulary must reach them. No mirror
+    -- row -> no such widening. Mirrors firestore.rules listAllowed.
     else exists (
       select 1 from jsonb_array_elements_text(coalesce(row_tables, '[]'::jsonb)) e
       where (public.app_user_data() -> 'tables') ? e
+         or coalesce((select value -> 'tables' from public.kv where store = '_meta' and key = 'ownerTables'),
+                     '[]'::jsonb) ? e
     )
   end
 $$;
@@ -314,6 +340,39 @@ $$;
 
 -- ---------- Row predicates (keep the policies below readable) ----------------------------------------
 -- READ gate. `val` is the existing row's value.
+-- PUBLIC tables (`public: true`, mirrored to _meta/ownerTables.public): readable with no account. Once any
+-- table is public, the schema and the translations are too (a visitor cannot draw a table without them),
+-- and the lists those tables name. Nothing else. Mirrors publicMode/publicColl in firestore.rules.
+create or replace function public.app_public_read(store text, key text)
+returns boolean language sql stable security definer set search_path = public as $$
+  with pub as (
+    select coalesce(value -> 'public', '{}'::jsonb) as p from public.kv where store = '_meta' and key = 'ownerTables'
+  )
+  select coalesce((select
+    case
+      when jsonb_array_length(coalesce(p -> 'tables', '[]'::jsonb)) = 0 then false
+      when app_public_read.store = '_meta' then app_public_read.key in ('schema', 'languages') or app_public_read.key like 'lang\_%'
+      when app_public_read.store = '_lists' then coalesce(p -> 'lists', '[]'::jsonb) ? app_public_read.key
+      when app_public_read.store like '%\_\_active' then coalesce(p -> 'tables', '[]'::jsonb) ? split_part(app_public_read.store, '__', 1)
+      else false
+    end from pub), false)
+$$;
+
+-- OPEN SIGN-UP: the record a signed-in account with none may write for itself is exactly the mirrored grant
+-- (_meta/ownerTables.signup), for its own email. Mirrors signupOk in firestore.rules.
+create or replace function public.app_signup_ok(k text, val jsonb)
+returns boolean language sql stable security definer set search_path = public as $$
+  select coalesce((select
+      (value -> 'signup') is not null and jsonb_typeof(value -> 'signup') = 'object'
+      and k = public.app_email()
+      and (val - 'role' - 'user' - 'tables' - 'rwTables') = '{}'::jsonb
+      and (val ->> 'role') = (value -> 'signup' ->> 'role')
+      and (val -> 'tables') = (value -> 'signup' -> 'tables')
+      and (val -> 'rwTables') is not distinct from (value -> 'signup' -> 'rwTables')
+      and lower(val ->> 'user') = k
+    from public.kv where store = '_meta' and key = 'ownerTables'), false)
+$$;
+
 create or replace function public.app_can_read(store text, key text, val jsonb)
 returns boolean language sql stable security definer set search_path = public as $$
   select case
@@ -437,6 +496,7 @@ returns boolean language sql stable security definer set search_path = public as
     when public.app_email() is null then false
     when store = '_meta' then public.app_no_users() or public.app_role() = 'admin'
     when store = '_users' then public.app_no_users() or public.app_role() = 'admin'
+      or public.app_signup_ok(key, val)   -- open sign-up: my own record, exactly the mirrored grant
     -- Shape gates mirror firestore.rules exactly, including WHO they bind: validProfile/validLink apply
     -- to the admin write too, validRequest only to the SELF-create (an admin editing a request is
     -- trusted there and here).
@@ -563,7 +623,13 @@ drop policy if exists kv_delete on public.kv;
 
 create policy kv_select on public.kv
   for select to authenticated
-  using (public.app_can_read(store, key, value));
+  using (public.app_can_read(store, key, value) or public.app_public_read(store, key));
+
+-- A visitor with no account: the public tables, and what drawing them needs (app_public_read) -- nothing else.
+drop policy if exists kv_select_public on public.kv;
+create policy kv_select_public on public.kv
+  for select to anon
+  using (public.app_public_read(store, key));
 
 create policy kv_insert on public.kv
   for insert to authenticated
@@ -577,6 +643,72 @@ create policy kv_update on public.kv
 create policy kv_delete on public.kv
   for delete to authenticated
   using (public.app_can_delete(store, key, value));
+
+-- ---------- Capacity (a response table's `capacity`, mirrored to _meta/ownerTables.capacity) --------
+-- An event row carries how many responses hold a place in it (`count`), and a response that would take
+-- the place past `capacity` is refused. The count is the SERVER's: a member reads only their own
+-- responses on a private roster, so no client can count the others. Mirrors the batch rules in
+-- firestore.rules (capacityOk / capacityBump), which have to make the client write the count instead.
+--
+-- An AFTER trigger, so the count includes the row being written, and raising aborts that write. The
+-- event row is locked first: two members taking the last place each lock it in turn, and the second
+-- counts after the first has committed (READ COMMITTED gives every statement a fresh snapshot), so it
+-- sees 25 and is refused rather than both seeing 24. Recounted rather than incremented, so a count can
+-- never drift from the rows, whoever wrote them -- an organizer deleting a booking in the grid included.
+-- Only the `__active` partition holds places.
+create or replace function public.app_capacity_holds(cfg jsonb, st text)
+returns boolean language sql immutable as $$
+  select coalesce(st, '') <> ''
+     and (jsonb_array_length(coalesce(cfg -> 'holds', '[]'::jsonb)) = 0 or (cfg -> 'holds') ? st)
+$$;
+
+create or replace function public.app_capacity_trg()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  st text := coalesce(new.store, old.store);
+  cfg jsonb;
+  link text; ev_store text; ev text; n bigint; cap numeric; res numeric; ev_row jsonb;
+  takes boolean;
+begin
+  if st not like '%\_\_active' then return null; end if;
+  select value -> 'capacity' -> 'responses' -> split_part(st, '__', 1) into cfg
+    from public.kv where store = '_meta' and key = 'ownerTables';
+  if cfg is null then return null; end if;
+  link := cfg ->> 'link';
+  ev_store := (cfg ->> 'events') || '__active';
+  for ev in
+    select distinct e from unnest(array[old.value ->> link, new.value ->> link]) e where coalesce(e, '') <> ''
+  loop
+    select value into ev_row from public.kv where store = ev_store and key = ev for update;
+    if ev_row is null then continue; end if;
+    select count(*) into n from public.kv
+      where store = st and value ->> link = ev and public.app_capacity_holds(cfg, value ->> (cfg ->> 'status'));
+    -- A blank or non-numeric limit is no limit, as in the rules.
+    cap := case when jsonb_typeof(ev_row -> (cfg ->> 'capacity')) = 'number' then (ev_row ->> (cfg ->> 'capacity'))::numeric end;
+    -- `reserved`: places taken that are not rows here (walk-ins), a number on the event row.
+    res := case when coalesce(cfg ->> 'reserved', '') <> '' and jsonb_typeof(ev_row -> (cfg ->> 'reserved')) = 'number'
+                then (ev_row ->> (cfg ->> 'reserved'))::numeric else 0 end;
+    -- Refuse only the write that TAKES a place here: a member editing a note on a booking in a class
+    -- the organizer has since shrunk below its count is not taking anything.
+    takes := tg_op <> 'DELETE' and new.value ->> link = ev
+      and public.app_capacity_holds(cfg, new.value ->> (cfg ->> 'status'))
+      and (tg_op = 'INSERT' or old.value ->> link is distinct from ev
+           or not public.app_capacity_holds(cfg, old.value ->> (cfg ->> 'status')));
+    if takes and cap is not null and n + res > cap then
+      raise exception 'capacity: % is full', ev using errcode = 'P0001', hint = 'capacity_full';
+    end if;
+    if (ev_row -> (cfg ->> 'count')) is distinct from to_jsonb(n) then
+      update public.kv set value = jsonb_set(value, array[cfg ->> 'count'], to_jsonb(n)), updated_at = now()
+        where store = ev_store and key = ev;
+    end if;
+  end loop;
+  return null;
+end
+$$;
+
+drop trigger if exists kv_capacity on public.kv;
+create trigger kv_capacity after insert or update or delete on public.kv
+  for each row execute function public.app_capacity_trg();
 
 -- ---------- Realtime (live sync between clients) ------------------------------------------------------
 -- The app subscribes to kv changes so one client's write appears in another's open view immediately

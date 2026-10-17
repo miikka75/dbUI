@@ -15,6 +15,8 @@ schema, and a schema's labels carry no UI prose.
 | `chores-about.json` | description + per-revision notes for chores |
 | `chores-lang-en.json` | labels for the chores schema |
 | `chores-data.json` | optional **sample rows** for the chores schema — a household of four, a chore catalogue, a fortnight of logged chores, rewards and a shopping list |
+| `gym-schema.json` | a gym's member app — a public timetable and prices, open sign-up, class booking with places and walk-ins, door and class check-in by changing code (a lockable full-screen tablet screen), memberships with pauses, a calendar feed, a training log, coins and rewards, staff boards and statistics |
+| `gym-about.json` / `gym-lang-en.json` / `-fi.json` / `gym-data.json` | its description, labels in two languages, and sample rows: two gyms, about four weeks of classes, two members, a trainer and the front desk (`npm run seed:import -- gym`) |
 | `demo-schema.json` | the **demo** — the widest of the three, and the one the test suite runs against: rotations, RSVPs, a board, embeds, doc-views, archive partitions, mirrored tables |
 | `demo-about.json` | description + per-revision notes for the demo |
 | `demo-lang-en.json` / `-es.json` / `-sv.json` | labels for the demo schema, in three languages |

@@ -23,6 +23,7 @@ backend = {
     });
   },
   saveSchema: function(schema) {
+    this._capacityMirror = null;   // re-read by _capacityFor: the capacity config is part of what this rewrites
     // Mirror the schema-derived facts the schema-blind firestore rules need, kept in sync on every
     // schema write: _meta/ownerTables (tables with an owner column -> gates owner-create),
     // _meta/pageAccess (restricted doc-views -> gates _pages__active reads; see pageAccessOf),
@@ -32,7 +33,7 @@ backend = {
     // _meta/listWritable (which lists a NON-ADMIN may add to at all; see userWritableListsOf).
     return Promise.all([
       StorageFirestore.setMeta('schema', schema),
-      StorageFirestore.setMeta('ownerTables', { tables: BackendHelpers.ownerTablesOf(schema) }),
+      StorageFirestore.setMeta('ownerTables', BackendHelpers.ownerTablesMirror(schema)),
       StorageFirestore.setMeta('pageAccess', BackendHelpers.pageAccessOf(schema)),
       StorageFirestore.setMeta('ownerWritable', BackendHelpers.ownerWritableOf(schema)),
       StorageFirestore.setMeta('stamped', BackendHelpers.stampedOf(schema)),
@@ -62,7 +63,8 @@ backend = {
     return Promise.resolve({ valid: true, name: 'Firebase' });
   },
   getFolderConfig: function() {
-    return StorageFirestore.getMeta('config').then(function(d) { return d || null; });
+    // A visitor may not read the config (it can hold a shared feed's link): they get none, not an error.
+    return StorageFirestore.getMeta('config').then(function(d) { return d || null; }, function(e) { if (!_myEmail()) return null; throw e; });
   },
   setFolderConfig: function(config) {
     return StorageFirestore.setMeta('config', config);
@@ -246,10 +248,59 @@ backend = {
   },
   putRow: function(tableId, data, tab) {
     if (!data.id) return Promise.resolve();
-    return StorageFirestore.put(_storeName(tableId, tab), data.id, data);
+    var self = this;
+    return self._capacityFor(tableId, tab).then(function(cfg) {
+      return cfg ? self._capacityWrite(tableId, cfg, data.id, data)
+                 : StorageFirestore.put(_storeName(tableId, tab), data.id, data);
+    });
   },
   deleteRow: function(tableId, id, tab) {
-    return StorageFirestore.delete(_storeName(tableId, tab), id);
+    var self = this;
+    return self._capacityFor(tableId, tab).then(function(cfg) {
+      return cfg ? self._capacityWrite(tableId, cfg, id, null)
+                 : StorageFirestore.delete(_storeName(tableId, tab), id);
+    });
+  },
+  // CAPACITY (a response table's `capacity`; the config rides in _meta/ownerTables). The rules cannot
+  // count, so a response that takes or gives up a place is written TOGETHER with the event's count,
+  // moved by one, and `lastBooking` naming the response -- the batch firestore.rules checks from both
+  // sides (capCreateOk/capUpdateOk/capDeleteOk and capacityBump). A transaction rather than a batch so
+  // the count it moves is the one stored now: two members taking the last place are serialized, and the
+  // second retries, re-reads, and is refused here as full rather than by a bare rules denial.
+  // Only the `active` partition holds places, as in the rules and the Postgres trigger.
+  _capacityFor: function(tableId, tab) {
+    if ((tab || 'active') !== 'active') return Promise.resolve(null);
+    var self = this;
+    if (!self._capacityMirror) {
+      self._capacityMirror = StorageFirestore.getMeta('ownerTables')
+        .then(function(d) { return (d && d.capacity) || null; }, function() { return null; });
+    }
+    return self._capacityMirror.then(function(c) { return (c && c.responses && c.responses[tableId]) || null; });
+  },
+  _capacityWrite: function(tableId, cfg, id, data) {
+    var bRef = _db.collection(_storeName(tableId, 'active')).doc(id);
+    var holds = function(r) { return !!r && BackendHelpers.capacityHolds(cfg, r[cfg.status]); };
+    // The stored response is read OUTSIDE the transaction: a member may not read a response that does
+    // not exist yet (the read rule needs a row to test), and a transaction read that is refused aborts
+    // the whole transaction. A row only its owner writes cannot change under them anyway.
+    return bRef.get().then(function(s) { return s.exists ? s.data() : null; }, function() { return null; }).then(function(old) {
+      var next = data === null ? null : Object.assign({}, old || {}, data);
+      var was = holds(old), now = holds(next), ev = (next || old || {})[cfg.link];
+      var write = function(tx) { if (data === null) tx.delete(bRef); else tx.set(bRef, data, { merge: true }); };
+      if (was === now || !ev) return _db.runTransaction(function(tx) { write(tx); return Promise.resolve(); });
+      var eRef = _db.collection(_storeName(cfg.events, 'active')).doc(ev);
+      return _db.runTransaction(function(tx) {
+        return tx.get(eRef).then(function(es) {
+          var e = es.exists ? es.data() : {}, n = Number(e[cfg.count]) || 0, cap = e[cfg.capacity], d = now ? 1 : -1;
+          var res = cfg.reserved && typeof e[cfg.reserved] === 'number' ? e[cfg.reserved] : 0;   // walk-ins
+          if (d > 0 && typeof cap === 'number' && n + res + 1 > cap) throw new Error('capacity: ' + ev + ' is full');
+          var bump = { lastBooking: id, updated_at: new Date().toISOString() };
+          bump[cfg.count] = n + d;
+          tx.set(eRef, bump, { merge: true });
+          write(tx);
+        });
+      });
+    });
   },
   moveRow: function(tableId, rowData, fromTab, toTab) {
     var self = this;
@@ -292,7 +343,6 @@ backend = {
   getLists: function() {
     var self = this;
     return self._myTables().then(function(tabs) {
-      if (tabs !== null && !tabs.length) return {};
       if (tabs === null) {
         return _db.collection('_lists').get().then(function(snap) {
           if (!snap.empty) { var o = {}; snap.forEach(function(d) { var v = d.data(); o[v.name || d.id] = v.items || []; }); return o; }
@@ -303,24 +353,16 @@ backend = {
           });
         });
       }
-      // restricted: Firestore rules can't prove-authorize an `array-contains-any` query against a
-      // get()-fetched allow-set (userData().tables), so the collection query is denied. Instead read
-      // each accessible list DOC individually — single-doc reads ARE authorized by the /_lists
-      // `listAllowed()` rule (it evaluates that one doc's `resource.data.tables`). The candidate list
-      // names are exactly the lists referenced by the user's accessible tables' columns.
-      return StorageFirestore.getMeta('schema').then(function(sd) {
-        var parsed = BackendHelpers.unwrapSchemaDoc(sd) || {};
-        var schemaTables = parsed.tables || {};
-        var wanted = {};
-        tabs.forEach(function(t) {
-          Columns.columnDefList(schemaTables[t]).forEach(function(d) {
-            if (d && typeof d === 'object') {
-              if (d.list) wanted[d.list] = 1;
-              if (d.listSwitch && d.listSwitch.list) wanted[d.listSwitch.list] = 1;
-            }
-          });
-        });
-        var names = Object.keys(wanted);
+      // restricted: rules cannot prove-authorize an `array-contains-any` query against a get()-fetched
+      // allow-set, so the collection query is denied; read each list the caller may read by name instead
+      // (a single-doc read is what listAllowed() evaluates). The candidates are ListAccess.accessibleListNames: the lists of their granted tables, plus
+      // those of every self-service table, which a member writes with no grant. A caller with no grants
+      // still asks, because self-service needs none; a refused schema read means nothing to ask for.
+      return StorageFirestore.getMeta('schema').catch(function () { return null; }).then(function (sd) {
+        var schemaTables = (BackendHelpers.unwrapSchemaDoc(sd) || {}).tables || {};
+        // A public table's lists are everyone's, a visitor's included.
+        var pubT = Object.keys(schemaTables).filter(function(t) { return schemaTables[t] && schemaTables[t].public === true; });
+        var names = ListAccess.accessibleListNames(schemaTables, tabs.concat(pubT), Object.keys(ListAccess.listOwnershipMap(schemaTables)), true);
         if (!names.length) return {};
         return Promise.all(names.map(function(name) {
           return _db.collection('_lists').doc(name).get()
@@ -537,10 +579,44 @@ function _startFirebase(config) {
       else { _db.enablePersistence().catch(function() {}); }
     } catch (e) { try { _db.enablePersistence().catch(function() {}); } catch (e2) {} }
   }
+  // Arrived from an emailed sign-in link: finish it here (the auth listener below then boots the account),
+  // or -- opened in another browser, with no address remembered -- ask for the address first.
+  if (_auth.isSignInWithEmailLink && _auth.isSignInWithEmailLink(location.href)) {
+    var linkEmail = ''; try { linkEmail = localStorage.getItem(EMAIL_FOR_LINK) || ''; } catch (e) {}
+    if (linkEmail) authEmailVerify(linkEmail).catch(function(e) { appInstance.authError = (e && e.message) || String(e); appInstance.signInOpen = true; });
+    else { appInstance.authLinkPending = true; appInstance.signInOpen = true; }
+  }
   _auth.onAuthStateChanged(function(user) {
     if (typeof window !== 'undefined' && window.bootMark) window.bootMark('authReady'); // auth RTT resolved
-    if (user) { appInstance.currentUserEmail = user.email; init(); }
-    else { appInstance.needsReauth = true; appInstance.loading = false; }
+    // Signed in after browsing as a visitor: start again as the account rather than booting twice.
+    if (user && appInstance.visitorMode) { location.reload(); return; }
+    if (user) { appInstance.currentUserEmail = user.email; init(); return; }
+    // Signed out. A database with public tables lets a visitor in (its schema is then readable with no
+    // account); any other asks them to sign in, exactly as before.
+    // The answer is ignored if someone signed in meanwhile: a probe that resolves after a sign-in would
+    // otherwise switch the signed-in session into visitor mode (and the next sign-in would reload the page).
+    _db.collection('_meta').doc('schema').get().then(function(d) {
+      if (_auth.currentUser) return;
+      if (!d.exists) throw new Error('no public schema');
+      appInstance.currentUserEmail = ''; appInstance.visitorMode = true; init();
+    }).catch(function() { if (_auth.currentUser) return; appInstance.needsReauth = true; appInstance.loading = false; });
+  });
+}
+
+// Email sign-in: Firebase emails a sign-in LINK (no code), which proves the mailbox -- the token then says
+// email_verified, which is what the rules require. The address is kept to finish the sign-in when the link
+// opens in this browser; opened elsewhere, the dialog asks for it again.
+var EMAIL_FOR_LINK = 'dbui_email_for_link';
+function authEmailStart(email) {
+  try { localStorage.setItem(EMAIL_FOR_LINK, email); } catch (e) {}
+  return _auth.sendSignInLinkToEmail(email, { url: location.origin + location.pathname, handleCodeInApp: true })
+    .then(function() { return { code: false }; });
+}
+// Finish a link sign-in (`code` is unused: Firebase has none). Called on load, or from the dialog.
+function authEmailVerify(email) {
+  return _auth.signInWithEmailLink(email, location.href).then(function() {
+    try { localStorage.removeItem(EMAIL_FOR_LINK); } catch (e) {}
+    history.replaceState(null, '', location.origin + location.pathname);
   });
 }
 
@@ -614,6 +690,17 @@ var backend_users = {
   },
   // --- Membership requests (self-service; admin approves) ---
   // An unregistered user submits a request for access; only they can write their own request doc.
+  // OPEN SIGN-UP: write my own record with exactly the schema's newUser grant; signupOk checks it.
+  selfRegister: function() {
+    var email = _myEmail();
+    if (!email) return Promise.reject(new Error('not signed in'));
+    return _db.collection('_meta').doc('schema').get().then(function(d) {
+      var nu = BackendHelpers.signupOf(BackendHelpers.unwrapSchemaDoc(d.exists ? d.data() : null) || {});
+      if (!nu) throw new Error('sign-up is closed');
+      backend._myTablesPromise = null;
+      return _db.collection('_users').doc(email).set(BackendHelpers.userGrantDoc(email, nu.role, email, nu.tables));
+    });
+  },
   requestAccess: function(name, note) {
     var email = _myEmail();
     if (!email) return Promise.reject(new Error('not signed in'));

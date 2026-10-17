@@ -106,3 +106,32 @@ describe('list-access - listOwnershipMap (the _meta/listTables mirror)', () => {
     assert.deepEqual(LA.listOwnershipMap(null), {});
   });
 });
+
+describe('list-access - self-service tables (a member with no grant still reads their columns\' lists)', () => {
+  // `bookings` is self-service (an owner column): members write their own rows there with no grant.
+  // Its status list must reach them, or an rsvp's toggle renders with no options at all.
+  const schemaTables = {
+    classes: { columns: [{ name: 'instructor', type: 'select', list: 'trainers' }] },
+    bookings: { columns: [{ name: 'owner', type: 'owner' }, { name: 'booking', type: 'select', list: 'booking_status' }] },
+    finance: { columns: [{ name: 'ledger', type: 'select', list: 'accounts' }] }
+  };
+  const allLists = { trainers: ['Laura'], booking_status: ['booked'], accounts: ['x'] };
+
+  it('a registered caller with no grants reads the lists of self-service tables, and no others', () => {
+    assert.deepEqual(accessibleListNames(schemaTables, [], Object.keys(allLists), true), ['booking_status']);
+    assert.deepEqual(filterLists(allLists, schemaTables, [], true), { booking_status: ['booked'] });
+  });
+
+  it('adds to a grant rather than replacing it', () => {
+    assert.deepEqual(accessibleListNames(schemaTables, ['classes'], Object.keys(allLists), true).sort(), ['booking_status', 'trainers']);
+  });
+
+  it('an unregistered caller (selfService omitted) gets only what their grants give', () => {
+    assert.deepEqual(accessibleListNames(schemaTables, [], Object.keys(allLists)), []);
+    assert.deepEqual(filterLists(allLists, schemaTables, ['classes']), { trainers: ['Laura'] });
+  });
+
+  it('unrestricted callers are unaffected', () => {
+    assert.deepEqual(filterLists(allLists, schemaTables, null, true), allLists);
+  });
+});

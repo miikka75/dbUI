@@ -7,7 +7,8 @@
 // opts:
 //   me           current user's identity (the owner value to match/stamp — an email)
 //   ownerCol     owner column in the response rows (default 'owner')
-//   dateColumn   event date column ('YYYY-MM-DD' strings; used for upcoming filter + sort)
+//   dateColumn   event date column: a `date` ('YYYY-MM-DD') or a `datetime` (an ISO instant), used for the
+//                upcoming filter, 'today' and sort. A datetime counts on the LOCAL day it falls on.
 //   eventKey     event column that responses link by (default = dateColumn — dates must be unique)
 //   titleColumns event columns joined into the display title
 //   linkColumn   response column holding the event key
@@ -16,13 +17,31 @@
 //   upcoming     default true (only future/today events); false = all
 //   limit        max events after sorting (optional)
 //   checkinColumn response column a member types the event's shared check-in code into (optional)
+//   capacity     { column, count, holds } from the response table's `capacity` (optional): each event
+//                then carries its limit, how many hold a place (the server's count), whether it is full,
+//                and whether MY response holds one -- a full event is still mine to leave.
 (function(root) {
+  // The local day a date or datetime value falls on. A UTC instant's first ten characters are the UTC
+  // day, which is the wrong day for an evening class east of Greenwich.
+  function dayOf(v) {
+    var s = String(v == null ? '' : v); if (s.length <= 10) return s;
+    var d = new Date(s); if (isNaN(d.getTime())) return s.slice(0, 10);
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+  // A blank or non-numeric limit is no limit -- the same reading both rules layers give it.
+  function limitOf(v) { return (typeof v === 'number' && isFinite(v)) ? v : null; }
+  function holds(cap, st) {
+    if (st == null || st === '') return false;
+    var h = (cap && cap.holds) || [];
+    return !h.length || h.indexOf(String(st)) >= 0;
+  }
   function build(events, responses, opts) {
     events = events || []; responses = responses || [];
     var ownerCol = opts.ownerCol || 'owner';
     var dateCol = opts.dateColumn, key = opts.eventKey || dateCol;
     var linkCol = opts.linkColumn, statusCol = opts.statusColumn;
     var titleCols = opts.titleColumns || [];
+    var cap = opts.capacity || null;
 
     // Index responses by the event key, and note distinct statuses for a legend.
     var byEvent = {}, statusSeen = {}, statuses = [];
@@ -34,7 +53,7 @@
     });
 
     var list = events.slice().sort(function(a, b) { return String(a[dateCol] || '').localeCompare(String(b[dateCol] || '')); });
-    if (opts.upcoming !== false && opts.today) list = list.filter(function(e) { return String(e[dateCol] || '') >= opts.today; });
+    if (opts.upcoming !== false && opts.today) list = list.filter(function(e) { return dayOf(e[dateCol]) >= opts.today; });
     if (opts.limit) list = list.slice(0, opts.limit);
 
     var out = list.map(function(e) {
@@ -50,7 +69,10 @@
       // The roster: who responded, and how. The caller only receives the responses the backend returned —
       // so with owner-scoped reads a non-organizer sees just their own row here; with a public roster,
       // everyone's. (Access is enforced server-side; this is only the display.)
-      var participants = responded.map(function(r) { return { owner: r[ownerCol], status: r[statusCol] }; })
+      // `arrived`: the row carries every value check-in stamps (`checkin.set`) -- what staff tick off by hand.
+      var stamp = (opts.checkin && opts.checkin.set) || null;
+      var participants = responded.map(function(r) { return { owner: r[ownerCol], status: r[statusCol], id: r.id,
+          arrived: !!stamp && Object.keys(stamp).every(function(c) { return r[c] === stamp[c]; }) }; })
         .sort(function(a, b) { return String(a.status).localeCompare(String(b.status)) || String(a.owner).localeCompare(String(b.owner)); });
       return {
         id: e.id,
@@ -60,7 +82,13 @@
         myStatus: mine ? mine[statusCol] : '',
         myRowId: mine ? mine.id : null,
         myCode: mine && opts.checkinColumn ? (mine[opts.checkinColumn] || '') : '',
-        isToday: !!opts.today && String(e[dateCol] || '') === opts.today,
+        isToday: !!opts.today && dayOf(e[dateCol]) === opts.today,
+        capacity: cap ? limitOf(e[cap.column]) : null,
+        // Places taken: the responses holding one, plus `reserved` (walk-ins) on the event row.
+        reserved: cap && cap.reserved ? (Number(e[cap.reserved]) || 0) : 0,
+        booked: cap ? (Number(e[cap.count]) || 0) + (cap.reserved ? (Number(e[cap.reserved]) || 0) : 0) : 0,
+        full: !!cap && limitOf(e[cap.column]) !== null && (Number(e[cap.count]) || 0) + (cap.reserved ? (Number(e[cap.reserved]) || 0) : 0) >= limitOf(e[cap.column]),
+        myHolds: !!mine && holds(cap, mine[statusCol]),
         tally: tally,
         total: responded.length,
         participants: participants
