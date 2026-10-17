@@ -20,30 +20,30 @@
       "title": "Bishopric Tool",
       "description": "A ward bishopric’s working tool — meeting programs, assignments, interviews and a members roster.",
       "icon": "./examples/bishopric-favicon.svg",
-      "revision": 42,
+      "revision": 43,
       "tables": 14,
       "views": 19,
       "schema": {
         "file": "bishopric-schema.json",
-        "hash": "ccc362c20022ba74"
+        "hash": "0d227dea1eeca68c"
       },
       "languages": [
         {
           "code": "en",
           "name": "English",
           "file": "bishopric-lang-en.json",
-          "hash": "13d55e4ca315a226"
+          "hash": "9f23d31b9b523ba5"
         },
         {
           "code": "fi",
           "name": "Suomi",
           "file": "bishopric-lang-fi.json",
-          "hash": "5ef75e1530ae0b2f"
+          "hash": "e882a53ac80412f0"
         }
       ],
       "about": {
         "file": "bishopric-about.json",
-        "hash": "c49985cf12e8c6a1"
+        "hash": "8d292eeb16ca6255"
       },
       "notes": {
         "29": "Welcome the newly baptized and those who moved in; releases now come before sustainings.",
@@ -58,7 +58,8 @@
         "39": "Adds a personal calendar feed: the interviews, calling steps, reminders and sacrament meeting assignments that are yours, in your phone or computer calendar. Subscribe under Settings -> My calendar feeds; each person gets a private link, in the language they pick. What counts as yours comes from the member name and calling linked to your account in Lists. There is no new screen. Links are only issued where the deployment has file storage.",
         "40": "The meeting agenda is a list of Sundays beside the open meeting: pick a date to edit that Sunday’s programme without scrolling across a wide table. On a phone a date opens its meeting as its own screen, and Back returns to the list.",
         "41": "Programs and Music are now a list of Sundays beside the open one, like the meeting agenda: pick a date to see that Sunday’s whole program, or to edit its hymns. On a phone a date opens its Sunday as its own screen, and Back returns to the list. Printing the music still gives the whole schedule as a table; a program still prints on its own.",
-        "42": "Shorter pickers: Presiding offers only the bishopric, and Responsible (on the meeting, reminders, interviews, responsibilities and callings) only the bishopric and ward roles such as the executive secretary. Values already saved stay as they are, even ones the picker no longer offers. Visiting authorities are still picked from Visitors. Those bishopric and ward rows can no longer be renamed or deleted in the Lookup tab, since the pickers depend on them."
+        "42": "Shorter pickers: Presiding offers only the bishopric, and Responsible (on the meeting, reminders, interviews, responsibilities and callings) only the bishopric and ward roles such as the executive secretary. Values already saved stay as they are, even ones the picker no longer offers. Visiting authorities are still picked from Visitors. Those bishopric and ward rows can no longer be renamed or deleted in the Lookup tab, since the pickers depend on them.",
+        "43": "Ward business welcomes the newly baptized and those who moved in under separate words, each in a block of its own."
       }
     },
     {
