@@ -30,7 +30,7 @@
     "@playwright/test": "1.64.0",
     "ajv": "^8.20.0",
     "better-sqlite3": "^13.0.3",
-    "firebase": "^12.19.0",
+    "firebase": "^13.0.0",
     "typescript": "^7.0.2"
   }
 }
