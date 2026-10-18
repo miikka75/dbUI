@@ -89,6 +89,14 @@
       return Object.assign({}, H.emptyTranslations(keys), existing || {});
     },
 
+    // A translations doc without `keys`, or null when it holds none of them (nothing to write). For the
+    // document stores, which can only delete a key by writing the doc back without it.
+    withoutTranslations: function(existing, keys) {
+      var next = Object.assign({}, existing || {}), changed = false;
+      (keys || []).forEach(function(k) { if (Object.prototype.hasOwnProperty.call(next, k)) { delete next[k]; changed = true; } });
+      return changed ? next : null;
+    },
+
     // The stored /_users/<key> document for a grant. `tables` may be 'all', a legacy name array, or a
     // per-table mode map { table: 'r' | 'rw' }. For the map shape ONLY, the writable subset is
     // denormalized alongside as `rwTables`: neither firestore.rules nor the Supabase RLS functions can

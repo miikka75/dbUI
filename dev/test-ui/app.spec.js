@@ -231,6 +231,24 @@ test.describe('Lists management', () => {
     expect(Object.keys(lists)).not.toContain('retired_terms');
     expect(Object.keys(lists)).toContain('status');
   });
+
+  test('Settings -> Leftovers deletes a dead translation key from the stored language', async ({ page }) => {
+    await ensureAppReady(page);
+    await page.request.post('/api/createLanguage', { data: { code: 'en', name: 'English', keys: [] } });
+    await page.request.post('/api/updateTranslations', { data: { langCode: 'en', updates: { 'field.retired_col': 'Old', 'field.status': 'Status' } } });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await page.evaluate(() => window.appInstance.selectTab('__settings'));
+    await page.locator('[data-testid="leftovers-section-toggle"]').click();
+    await page.locator('[data-testid="leftovers-scan"]').click();
+    const row = page.locator('[data-testid="leftover-translation-field.retired_col"]');
+    await row.locator('button').click();           // arms
+    await row.locator('button').click();           // acts
+    await expect(row).toHaveCount(0);
+    const t = await (await page.request.post('/api/getTranslations', { data: { langCode: 'en' } })).json();
+    expect(Object.keys(t)).not.toContain('field.retired_col');
+    expect(t['field.status']).toBe('Status');
+  });
 });
 
 test.describe('Theme toggle', () => {

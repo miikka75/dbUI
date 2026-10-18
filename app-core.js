@@ -4660,10 +4660,10 @@ function createVueApp() {
         }).then(function() { self.leftovers.busy = false; }, function() { self.leftovers.busy = false; });
       },
       // One item, two presses, through the writes that already exist. A list goes the way a list is
-      // deliberately retired (saveLists without it), a page body is a _pages row, a link is unlinked. A
-      // lookup table and a translation key are reported only: the first is declared by the schema, and
-      // the backend contract has no way to delete a translation key (updateTranslations merges).
-      canDeleteLeftover: function(item) { return item.kind === 'list' || item.kind === 'page' || item.kind === 'link'; },
+      // deliberately retired (saveLists without it), a page body is a _pages row, a link is unlinked, a
+      // translation key leaves every language (the row counts it across all of them). A lookup table is
+      // reported only: the schema declares it.
+      canDeleteLeftover: function(item) { return item.kind !== 'lookup'; },
       deleteLeftover: function(item) {
         var self = this, key = 'leftover:' + item.kind + ':' + item.name;
         if (!this.isArmed(key)) { this.armConfirm(key); return Promise.resolve(false); }
@@ -4671,6 +4671,12 @@ function createVueApp() {
         if (item.kind === 'list') { delete this.listsCache[item.name]; done = backend.saveLists(this.listsCache); }
         else if (item.kind === 'page') { if (this.pageCache) delete this.pageCache[item.name]; done = Writes.deleteRow('_pages', item.name, 'active'); }
         else if (item.kind === 'link') done = this.setListUserLink(item.list, item.value, '');
+        else if (item.kind === 'translation') {
+          // Out of the loaded copies too: an open Languages editor saves its whole map back, key included.
+          delete this.strings[item.name];
+          delete this.currentTranslations[item.name];
+          done = Promise.all((this.languages || []).map(function(l) { return backend.deleteTranslations(l.code, [item.name]); }));
+        }
         else return Promise.resolve(false);
         return Promise.resolve(done).then(function() {
           self.leftovers.items = (self.leftovers.items || []).filter(function(x) { return x !== item; });

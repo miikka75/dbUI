@@ -128,6 +128,11 @@ async function createPgliteBackend(opts) {
       // put() merges, which is what an update of some keys means; setMeta would replace the whole map.
       return S.put('_meta', 'lang_' + code, updates || {});
     },
+    async deleteTranslations(code, keys) {
+      // put() cannot remove a key; write the doc back without them (setMeta replaces).
+      const next = BackendHelpers.withoutTranslations(await S.getMeta('lang_' + code), keys);
+      if (next) await S.setMeta('lang_' + code, next);
+    },
     async createLanguage(code, name, keys) {
       const d = await S.getMeta('languages');
       const langs = BackendHelpers.addLanguage(d ? (d.list || []) : [], code, name);

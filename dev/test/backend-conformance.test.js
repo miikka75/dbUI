@@ -174,6 +174,13 @@ describe('backend contract — createLanguage never erases existing translations
       assert.ok((backend.getAvailableLanguages() || []).some((l) => (l.code || l) === 'fi'),
         name + ': the language was not registered');
     });
+
+    it(name + ': deleteTranslations removes only the keys given; absent keys and languages are a no-op', () => {
+      backend.updateTranslations('de', { 'field.gone': 'Weg', 'field.kept': 'Da' });
+      backend.deleteTranslations('de', ['field.gone', 'field.never_was']);
+      assert.deepEqual(backend.getTranslations('de'), { 'field.kept': 'Da' });
+      backend.deleteTranslations('zz', ['field.gone']);
+    });
   }
 });
 

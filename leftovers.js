@@ -51,6 +51,7 @@
       Object.keys(v).forEach(function (k) {
         if (!declaresOnly) out.push(k);
         var x = v[k];
+        if (k === 'listFilter') return condition(x);
         if (!inView) return walk(x, membersAreViews);
         if (typeof x === 'string' && (VIEW_OWN[k] || (columnEntry && k === 'name'))) return;
         if (k === 'columns' && Array.isArray(x)) {
@@ -76,6 +77,15 @@
         }
         walk(x, true);
       });
+    }
+    // A column's `listFilter` is a condition over its lookup's ROWS: its string values are row values (the
+    // bishopric's `{ organization: "bishopric" }`), never a list's name, and counting them kept a retired
+    // list of the same name alive. Its keys and a `matchList` still count.
+    function condition(v) {
+      if (v == null || typeof v !== 'object' || seen.indexOf(v) >= 0) return;
+      seen.push(v);
+      if (Array.isArray(v)) return v.forEach(condition);
+      Object.keys(v).forEach(function (k) { out.push(k); if (k === 'matchList') walk(v[k], false); else condition(v[k]); });
     }
     (docs || []).forEach(function (d) { walk(d, false); });
     return out.join('\n');

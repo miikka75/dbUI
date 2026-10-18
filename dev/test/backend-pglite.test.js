@@ -140,6 +140,9 @@ describe('backend-pglite — languages and translations', () => {
 
     await B.updateTranslations('fi', { greet: 'Moi' });
     assert.deepEqual(await B.getTranslations('fi'), { greet: 'Moi', bye: '' }, 'an update MERGES');
+
+    await B.deleteTranslations('fi', ['bye', 'never_was']);
+    assert.deepEqual(await B.getTranslations('fi'), { greet: 'Moi' }, 'a delete removes only the keys given');
   });
 
   it('renames and deletes a language', async () => {

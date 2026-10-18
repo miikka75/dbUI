@@ -475,6 +475,14 @@ backend = {
   updateTranslations: function(langCode, updates) {
     return _db.collection('_meta').doc('lang_' + langCode).set(updates, { merge: true });
   },
+  // update(), not set(merge): only update() removes a field. Each key as a FieldPath, because a string
+  // path reads `field.topic` as a nested field. A missing doc has nothing to remove.
+  deleteTranslations: function(langCode, keys) {
+    if (!keys || !keys.length) return Promise.resolve();
+    var ref = _db.collection('_meta').doc('lang_' + langCode), args = [];
+    keys.forEach(function(k) { args.push(new firebase.firestore.FieldPath(k), firebase.firestore.FieldValue.delete()); });
+    return ref.update.apply(ref, args).catch(function(e) { if (!e || e.code !== 'not-found') throw e; });
+  },
   createLanguage: function(code, name, keys) {
     return StorageFirestore.getMeta('languages').then(function(d) {
       var langs = BackendHelpers.addLanguage(d ? (d.list || []) : [], code, name);
