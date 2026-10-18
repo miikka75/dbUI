@@ -275,6 +275,14 @@
       updateTranslations: function (langCode, updates) {
         return S._merge('_meta', 'lang_' + langCode, updates);   // merge (Firestore set{merge:true})
       },
+      // Read, drop, write back: a merge cannot remove a key. Not atomic -- a string saved in between is
+      // lost -- which an admin's one-off cleanup can afford.
+      deleteTranslations: function (langCode, keys) {
+        return S.getMeta('lang_' + langCode).then(function (d) {
+          var next = H.withoutTranslations(d, keys);
+          return next && S.setMeta('lang_' + langCode, next);
+        });
+      },
       createLanguage: function (code, name, keys) {
         return S.getMeta('languages').then(function (d) {
           var langs = H.addLanguage(d ? (d.list || []) : [], code, name);
