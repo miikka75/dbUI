@@ -844,13 +844,27 @@
                 },
                 {
                   "status": "confirmed"
-                },
-                {
-                  "status": "moved_in"
                 }
               ]
             },
-            "markdown": "{{t:text.welcome_header}}\n\n{{self}}\n\n{{t:text.welcome_footer}}"
+            "markdown": "{{t:text.welcome_baptized_header}}\n\n{{self}}\n\n{{t:text.welcome_footer}}"
+          },
+          {
+            "mode": "union",
+            "bare": true,
+            "readonly": true,
+            "hideEmpty": true,
+            "columns": [
+              "person",
+              "notes"
+            ],
+            "sources": [
+              "admin_callings"
+            ],
+            "filter": {
+              "status": "moved_in"
+            },
+            "markdown": "{{t:text.welcome_moved_in_header}}\n\n{{self}}\n\n{{t:text.welcome_footer}}"
           },
           {
             "mode": "union",
