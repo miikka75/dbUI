@@ -28,3 +28,12 @@ test('bottom bar: More when the menu has pages the bar leaves out, none when the
   await expect(page.locator('.v-bottom-navigation')).toBeVisible();
   await expect(page.locator('[data-testid="bottom-more"]')).toHaveCount(0);
 });
+
+test('bottom bar: pressing the open page again keeps it open', async ({ page }) => {
+  await bootWith(page, schemaWith(['a', 'b', 'c'], ['a', 'b', 'c']));
+  const b = page.locator('.v-bottom-navigation .v-btn').nth(1);
+  await b.click();
+  await expect.poll(() => page.evaluate(() => appInstance.currentTable)).toBe('b');
+  await b.click();
+  await expect.poll(() => page.evaluate(() => appInstance.currentTable)).toBe('b');
+});

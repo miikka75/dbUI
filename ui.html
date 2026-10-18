@@ -418,8 +418,9 @@
       </v-dialog>
     </template>
 
-    <!-- Bottom navigation for mobile -->
-    <v-bottom-navigation v-if="mobile && !loading && navLayout === 'drawer'" :model-value="currentTable" @update:model-value="selectTab($event)" grow>
+    <!-- Bottom navigation for mobile. `mandatory`: the bar is a toggle group, and a second press on the
+         open page would otherwise deselect it and open no page at all (a blank screen). -->
+    <v-bottom-navigation v-if="mobile && !loading && navLayout === 'drawer'" :model-value="currentTable" @update:model-value="selectTab($event)" grow mandatory>
       <v-btn v-for="tab in bottomNavVisible" :key="tab.id" :value="tab.id" size="small">
         <v-icon>{{ tab.icon || 'mdi-view-list' }}</v-icon>
         <span style="font-size:0.6rem; max-width:64px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">{{ tab.title }}</span>

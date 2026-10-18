@@ -121,6 +121,8 @@ function selectedFeatures(tableList) { return AccessFeatures.selectedFeatures(ta
 // NEW appConfig parameter is round-tripped automatically with no export/import code change — add a
 // key here only if it must stay machine-local. (See access.test.js round-trip guard test.)
 var FOLDER_CONFIG_EXPORT_EXCLUDE = { mode: true };
+// Set by an import that replaced the schema, read once after its reload: look for leftovers then.
+var LEFTOVERS_CHECK_KEY = 'leftovers_check';
 function exportableConfig(appConfig) {
   var out = {};
   Object.keys(appConfig || {}).forEach(function(k) { if (!FOLDER_CONFIG_EXPORT_EXCLUDE[k]) out[k] = appConfig[k]; });
@@ -1203,7 +1205,7 @@ function createVueApp() {
          'access.request_access', 'access.request_sent', 'access.your_name', 'access.pending_requests', 'access.approve', 'access.deny', 'access.name_required',
          'profile.title', 'profile.email', 'profile.share_name', 'profile.picture',
          'period.this_week', 'period.weeks_ago', 'period.current',
-         'list.link_user', 'list.unlink_user', 'list.not_referenced', 'settings.leftovers', 'settings.leftovers_scan', 'settings.leftovers_none', 'leftover.list', 'leftover.lookup', 'leftover.page', 'leftover.link', 'leftover.translation', 'list.locked_value', 'list.locked_group',
+         'list.link_user', 'list.unlink_user', 'list.not_referenced', 'settings.leftovers', 'settings.leftovers_scan', 'settings.leftovers_none', 'leftover.list', 'leftover.lookup', 'leftover.page', 'leftover.link', 'leftover.translation', 'msg.leftovers_found', 'list.locked_value', 'list.locked_group',
          'lang.app', 'lang.schema', 'lang.lists'].sort();
       },
       schemaTranslationKeys: function() {
@@ -1489,7 +1491,7 @@ function createVueApp() {
         var self = this;
         return Promise.resolve(backend.saveSchema(this.schemaData))
           .then(function() { return self._migrateTranslations(m.renames); })
-          .then(function() { console.info('schema migrated to v' + m.to + ': ' + m.applied.join('; ')); })
+          .then(function() { console.info('schema migrated to v' + m.to + ': ' + m.applied.join('; ')); self._noticeLeftovers(); })
           .catch(function() { self.notify(self.t('msg.save_failed')); });
       },
 
@@ -4638,7 +4640,8 @@ function createVueApp() {
       isLeftover: function(name) { return Leftovers.unreferenced(name, this.leftoverCorpus); },
       // The whole report. Reads what the badge cannot: every stored page body, every language's
       // translations and the account links, each fetched fresh -- a stale copy would report something
-      // somebody restored a minute ago.
+      // somebody restored a minute ago. The page bodies join the corpus too: pageCache holds only the
+      // pages opened this session, and a name in an unopened page's prose is still a reference.
       scanLeftovers: function() {
         var self = this;
         if (!this.isAdmin) return Promise.resolve(null);
@@ -4647,23 +4650,38 @@ function createVueApp() {
         Object.keys(SCHEMA).forEach(function(t) { if (SCHEMA[t].isLookup) lookups[t] = Rows.partitionRows(self.dataCache, t, 'active').length; });
         var translations = {};
         return Promise.all([
-          Promise.resolve(backend.getTableData('_pages', 'active')).then(function(r) { return (parseTableResult(r).rows || []).map(function(x) { return x.id; }); }, function() { return []; }),
+          Promise.resolve(backend.getTableData('_pages', 'active')).then(function(r) { return parseTableResult(r).rows || []; }, function() { return []; }),
           backend.getListUserLinks ? Promise.resolve(backend.getListUserLinks()).catch(function() { return {}; }) : Promise.resolve({}),
           Promise.all((this.languages || []).map(function(l) {
             return Promise.resolve(backend.getTranslations(l.code)).then(function(t) { translations[l.code] = t || {}; }, function() {});
           }))
         ]).then(function(res) {
+          var pages = res[0].map(function(x) { return x.id; });
+          var prose = res[0].map(function(x) { return typeof x.markdown === 'string' ? x.markdown : ''; }).join('\n');
           self.leftovers.items = Leftovers.inventory({
-            text: self.leftoverCorpus, lists: self.listsCache || {}, lookups: lookups, tables: Object.keys(SCHEMA),
-            pages: res[0], views: VIEWS, links: res[1] || {}, translations: translations, keep: self.staticTranslationKeys
+            text: self.leftoverCorpus + '\n' + prose, lists: self.listsCache || {}, lookups: lookups, tables: Object.keys(SCHEMA),
+            pages: pages, views: VIEWS, links: res[1] || {}, translations: translations, keep: self.staticTranslationKeys
           });
         }).then(function() { self.leftovers.busy = false; }, function() { self.leftovers.busy = false; });
       },
+      // After a schema change -- an import that replaced the schema, a migration written back -- look
+      // once and say so when something is left over. A notice, never a sweep: the report is filled in
+      // and opened in Settings, and each delete there stays the person's two presses.
+      _noticeLeftovers: function() {
+        var self = this;
+        if (!this.isAdmin) return Promise.resolve();
+        return this.scanLeftovers().then(function() {
+          var n = (self.leftovers.items || []).length;
+          if (!n) return;
+          self.settings._collapseLeftovers = false;
+          self.notify(self.t('msg.leftovers_found') + ' (' + n + ')');
+        });
+      },
       // One item, two presses, through the writes that already exist. A list goes the way a list is
-      // deliberately retired (saveLists without it), a page body is a _pages row, a link is unlinked. A
-      // lookup table and a translation key are reported only: the first is declared by the schema, and
-      // the backend contract has no way to delete a translation key (updateTranslations merges).
-      canDeleteLeftover: function(item) { return item.kind === 'list' || item.kind === 'page' || item.kind === 'link'; },
+      // deliberately retired (saveLists without it), a page body is a _pages row, a link is unlinked, a
+      // translation key leaves every language (the row counts it across all of them). A lookup table is
+      // reported only: the schema declares it.
+      canDeleteLeftover: function(item) { return item.kind !== 'lookup'; },
       deleteLeftover: function(item) {
         var self = this, key = 'leftover:' + item.kind + ':' + item.name;
         if (!this.isArmed(key)) { this.armConfirm(key); return Promise.resolve(false); }
@@ -4671,6 +4689,12 @@ function createVueApp() {
         if (item.kind === 'list') { delete this.listsCache[item.name]; done = backend.saveLists(this.listsCache); }
         else if (item.kind === 'page') { if (this.pageCache) delete this.pageCache[item.name]; done = Writes.deleteRow('_pages', item.name, 'active'); }
         else if (item.kind === 'link') done = this.setListUserLink(item.list, item.value, '');
+        else if (item.kind === 'translation') {
+          // Out of the loaded copies too: an open Languages editor saves its whole map back, key included.
+          delete this.strings[item.name];
+          delete this.currentTranslations[item.name];
+          done = Promise.all((this.languages || []).map(function(l) { return backend.deleteTranslations(l.code, [item.name]); }));
+        }
         else return Promise.resolve(false);
         return Promise.resolve(done).then(function() {
           self.leftovers.items = (self.leftovers.items || []).filter(function(x) { return x !== item; });
@@ -7594,6 +7618,8 @@ function createVueApp() {
                 VIEWS = SchemaNormalize.flattenViews(_viewsNav);
               }
               return backend.saveSchema(imported.schema).then(function() {
+                // The import ends in a reload; the leftovers check runs on the other side of it.
+                try { sessionStorage.setItem(LEFTOVERS_CHECK_KEY, '1'); } catch (e) {}
                 _normalizeSchema(imported.schema);
                 self.schemaData = Object.freeze(imported.schema); // mirror boot: refresh the reactive schema (invalidates lockedListValues et al.)
                 return backend.initSchema(SCHEMA);
@@ -8332,7 +8358,13 @@ function createVueApp() {
       // load. Ask only once the answer can be yes: `isAdmin` returns true until the user list lands (see
       // its default), so gating at the boot call site would have changed nothing; the wait is the fix.
       // Non-admins keep the initial {} exactly as the swallowed rejection left them.
-      usersLoaded: function(v) { if (v && this.isAdmin) this.loadListUserLinks(); },
+      usersLoaded: function(v) {
+        if (!v || !this.isAdmin) return;
+        this.loadListUserLinks();
+        var check = false;
+        try { check = !!sessionStorage.getItem(LEFTOVERS_CHECK_KEY); sessionStorage.removeItem(LEFTOVERS_CHECK_KEY); } catch (e) {}
+        if (check) this._noticeLeftovers();
+      },
       viewingArchive: function() {
         // Active tab sorts the default column in its own direction (ascending unless defaultSortDesc); the
         // archive tab reverses it (most-recently-archived first). Only applies when a defaultSort is set.

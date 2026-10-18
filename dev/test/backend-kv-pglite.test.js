@@ -156,6 +156,14 @@ describe('browser-local kv backend — boot, lists and languages over the shared
     assert.ok('btn.add' in t);
     assert.ok((await B.getAvailableLanguages()).some((l) => (l.code || l) === 'en'));
   });
+
+  it('deleteTranslations removes only the keys given, dotted ones included', async () => {
+    B._test_as('admin@x.com');
+    await B.updateTranslations('sv', { 'field.gone': 'Borta', 'field.kept': 'Kvar' });
+    await B.deleteTranslations('sv', ['field.gone', 'field.never_was']);
+    assert.deepEqual(await B.getTranslations('sv'), { 'field.kept': 'Kvar' });
+    await B.deleteTranslations('zz', ['field.gone']);              // no language: nothing to do
+  });
 });
 
 describe('browser-local kv backend — capabilities are advertised, never faked', () => {

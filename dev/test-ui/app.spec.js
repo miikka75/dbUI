@@ -211,8 +211,9 @@ test.describe('Lists management', () => {
 
   test('Settings -> Leftovers reports what nothing names, and deletes one item on two presses', async ({ page }) => {
     await ensureAppReady(page);
-    await page.request.post('/api/saveLists', { data: { lists: { status: ['open', 'done'], assigned_to: ['ann'], crew: ['bob'], retired_terms: ['x', 'y'] } } });
-    await page.request.post('/api/putRow', { data: { tableId: '_pages', tab: 'active', data: { id: 'renamed_away', markdown: '# old' } } });
+    await page.request.post('/api/saveLists', { data: { lists: { status: ['open', 'done'], assigned_to: ['ann'], crew: ['bob'], retired_terms: ['x', 'y'], prose_terms: ['p'] } } });
+    // A page nobody has opened this session still names prose_terms: the scan reads every stored body.
+    await page.request.post('/api/putRow', { data: { tableId: '_pages', tab: 'active', data: { id: 'renamed_away', markdown: '# old, see prose_terms' } } });
     await page.reload();
     await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
     await page.evaluate(() => window.appInstance.selectTab('__settings'));
@@ -222,6 +223,7 @@ test.describe('Lists management', () => {
     await expect(list).toContainText('2');
     await expect(page.locator('[data-testid="leftover-page-renamed_away"]')).toBeVisible();
     await expect(page.locator('[data-testid="leftover-list-status"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid="leftover-list-prose_terms"]')).toHaveCount(0);
 
     await list.locator('button').click();          // arms
     await expect(list).toBeVisible();
@@ -230,6 +232,24 @@ test.describe('Lists management', () => {
     const lists = await (await page.request.post('/api/getLists', { data: {} })).json();
     expect(Object.keys(lists)).not.toContain('retired_terms');
     expect(Object.keys(lists)).toContain('status');
+  });
+
+  test('Settings -> Leftovers deletes a dead translation key from the stored language', async ({ page }) => {
+    await ensureAppReady(page);
+    await page.request.post('/api/createLanguage', { data: { code: 'en', name: 'English', keys: [] } });
+    await page.request.post('/api/updateTranslations', { data: { langCode: 'en', updates: { 'field.retired_col': 'Old', 'field.status': 'Status' } } });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await page.evaluate(() => window.appInstance.selectTab('__settings'));
+    await page.locator('[data-testid="leftovers-section-toggle"]').click();
+    await page.locator('[data-testid="leftovers-scan"]').click();
+    const row = page.locator('[data-testid="leftover-translation-field.retired_col"]');
+    await row.locator('button').click();           // arms
+    await row.locator('button').click();           // acts
+    await expect(row).toHaveCount(0);
+    const t = await (await page.request.post('/api/getTranslations', { data: { langCode: 'en' } })).json();
+    expect(Object.keys(t)).not.toContain('field.retired_col');
+    expect(t['field.status']).toBe('Status');
   });
 });
 
@@ -1710,6 +1730,29 @@ test.describe('Import round-trip', () => {
       active: window.Rows.partitionRows(appInstance.dataCache, 'docs', 'active').map(r => r.id),
       archive: window.Rows.partitionRows(appInstance.dataCache, 'docs', 'archive').map(r => r.id)
     })).toEqual({ active: ['a1'], archive: ['z1'] });
+  });
+
+  test('an import that replaces the schema looks for leftovers after its reload, once', async ({ page }) => {
+    test.setTimeout(20000);
+    const SCH = { defaultLanguage: 'en', tables: { docs: { columns: [{ name: 'title', type: 'text' }] } }, views: [{ table: 'docs' }], nav: { items: [{ table: 'docs' }] } };
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: SCH } });
+    await page.request.post('/api/saveLists', { data: { lists: { retired_terms: ['x'] } } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await page.locator('.v-navigation-drawer .v-list-item:has(.mdi-cog-outline)').click();
+    await page.waitForTimeout(150);
+
+    await page.setInputFiles('input[type=file][accept=".json"]', { name: 'import.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ schema: SCH })) });
+    await importComplete(page);
+    await expect(page.getByText('msg.leftovers_found (1)')).toBeVisible({ timeout: 10000 });
+    await appPoll(page, () => ({
+      items: (appInstance.leftovers.items || []).map(i => i.kind + ':' + i.name),
+      open: !appInstance.settings._collapseLeftovers,
+      flag: sessionStorage.getItem('leftovers_check')
+    })).toEqual({ items: ['list:retired_terms'], open: true, flag: null });
   });
 
   test('re-importing an already-migrated bundle changes nothing, and clears a leftover archive row', async ({ page }) => {

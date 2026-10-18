@@ -38,7 +38,8 @@ its own copy of a contract method fails the suite.
 | `getAvailableTables()` | `() → Promise` | `[{id, name}]` | Setup wizard (detect existing tables). Required to EXIST — returning `[]` is the right answer where it does not apply (Firebase). |
 | `getAvailableLanguages()` | `() → Promise` | `[{code, name}]` | Extra fields (fileId) allowed, ignored by caller. |
 | `getTranslations(langCode)` | `(string) → Promise` | `{key: string} \| null` | Null = no translations for that language. |
-| `updateTranslations(code, translations)` | `(string, object) → Promise` | void | |
+| `updateTranslations(code, translations)` | `(string, object) → Promise` | void | Merges: keys not given are kept. |
+| `deleteTranslations(code, keys)` | `(string, string[]) → Promise` | void | Removes those keys from one language. Absent keys and a missing language are a no-op. |
 | `createLanguage(code, name, keys)` | `(string, string, string[]) → Promise` | void | Return value discarded. |
 | `deleteLanguage(code)` | `(string) → Promise` | void | |
 

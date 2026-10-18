@@ -121,3 +121,21 @@ describe('leftovers.js — a view\'s own column names are not references', () =>
     assert.equal(Leftovers.unreferenced('callings', t), false);
   });
 });
+
+describe('leftovers.js — a listFilter\'s values are row values, not references', () => {
+  // The bishopric narrows its ref_callings pickers with { organization: "bishopric" }, which kept the
+  // retired `bishopric` list looking referenced.
+  const doc = { tables: { agenda: { columns: [
+    { name: 'presiding', type: 'select', list: 'ref_callings', listFilter: { organization: 'bishopric' } },
+    { name: 'responsible', type: 'select', list: 'ref_callings', listFilter: { $or: [{ organization: ['ward', 'stake'] }, { kind: { matchList: 'kinds' } }] } }
+  ] } } };
+  const text = Leftovers.corpus([doc], [doc.tables], []);
+  const unref = (n) => Leftovers.unreferenced(n, text);
+
+  it('a value it narrows by is unreferenced, nested and in arrays too', () => {
+    for (const n of ['bishopric', 'ward', 'stake']) assert.equal(unref(n), true, n);
+  });
+  it('its column names and a matchList still count', () => {
+    for (const n of ['organization', 'kind', 'kinds', 'ref_callings']) assert.equal(unref(n), false, n);
+  });
+});

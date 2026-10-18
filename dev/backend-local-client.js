@@ -14,6 +14,7 @@ backend = {
   deleteRow: (tableId, id, tab) => _post('deleteRow', { tableId, id, tab }),
   getTranslations: (langCode) => _post('getTranslations', { langCode }),
   updateTranslations: (langCode, updates) => _post('updateTranslations', { langCode, updates }),
+  deleteTranslations: (langCode, keys) => _post('deleteTranslations', { langCode, keys }),
   createLanguage: (code, name, keys) => _post('createLanguage', { code, name, keys }),
   deleteLanguage: (code) => _post('deleteLanguage', { code }),
   renameLanguage: (code, name) => _post('renameLanguage', { code, name }),

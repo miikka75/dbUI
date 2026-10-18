@@ -150,7 +150,7 @@ async function mirrorUsersToPolicy() {
 const ADMIN_ROUTES = [
   'saveSchema', 'initSchema', 'setFolderConfig', 'saveConfig',
   'getUsers', 'setUserRole', 'removeUser',
-  'getAccessRequests', 'getProfiles', 'getListUserLinks', 'setListUser'
+  'getAccessRequests', 'getProfiles', 'getListUserLinks', 'setListUser', 'deleteTranslations'
 ];
 // NOT here: `resetData`. It is the only route with no counterpart in any production backend -- it is
 // the local fixture reset, and storage-pglite runs it `asOwner` precisely so no policy applies. Gating
@@ -645,6 +645,7 @@ const server = http.createServer(async (req, res) => {
       }
       case 'getTranslations': return json(res, await backend.getTranslations(body.langCode));
       case 'updateTranslations': await backend.updateTranslations(body.langCode, body.updates); return json(res, { ok: true });
+      case 'deleteTranslations': await backend.deleteTranslations(body.langCode, body.keys); return json(res, { ok: true });
       case 'createLanguage': return json(res, { id: await backend.createLanguage(body.code, body.name, body.keys) });
       case 'deleteLanguage': await backend.deleteLanguage(body.code); return json(res, { ok: true });
       case 'renameLanguage': await backend.renameLanguage(body.code, body.name); return json(res, { ok: true });

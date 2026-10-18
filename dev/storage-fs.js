@@ -106,6 +106,10 @@ function createFsBackend(dataDir) {
       Object.assign(t, updates);
       writeJSON(fLang(code), t);
     },
+    deleteTranslations(code, keys) {
+      var next = H.withoutTranslations(readJSON(fLang(code)), keys);
+      if (next) writeJSON(fLang(code), next);
+    },
     createLanguage(code, name, keys) {
       writeJSON(F_LANGS, H.addLanguage(readJSON(F_LANGS), code, name));
       // Blank slots for the keys asked for, but never over the strings already stored -- import calls

@@ -264,6 +264,11 @@ function createLocalBackend(dbPath) {
       }
     },
 
+    deleteTranslations(code, keys) {
+      const stmt = db.prepare('DELETE FROM _translations WHERE code = ? AND key = ?');
+      for (const key of keys || []) stmt.run(code, key);
+    },
+
     createLanguage(code, name, keys) {
       db.prepare('INSERT OR REPLACE INTO _languages (code, name) VALUES (?, ?)').run(code, name);
       if (keys && keys.length) {
