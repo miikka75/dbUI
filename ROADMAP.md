@@ -1824,6 +1824,14 @@ write the doc, through one helper in `backend-helpers`. The dev server gates it 
 report's row is one key counted across languages, so its two-press delete removes the key from every
 language, and from the app's loaded strings and an open Languages editor, whose next save writes its
 whole map back and would otherwise restore the key.
+
+*Proposed: a notice after a schema change.* A schema change is when leftovers appear, and nothing
+points at the report. After an import that replaced the schema (flagged across its reload in
+`sessionStorage`) or a migration written back on boot, an admin's app runs the scan once. When anything
+is reported, a snackbar gives the count and the Leftovers section opens with the report filled in.
+Still never a sweep: every delete stays the person's two presses. While at it, the scan folds the
+stored page bodies it already reads into the corpus. The app's `pageCache` holds only the pages someone
+opened, so a list named only in an unopened page's prose was reported as unreferenced.
 "Collections for a table the schema no longer declares" is not in it either: the contract has no way to
 enumerate collections (`getAvailableTables` answers `[]` on Firebase).
 
