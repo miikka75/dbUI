@@ -13,7 +13,8 @@
 // Two modes, mutually exclusive:
 //
 //   tiles   — explicit tiles over the WHOLE row set. Each names an aggregate:
-//               { label, agg, column, goal, when, display, decimals }
+//               { label, agg, column, goal, when, display, decimals, plus }
+//             `plus: [{ agg, column, when }]` adds more counts/sums to the tile's own.
 //             `agg` is count | sum | avg | min | max | latest | streak. `column` is required by all but count.
 //             `streak` counts PERIODS, not rows: how many `interval`s in a row (daily | weekly | monthly,
 //             default weekly), ending now, have at least one row dated in them by `column`.
@@ -202,6 +203,11 @@
       (opts.tiles || []).forEach(function(t) {
         var bucket = t.when ? rows.filter(function(r) { return Rows.condMatches(r, t.when); }) : rows;
         var v = t.agg === 'streak' ? streak(bucket, t.column, t.interval || 'weekly', now) : reduce(bucket, t.agg || 'count', t.column);
+        // `plus`: more counts or sums, each over its own rows.
+        (t.plus || []).forEach(function(p) {
+          var pv = reduce(p.when ? rows.filter(function(r) { return Rows.condMatches(r, p.when); }) : rows, p.agg || 'count', p.column);
+          if (typeof pv === 'number') v = (typeof v === 'number' ? v : 0) + pv;
+        });
         if ((t.agg || 'count') === 'avg') v = roundAvg(v, t.decimals);
         // `divide`: show the number in a bigger unit -- minutes as hours (60) -- rounded to `decimals`.
         if (t.divide > 0 && typeof v === 'number') v = roundAvg(v / t.divide, t.decimals);

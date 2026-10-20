@@ -16,6 +16,7 @@
 //   today        'YYYY-MM-DD' — events with dateColumn < today are dropped unless upcoming === false
 //   upcoming     default true (only future/today events); false = all
 //   limit        max events after sorting (optional)
+//   before       'YYYY-MM-DD': later events are left out and counted as `later` (optional)
 //   checkinColumn response column a member types the event's shared check-in code into (optional)
 //   capacity     { column, count, holds } from the response table's `capacity` (optional): each event
 //                then carries its limit, how many hold a place (the server's count), whether it is full,
@@ -54,6 +55,8 @@
 
     var list = events.slice().sort(function(a, b) { return String(a[dateCol] || '').localeCompare(String(b[dateCol] || '')); });
     if (opts.upcoming !== false && opts.today) list = list.filter(function(e) { return dayOf(e[dateCol]) >= opts.today; });
+    var later = 0;
+    if (opts.before) { var n0 = list.length; list = list.filter(function(e) { return dayOf(e[dateCol]) < opts.before; }); later = n0 - list.length; }
     if (opts.limit) list = list.slice(0, opts.limit);
 
     var out = list.map(function(e) {
@@ -95,7 +98,7 @@
       };
     });
 
-    return { events: out, statuses: statuses.sort() };
+    return { events: out, statuses: statuses.sort(), later: later };
   }
 
   // ---- Self check-in with a shared code --------------------------------------------------------------

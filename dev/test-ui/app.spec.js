@@ -3749,6 +3749,67 @@ test.describe('v3 @both partition toggle in an embed', () => {
     expect(r.inherited).toBe('');                      // a view-level goal is a goal
   });
 
+  // `copy` needs one table to add to, a date to move, and resets that are its columns.
+  test('validateSchema checks a view copy', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const errs = (n) => window.validateSchema().filter((e) => e.indexOf('"' + n + '"') >= 0).join(' | ');
+      window.SCHEMA.cp_t = { columns: { when: { type: 'date' }, title: { type: 'text' }, n: { type: 'number' } } };
+      window.VIEWS.cp_ok = { name: 'cp_ok', sources: ['cp_t'], copy: { dateColumn: 'when', reset: ['n'] } };
+      window.VIEWS.cp_date = { name: 'cp_date', sources: ['cp_t'], copy: { dateColumn: 'title' } };
+      window.VIEWS.cp_reset = { name: 'cp_reset', sources: ['cp_t'], copy: { dateColumn: 'when', reset: ['nope'] } };
+      const out = { ok: errs('cp_ok'), date: errs('cp_date'), reset: errs('cp_reset') };
+      ['cp_ok', 'cp_date', 'cp_reset'].forEach((n) => delete window.VIEWS[n]);
+      delete window.SCHEMA.cp_t;
+      return out;
+    });
+    expect(r.ok).toBe('');
+    expect(r.date).toContain('must be a date or datetime column');
+    expect(r.reset).toContain('`copy.reset` must list columns');
+  });
+
+  // `archiveAfter` has two clocks: a finished status measured from `updated_at`, or the row's own date.
+  test('validateSchema checks both archiveAfter clocks', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const errs = (n) => window.validateSchema().filter((e) => e.indexOf('"' + n + '"') >= 0).join(' | ');
+      const cols = { starts_at: { type: 'datetime' }, title: { type: 'text' } };
+      window.SCHEMA.aa_ok = { archivable: true, columns: cols, archiveAfter: { dateColumn: 'starts_at', after: '2h' } };
+      window.SCHEMA.aa_text = { archivable: true, columns: cols, archiveAfter: { dateColumn: 'title', after: '1d' } };
+      window.SCHEMA.aa_none = { archivable: true, columns: cols, archiveAfter: { dateColumn: 'starts_at' } };
+      window.SCHEMA.aa_clock = { archivable: true, columns: cols, archiveAfter: { column: 'title', values: ['x'], after: '1h' } };
+      window.SCHEMA.aa_m = { archivable: true, columns: cols, archiveAfter: { dateColumn: 'starts_at', after: '1.5h' } };
+      window.SCHEMA.aa_both = { archivable: true, columns: cols, archiveAfter: { dateColumn: 'starts_at', days: 1 } };
+      const out = { ok: errs('aa_ok'), text: errs('aa_text'), none: errs('aa_none'), clock: errs('aa_clock'), m: errs('aa_m'), both: errs('aa_both') };
+      ['aa_ok', 'aa_text', 'aa_none', 'aa_clock', 'aa_m', 'aa_both'].forEach((n) => delete window.SCHEMA[n]);
+      return out;
+    });
+    expect(r.ok).toBe('');                                    // no updated_at needed on the date clock
+    expect(r.text).toContain('must be a date or datetime column');
+    expect(r.none).toContain('needs `after`');
+    expect(r.both).toContain('`archiveAfter.days` is gone -- write `after: "1d"`');
+    expect(r.m).toContain('is not a duration');
+    expect(r.clock).toContain('must declare that column');    // the edit clock still needs updated_at
+  });
+
+  // `plus` adds to a number, so only a count or a sum may be in it.
+  test('validateSchema checks a tile plus list', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const errs = (n) => window.validateSchema().filter((e) => e.indexOf(n) >= 0).join(' | ');
+      window.VIEWS.pl_ok = { name: 'pl_ok', sources: ['tasks'], stats: { tiles: [{ agg: 'count', plus: [{ agg: 'count', when: { status: 'done' } }] }] } };
+      window.VIEWS.pl_bad = { name: 'pl_bad', sources: ['tasks'], stats: { tiles: [{ agg: 'count', plus: [{ agg: 'latest', column: 'status' }, { agg: 'sum' }] }] } };
+      window.VIEWS.pl_shape = { name: 'pl_shape', sources: ['tasks'], stats: { tiles: [{ agg: 'count', plus: { agg: 'count' } }] } };
+      const out = { ok: errs('pl_ok'), bad: errs('pl_bad'), shape: errs('pl_shape') };
+      ['pl_ok', 'pl_bad', 'pl_shape'].forEach((n) => delete window.VIEWS[n]);
+      return out;
+    });
+    expect(r.ok).toBe('');
+    expect(r.bad).toContain('agg "latest" — use count or sum');
+    expect(r.bad).toContain('`sum` needs a `column`');
+    expect(r.shape).toContain('`plus` must be a list');
+  });
+
   // `groupBy.seed` takes the key set from the catalogue the group column references, so that a group
   // with nothing in it still produces a row. Both refusals below are a view that LOADS and renders and
   // quietly does none of what the author asked for, which is the class of mistake load time is for.

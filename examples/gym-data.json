@@ -1,4 +1,5 @@
 {
+  "asOf": "2026-10-12",
   "lists": {
     "trainers": [
       "Laura",
@@ -51,11 +52,6 @@
       "Beginner",
       "Intermediate",
       "Advanced"
-    ],
-    "rooms": [
-      "Cycling studio",
-      "Main hall",
-      "Studio 2"
     ]
   },
   "tables": {
@@ -73,6 +69,28 @@
         "address": "Satamatie 3",
         "opening_hours": "Mon–Fri 6–22, Sat–Sun 8–20",
         "code": "GYM-HARBOUR"
+      }
+    ],
+    "ref_rooms": [
+      {
+        "id": "room-city-centre-cycling-studio",
+        "gym": "City Centre",
+        "room": "Cycling studio"
+      },
+      {
+        "id": "room-city-centre-main-hall",
+        "gym": "City Centre",
+        "room": "Main hall"
+      },
+      {
+        "id": "room-city-centre-studio-2",
+        "gym": "City Centre",
+        "room": "Studio 2"
+      },
+      {
+        "id": "room-harbour-main-hall",
+        "gym": "Harbour",
+        "room": "Main hall"
       }
     ],
     "ref_class_types": [
@@ -242,6 +260,732 @@
     ],
     "classes": [
       {
+        "id": "cls-2026-09-14-0700",
+        "starts_at": "2026-09-14T04:00:00.000Z",
+        "class_type": "Spinning",
+        "gym": "City Centre",
+        "room": "Cycling studio",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 2,
+        "walk_ins": 0
+      },
+      {
+        "id": "cls-2026-09-14-1730",
+        "starts_at": "2026-09-14T14:30:00.000Z",
+        "class_type": "Body Pump",
+        "gym": "City Centre",
+        "room": "Main hall",
+        "instructor": "Laura",
+        "capacity": 25,
+        "booked": 2,
+        "walk_ins": 0
+      },
+      {
+        "id": "cls-2026-09-14-1830",
+        "starts_at": "2026-09-14T15:30:00.000Z",
+        "class_type": "Yoga",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Sanna",
+        "capacity": 15,
+        "booked": 1,
+        "walk_ins": 0
+      },
+      {
+        "id": "cls-2026-09-14-1900",
+        "starts_at": "2026-09-14T16:00:00.000Z",
+        "class_type": "HIIT",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 0,
+        "walk_ins": 1
+      },
+      {
+        "id": "cls-2026-09-15-0700",
+        "starts_at": "2026-09-15T04:00:00.000Z",
+        "class_type": "Spinning",
+        "gym": "City Centre",
+        "room": "Cycling studio",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 0,
+        "walk_ins": 0
+      },
+      {
+        "id": "cls-2026-09-15-1730",
+        "starts_at": "2026-09-15T14:30:00.000Z",
+        "class_type": "Body Pump",
+        "gym": "City Centre",
+        "room": "Main hall",
+        "instructor": "Laura",
+        "capacity": 25,
+        "booked": 1,
+        "walk_ins": 0
+      },
+      {
+        "id": "cls-2026-09-15-1830",
+        "starts_at": "2026-09-15T15:30:00.000Z",
+        "class_type": "Yoga",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Sanna",
+        "capacity": 15,
+        "booked": 1,
+        "walk_ins": 0
+      },
+      {
+        "id": "cls-2026-09-15-1900",
+        "starts_at": "2026-09-15T16:00:00.000Z",
+        "class_type": "HIIT",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 1,
+        "walk_ins": 1
+      },
+      {
+        "id": "cls-2026-09-16-0700",
+        "starts_at": "2026-09-16T04:00:00.000Z",
+        "class_type": "Spinning",
+        "gym": "City Centre",
+        "room": "Cycling studio",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 1,
+        "walk_ins": 0
+      },
+      {
+        "id": "cls-2026-09-16-1730",
+        "starts_at": "2026-09-16T14:30:00.000Z",
+        "class_type": "Body Pump",
+        "gym": "City Centre",
+        "room": "Main hall",
+        "instructor": "Laura",
+        "capacity": 25,
+        "booked": 0,
+        "walk_ins": 1
+      },
+      {
+        "id": "cls-2026-09-16-1830",
+        "starts_at": "2026-09-16T15:30:00.000Z",
+        "class_type": "Yoga",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Sanna",
+        "capacity": 15,
+        "booked": 0,
+        "walk_ins": 1
+      },
+      {
+        "id": "cls-2026-09-16-1900",
+        "starts_at": "2026-09-16T16:00:00.000Z",
+        "class_type": "HIIT",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 1,
+        "walk_ins": 0
+      },
+      {
+        "id": "cls-2026-09-17-0700",
+        "starts_at": "2026-09-17T04:00:00.000Z",
+        "class_type": "Spinning",
+        "gym": "City Centre",
+        "room": "Cycling studio",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 0,
+        "walk_ins": 1
+      },
+      {
+        "id": "cls-2026-09-17-1730",
+        "starts_at": "2026-09-17T14:30:00.000Z",
+        "class_type": "Body Pump",
+        "gym": "City Centre",
+        "room": "Main hall",
+        "instructor": "Laura",
+        "capacity": 25,
+        "booked": 1,
+        "walk_ins": 0
+      },
+      {
+        "id": "cls-2026-09-17-1830",
+        "starts_at": "2026-09-17T15:30:00.000Z",
+        "class_type": "Yoga",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Sanna",
+        "capacity": 15,
+        "booked": 0,
+        "walk_ins": 0
+      },
+      {
+        "id": "cls-2026-09-17-1900",
+        "starts_at": "2026-09-17T16:00:00.000Z",
+        "class_type": "HIIT",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 0,
+        "walk_ins": 0
+      },
+      {
+        "id": "cls-2026-09-18-0700",
+        "starts_at": "2026-09-18T04:00:00.000Z",
+        "class_type": "Spinning",
+        "gym": "City Centre",
+        "room": "Cycling studio",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 1,
+        "walk_ins": 0
+      },
+      {
+        "id": "cls-2026-09-18-1730",
+        "starts_at": "2026-09-18T14:30:00.000Z",
+        "class_type": "Body Pump",
+        "gym": "City Centre",
+        "room": "Main hall",
+        "instructor": "Laura",
+        "capacity": 25,
+        "booked": 0,
+        "walk_ins": 2
+      },
+      {
+        "id": "cls-2026-09-18-1830",
+        "starts_at": "2026-09-18T15:30:00.000Z",
+        "class_type": "Yoga",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Sanna",
+        "capacity": 15,
+        "booked": 1,
+        "walk_ins": 0
+      },
+      {
+        "id": "cls-2026-09-18-1900",
+        "starts_at": "2026-09-18T16:00:00.000Z",
+        "class_type": "HIIT",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 0,
+        "walk_ins": 0
+      },
+      {
+        "id": "cls-2026-09-19-1830",
+        "starts_at": "2026-09-19T15:30:00.000Z",
+        "class_type": "Yoga",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Sanna",
+        "capacity": 15,
+        "booked": 0,
+        "walk_ins": 0
+      },
+      {
+        "id": "cls-2026-09-20-1830",
+        "starts_at": "2026-09-20T15:30:00.000Z",
+        "class_type": "Yoga",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Sanna",
+        "capacity": 15,
+        "booked": 3,
+        "walk_ins": 0
+      },
+      {
+        "id": "cls-2026-09-21-0700",
+        "starts_at": "2026-09-21T04:00:00.000Z",
+        "class_type": "Spinning",
+        "gym": "City Centre",
+        "room": "Cycling studio",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 0,
+        "walk_ins": 0
+      },
+      {
+        "id": "cls-2026-09-21-1730",
+        "starts_at": "2026-09-21T14:30:00.000Z",
+        "class_type": "Body Pump",
+        "gym": "City Centre",
+        "room": "Main hall",
+        "instructor": "Laura",
+        "capacity": 25,
+        "booked": 2,
+        "walk_ins": 0
+      },
+      {
+        "id": "cls-2026-09-21-1830",
+        "starts_at": "2026-09-21T15:30:00.000Z",
+        "class_type": "Yoga",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Sanna",
+        "capacity": 15,
+        "booked": 0,
+        "walk_ins": 0
+      },
+      {
+        "id": "cls-2026-09-21-1900",
+        "starts_at": "2026-09-21T16:00:00.000Z",
+        "class_type": "HIIT",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 1,
+        "walk_ins": 1
+      },
+      {
+        "id": "cls-2026-09-22-0700",
+        "starts_at": "2026-09-22T04:00:00.000Z",
+        "class_type": "Spinning",
+        "gym": "City Centre",
+        "room": "Cycling studio",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 1,
+        "walk_ins": 2
+      },
+      {
+        "id": "cls-2026-09-22-1730",
+        "starts_at": "2026-09-22T14:30:00.000Z",
+        "class_type": "Body Pump",
+        "gym": "City Centre",
+        "room": "Main hall",
+        "instructor": "Laura",
+        "capacity": 25,
+        "booked": 1,
+        "walk_ins": 0
+      },
+      {
+        "id": "cls-2026-09-22-1830",
+        "starts_at": "2026-09-22T15:30:00.000Z",
+        "class_type": "Yoga",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Sanna",
+        "capacity": 15,
+        "booked": 1,
+        "walk_ins": 0
+      },
+      {
+        "id": "cls-2026-09-22-1900",
+        "starts_at": "2026-09-22T16:00:00.000Z",
+        "class_type": "HIIT",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 1,
+        "walk_ins": 0
+      },
+      {
+        "id": "cls-2026-09-23-0700",
+        "starts_at": "2026-09-23T04:00:00.000Z",
+        "class_type": "Spinning",
+        "gym": "City Centre",
+        "room": "Cycling studio",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 1,
+        "walk_ins": 0
+      },
+      {
+        "id": "cls-2026-09-23-1730",
+        "starts_at": "2026-09-23T14:30:00.000Z",
+        "class_type": "Body Pump",
+        "gym": "City Centre",
+        "room": "Main hall",
+        "instructor": "Laura",
+        "capacity": 25,
+        "booked": 0,
+        "walk_ins": 1
+      },
+      {
+        "id": "cls-2026-09-23-1830",
+        "starts_at": "2026-09-23T15:30:00.000Z",
+        "class_type": "Yoga",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Sanna",
+        "capacity": 15,
+        "booked": 0,
+        "walk_ins": 0
+      },
+      {
+        "id": "cls-2026-09-23-1900",
+        "starts_at": "2026-09-23T16:00:00.000Z",
+        "class_type": "HIIT",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 0,
+        "walk_ins": 0
+      },
+      {
+        "id": "cls-2026-09-24-0700",
+        "starts_at": "2026-09-24T04:00:00.000Z",
+        "class_type": "Spinning",
+        "gym": "City Centre",
+        "room": "Cycling studio",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 2,
+        "walk_ins": 0
+      },
+      {
+        "id": "cls-2026-09-24-1730",
+        "starts_at": "2026-09-24T14:30:00.000Z",
+        "class_type": "Body Pump",
+        "gym": "City Centre",
+        "room": "Main hall",
+        "instructor": "Laura",
+        "capacity": 25,
+        "booked": 0,
+        "walk_ins": 0
+      },
+      {
+        "id": "cls-2026-09-24-1830",
+        "starts_at": "2026-09-24T15:30:00.000Z",
+        "class_type": "Yoga",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Sanna",
+        "capacity": 15,
+        "booked": 2,
+        "walk_ins": 0
+      },
+      {
+        "id": "cls-2026-09-24-1900",
+        "starts_at": "2026-09-24T16:00:00.000Z",
+        "class_type": "HIIT",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 1,
+        "walk_ins": 0
+      },
+      {
+        "id": "cls-2026-09-25-0700",
+        "starts_at": "2026-09-25T04:00:00.000Z",
+        "class_type": "Spinning",
+        "gym": "City Centre",
+        "room": "Cycling studio",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 0,
+        "walk_ins": 1
+      },
+      {
+        "id": "cls-2026-09-25-1730",
+        "starts_at": "2026-09-25T14:30:00.000Z",
+        "class_type": "Body Pump",
+        "gym": "City Centre",
+        "room": "Main hall",
+        "instructor": "Laura",
+        "capacity": 25,
+        "booked": 0,
+        "walk_ins": 0
+      },
+      {
+        "id": "cls-2026-09-25-1830",
+        "starts_at": "2026-09-25T15:30:00.000Z",
+        "class_type": "Yoga",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Sanna",
+        "capacity": 15,
+        "booked": 0,
+        "walk_ins": 2
+      },
+      {
+        "id": "cls-2026-09-25-1900",
+        "starts_at": "2026-09-25T16:00:00.000Z",
+        "class_type": "HIIT",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 0,
+        "walk_ins": 0
+      },
+      {
+        "id": "cls-2026-09-26-1830",
+        "starts_at": "2026-09-26T15:30:00.000Z",
+        "class_type": "Yoga",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Sanna",
+        "capacity": 15,
+        "booked": 1,
+        "walk_ins": 0
+      },
+      {
+        "id": "cls-2026-09-27-1830",
+        "starts_at": "2026-09-27T15:30:00.000Z",
+        "class_type": "Yoga",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Sanna",
+        "capacity": 15,
+        "booked": 1,
+        "walk_ins": 1
+      },
+      {
+        "id": "cls-2026-09-28-0700",
+        "starts_at": "2026-09-28T04:00:00.000Z",
+        "class_type": "Spinning",
+        "gym": "City Centre",
+        "room": "Cycling studio",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 1,
+        "walk_ins": 0
+      },
+      {
+        "id": "cls-2026-09-28-1730",
+        "starts_at": "2026-09-28T14:30:00.000Z",
+        "class_type": "Body Pump",
+        "gym": "City Centre",
+        "room": "Main hall",
+        "instructor": "Laura",
+        "capacity": 25,
+        "booked": 1,
+        "walk_ins": 1
+      },
+      {
+        "id": "cls-2026-09-28-1830",
+        "starts_at": "2026-09-28T15:30:00.000Z",
+        "class_type": "Yoga",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Sanna",
+        "capacity": 15,
+        "booked": 1,
+        "walk_ins": 0
+      },
+      {
+        "id": "cls-2026-09-28-1900",
+        "starts_at": "2026-09-28T16:00:00.000Z",
+        "class_type": "HIIT",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 0,
+        "walk_ins": 0
+      },
+      {
+        "id": "cls-2026-09-29-0700",
+        "starts_at": "2026-09-29T04:00:00.000Z",
+        "class_type": "Spinning",
+        "gym": "City Centre",
+        "room": "Cycling studio",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 1,
+        "walk_ins": 2
+      },
+      {
+        "id": "cls-2026-09-29-1730",
+        "starts_at": "2026-09-29T14:30:00.000Z",
+        "class_type": "Body Pump",
+        "gym": "City Centre",
+        "room": "Main hall",
+        "instructor": "Laura",
+        "capacity": 25,
+        "booked": 1,
+        "walk_ins": 0
+      },
+      {
+        "id": "cls-2026-09-29-1830",
+        "starts_at": "2026-09-29T15:30:00.000Z",
+        "class_type": "Yoga",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Sanna",
+        "capacity": 15,
+        "booked": 0,
+        "walk_ins": 0
+      },
+      {
+        "id": "cls-2026-09-29-1900",
+        "starts_at": "2026-09-29T16:00:00.000Z",
+        "class_type": "HIIT",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 0,
+        "walk_ins": 0
+      },
+      {
+        "id": "cls-2026-09-30-0700",
+        "starts_at": "2026-09-30T04:00:00.000Z",
+        "class_type": "Spinning",
+        "gym": "City Centre",
+        "room": "Cycling studio",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 0,
+        "walk_ins": 0
+      },
+      {
+        "id": "cls-2026-09-30-1730",
+        "starts_at": "2026-09-30T14:30:00.000Z",
+        "class_type": "Body Pump",
+        "gym": "City Centre",
+        "room": "Main hall",
+        "instructor": "Laura",
+        "capacity": 25,
+        "booked": 0,
+        "walk_ins": 0
+      },
+      {
+        "id": "cls-2026-09-30-1830",
+        "starts_at": "2026-09-30T15:30:00.000Z",
+        "class_type": "Yoga",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Sanna",
+        "capacity": 15,
+        "booked": 0,
+        "walk_ins": 1
+      },
+      {
+        "id": "cls-2026-09-30-1900",
+        "starts_at": "2026-09-30T16:00:00.000Z",
+        "class_type": "HIIT",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 3,
+        "walk_ins": 0
+      },
+      {
+        "id": "cls-2026-10-01-0700",
+        "starts_at": "2026-10-01T04:00:00.000Z",
+        "class_type": "Spinning",
+        "gym": "City Centre",
+        "room": "Cycling studio",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 1,
+        "walk_ins": 0
+      },
+      {
+        "id": "cls-2026-10-01-1730",
+        "starts_at": "2026-10-01T14:30:00.000Z",
+        "class_type": "Body Pump",
+        "gym": "City Centre",
+        "room": "Main hall",
+        "instructor": "Laura",
+        "capacity": 25,
+        "booked": 1,
+        "walk_ins": 0
+      },
+      {
+        "id": "cls-2026-10-01-1830",
+        "starts_at": "2026-10-01T15:30:00.000Z",
+        "class_type": "Yoga",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Sanna",
+        "capacity": 15,
+        "booked": 0,
+        "walk_ins": 0
+      },
+      {
+        "id": "cls-2026-10-01-1900",
+        "starts_at": "2026-10-01T16:00:00.000Z",
+        "class_type": "HIIT",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 1,
+        "walk_ins": 0
+      },
+      {
+        "id": "cls-2026-10-02-0700",
+        "starts_at": "2026-10-02T04:00:00.000Z",
+        "class_type": "Spinning",
+        "gym": "City Centre",
+        "room": "Cycling studio",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 2,
+        "walk_ins": 0
+      },
+      {
+        "id": "cls-2026-10-02-1730",
+        "starts_at": "2026-10-02T14:30:00.000Z",
+        "class_type": "Body Pump",
+        "gym": "City Centre",
+        "room": "Main hall",
+        "instructor": "Laura",
+        "capacity": 25,
+        "booked": 1,
+        "walk_ins": 0
+      },
+      {
+        "id": "cls-2026-10-02-1830",
+        "starts_at": "2026-10-02T15:30:00.000Z",
+        "class_type": "Yoga",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Sanna",
+        "capacity": 15,
+        "booked": 2,
+        "walk_ins": 0
+      },
+      {
+        "id": "cls-2026-10-02-1900",
+        "starts_at": "2026-10-02T16:00:00.000Z",
+        "class_type": "HIIT",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Mikko",
+        "capacity": 25,
+        "booked": 1,
+        "walk_ins": 0
+      },
+      {
+        "id": "cls-2026-10-03-1830",
+        "starts_at": "2026-10-03T15:30:00.000Z",
+        "class_type": "Yoga",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Sanna",
+        "capacity": 15,
+        "booked": 1,
+        "walk_ins": 0
+      },
+      {
+        "id": "cls-2026-10-04-1830",
+        "starts_at": "2026-10-04T15:30:00.000Z",
+        "class_type": "Yoga",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Sanna",
+        "capacity": 15,
+        "booked": 1,
+        "walk_ins": 0
+      },
+      {
         "id": "cls-2026-10-05-0700",
         "starts_at": "2026-10-05T04:00:00.000Z",
         "class_type": "Spinning",
@@ -249,7 +993,8 @@
         "room": "Cycling studio",
         "instructor": "Mikko",
         "capacity": 25,
-        "booked": 0
+        "booked": 0,
+        "walk_ins": 0
       },
       {
         "id": "cls-2026-10-05-1730",
@@ -259,7 +1004,8 @@
         "room": "Main hall",
         "instructor": "Laura",
         "capacity": 25,
-        "booked": 1
+        "booked": 2,
+        "walk_ins": 1
       },
       {
         "id": "cls-2026-10-05-1830",
@@ -269,7 +1015,8 @@
         "room": "Main hall",
         "instructor": "Sanna",
         "capacity": 15,
-        "booked": 0
+        "booked": 0,
+        "walk_ins": 1
       },
       {
         "id": "cls-2026-10-05-1900",
@@ -279,7 +1026,8 @@
         "room": "Main hall",
         "instructor": "Mikko",
         "capacity": 25,
-        "booked": 0
+        "booked": 0,
+        "walk_ins": 0
       },
       {
         "id": "cls-2026-10-06-0700",
@@ -289,7 +1037,8 @@
         "room": "Cycling studio",
         "instructor": "Mikko",
         "capacity": 25,
-        "booked": 1
+        "booked": 2,
+        "walk_ins": 1
       },
       {
         "id": "cls-2026-10-06-1730",
@@ -299,7 +1048,8 @@
         "room": "Main hall",
         "instructor": "Laura",
         "capacity": 25,
-        "booked": 0
+        "booked": 2,
+        "walk_ins": 0
       },
       {
         "id": "cls-2026-10-06-1830",
@@ -309,7 +1059,8 @@
         "room": "Main hall",
         "instructor": "Sanna",
         "capacity": 15,
-        "booked": 0
+        "booked": 2,
+        "walk_ins": 1
       },
       {
         "id": "cls-2026-10-06-1900",
@@ -319,7 +1070,8 @@
         "room": "Main hall",
         "instructor": "Mikko",
         "capacity": 25,
-        "booked": 1
+        "booked": 2,
+        "walk_ins": 0
       },
       {
         "id": "cls-2026-10-07-0700",
@@ -329,7 +1081,8 @@
         "room": "Cycling studio",
         "instructor": "Mikko",
         "capacity": 25,
-        "booked": 0
+        "booked": 0,
+        "walk_ins": 1
       },
       {
         "id": "cls-2026-10-07-1730",
@@ -339,7 +1092,8 @@
         "room": "Main hall",
         "instructor": "Laura",
         "capacity": 25,
-        "booked": 0
+        "booked": 0,
+        "walk_ins": 0
       },
       {
         "id": "cls-2026-10-07-1830",
@@ -349,7 +1103,8 @@
         "room": "Main hall",
         "instructor": "Sanna",
         "capacity": 15,
-        "booked": 1
+        "booked": 2,
+        "walk_ins": 0
       },
       {
         "id": "cls-2026-10-07-1900",
@@ -359,7 +1114,8 @@
         "room": "Main hall",
         "instructor": "Mikko",
         "capacity": 25,
-        "booked": 0
+        "booked": 1,
+        "walk_ins": 0
       },
       {
         "id": "cls-2026-10-08-0700",
@@ -369,7 +1125,8 @@
         "room": "Cycling studio",
         "instructor": "Mikko",
         "capacity": 25,
-        "booked": 0
+        "booked": 1,
+        "walk_ins": 0
       },
       {
         "id": "cls-2026-10-08-1730",
@@ -379,7 +1136,8 @@
         "room": "Main hall",
         "instructor": "Laura",
         "capacity": 25,
-        "booked": 0
+        "booked": 1,
+        "walk_ins": 1
       },
       {
         "id": "cls-2026-10-08-1830",
@@ -389,7 +1147,8 @@
         "room": "Main hall",
         "instructor": "Sanna",
         "capacity": 15,
-        "booked": 0
+        "booked": 1,
+        "walk_ins": 1
       },
       {
         "id": "cls-2026-10-08-1900",
@@ -399,7 +1158,8 @@
         "room": "Main hall",
         "instructor": "Mikko",
         "capacity": 25,
-        "booked": 1
+        "booked": 1,
+        "walk_ins": 1
       },
       {
         "id": "cls-2026-10-09-0700",
@@ -409,7 +1169,8 @@
         "room": "Cycling studio",
         "instructor": "Mikko",
         "capacity": 25,
-        "booked": 0
+        "booked": 1,
+        "walk_ins": 0
       },
       {
         "id": "cls-2026-10-09-1730",
@@ -419,7 +1180,8 @@
         "room": "Main hall",
         "instructor": "Laura",
         "capacity": 25,
-        "booked": 1
+        "booked": 1,
+        "walk_ins": 0
       },
       {
         "id": "cls-2026-10-09-1830",
@@ -429,7 +1191,8 @@
         "room": "Main hall",
         "instructor": "Sanna",
         "capacity": 15,
-        "booked": 0
+        "booked": 0,
+        "walk_ins": 0
       },
       {
         "id": "cls-2026-10-09-1900",
@@ -439,7 +1202,30 @@
         "room": "Main hall",
         "instructor": "Mikko",
         "capacity": 25,
-        "booked": 0
+        "booked": 1,
+        "walk_ins": 0
+      },
+      {
+        "id": "cls-2026-10-10-1830",
+        "starts_at": "2026-10-10T15:30:00.000Z",
+        "class_type": "Yoga",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Sanna",
+        "capacity": 15,
+        "booked": 1,
+        "walk_ins": 0
+      },
+      {
+        "id": "cls-2026-10-11-1830",
+        "starts_at": "2026-10-11T15:30:00.000Z",
+        "class_type": "Yoga",
+        "gym": "Harbour",
+        "room": "Main hall",
+        "instructor": "Sanna",
+        "capacity": 15,
+        "booked": 1,
+        "walk_ins": 0
       },
       {
         "id": "cls-2026-10-12-0700",
@@ -459,7 +1245,7 @@
         "room": "Main hall",
         "instructor": "Laura",
         "capacity": 25,
-        "booked": 2
+        "booked": 3
       },
       {
         "id": "cls-2026-10-12-1830",
@@ -469,7 +1255,7 @@
         "room": "Main hall",
         "instructor": "Sanna",
         "capacity": 15,
-        "booked": 0
+        "booked": 1
       },
       {
         "id": "cls-2026-10-12-1900",
@@ -479,7 +1265,7 @@
         "room": "Main hall",
         "instructor": "Mikko",
         "capacity": 25,
-        "booked": 0
+        "booked": 1
       },
       {
         "id": "cls-2026-10-13-0700",
@@ -509,7 +1295,7 @@
         "room": "Main hall",
         "instructor": "Sanna",
         "capacity": 15,
-        "booked": 0
+        "booked": 1
       },
       {
         "id": "cls-2026-10-13-1900",
@@ -519,7 +1305,7 @@
         "room": "Main hall",
         "instructor": "Mikko",
         "capacity": 25,
-        "booked": 0
+        "booked": 1
       },
       {
         "id": "cls-2026-10-14-0700",
@@ -529,7 +1315,7 @@
         "room": "Cycling studio",
         "instructor": "Mikko",
         "capacity": 25,
-        "booked": 0
+        "booked": 3
       },
       {
         "id": "cls-2026-10-14-1730",
@@ -569,7 +1355,7 @@
         "room": "Cycling studio",
         "instructor": "Mikko",
         "capacity": 25,
-        "booked": 0
+        "booked": 1
       },
       {
         "id": "cls-2026-10-15-1730",
@@ -599,7 +1385,7 @@
         "room": "Main hall",
         "instructor": "Mikko",
         "capacity": 25,
-        "booked": 0
+        "booked": 1
       },
       {
         "id": "cls-2026-10-16-0700",
@@ -629,7 +1415,7 @@
         "room": "Main hall",
         "instructor": "Sanna",
         "capacity": 15,
-        "booked": 0
+        "booked": 1
       },
       {
         "id": "cls-2026-10-16-1900",
@@ -1182,6 +1968,622 @@
         "booking": "booked",
         "attendance": "no_show",
         "checkin_code": ""
+      },
+      {
+        "id": "bk-liisa-2026-09-15-1830",
+        "owner": "liisa@dev",
+        "class": "cls-2026-09-15-1830",
+        "booking": "booked",
+        "attendance": "attended",
+        "checkin_code": "K7PQM"
+      },
+      {
+        "id": "bk-liisa-2026-09-20-1830",
+        "owner": "liisa@dev",
+        "class": "cls-2026-09-20-1830",
+        "booking": "booked",
+        "attendance": "attended",
+        "checkin_code": "K7PQM"
+      },
+      {
+        "id": "bk-liisa-2026-09-17-1730",
+        "owner": "liisa@dev",
+        "class": "cls-2026-09-17-1730",
+        "booking": "booked",
+        "attendance": "no_show",
+        "checkin_code": ""
+      },
+      {
+        "id": "bk-liisa-2026-09-21-1730",
+        "owner": "liisa@dev",
+        "class": "cls-2026-09-21-1730",
+        "booking": "booked",
+        "attendance": "no_show",
+        "checkin_code": ""
+      },
+      {
+        "id": "bk-liisa-2026-09-22-1730",
+        "owner": "liisa@dev",
+        "class": "cls-2026-09-22-1730",
+        "booking": "booked",
+        "attendance": "attended",
+        "checkin_code": "K7PQM"
+      },
+      {
+        "id": "bk-liisa-2026-09-27-1830",
+        "owner": "liisa@dev",
+        "class": "cls-2026-09-27-1830",
+        "booking": "booked",
+        "attendance": "attended",
+        "checkin_code": "K7PQM"
+      },
+      {
+        "id": "bk-liisa-2026-09-28-1730",
+        "owner": "liisa@dev",
+        "class": "cls-2026-09-28-1730",
+        "booking": "booked",
+        "attendance": "attended",
+        "checkin_code": "K7PQM"
+      },
+      {
+        "id": "bk-liisa-2026-10-02-1730",
+        "owner": "liisa@dev",
+        "class": "cls-2026-10-02-1730",
+        "booking": "booked",
+        "attendance": "no_show",
+        "checkin_code": ""
+      },
+      {
+        "id": "bk-liisa-2026-10-02-1830",
+        "owner": "liisa@dev",
+        "class": "cls-2026-10-02-1830",
+        "booking": "booked",
+        "attendance": "attended",
+        "checkin_code": "K7PQM"
+      },
+      {
+        "id": "bk-liisa-2026-10-08-1830",
+        "owner": "liisa@dev",
+        "class": "cls-2026-10-08-1830",
+        "booking": "booked",
+        "attendance": "attended",
+        "checkin_code": "K7PQM"
+      },
+      {
+        "id": "bk-liisa-2026-10-06-1730",
+        "owner": "liisa@dev",
+        "class": "cls-2026-10-06-1730",
+        "booking": "booked",
+        "attendance": "no_show",
+        "checkin_code": ""
+      },
+      {
+        "id": "bk-liisa-2026-10-16-1830",
+        "owner": "liisa@dev",
+        "class": "cls-2026-10-16-1830",
+        "booking": "booked",
+        "attendance": "pending",
+        "checkin_code": ""
+      },
+      {
+        "id": "bk-juha-2026-09-18-0700",
+        "owner": "juha@dev",
+        "class": "cls-2026-09-18-0700",
+        "booking": "booked",
+        "attendance": "attended",
+        "checkin_code": "K7PQM"
+      },
+      {
+        "id": "bk-juha-2026-09-14-0700",
+        "owner": "juha@dev",
+        "class": "cls-2026-09-14-0700",
+        "booking": "booked",
+        "attendance": "attended",
+        "checkin_code": "K7PQM"
+      },
+      {
+        "id": "bk-juha-2026-09-24-0700",
+        "owner": "juha@dev",
+        "class": "cls-2026-09-24-0700",
+        "booking": "booked",
+        "attendance": "attended",
+        "checkin_code": "K7PQM"
+      },
+      {
+        "id": "bk-juha-2026-09-22-0700",
+        "owner": "juha@dev",
+        "class": "cls-2026-09-22-0700",
+        "booking": "booked",
+        "attendance": "attended",
+        "checkin_code": "K7PQM"
+      },
+      {
+        "id": "bk-juha-2026-10-02-0700",
+        "owner": "juha@dev",
+        "class": "cls-2026-10-02-0700",
+        "booking": "booked",
+        "attendance": "attended",
+        "checkin_code": "K7PQM"
+      },
+      {
+        "id": "bk-juha-2026-09-29-0700",
+        "owner": "juha@dev",
+        "class": "cls-2026-09-29-0700",
+        "booking": "booked",
+        "attendance": "attended",
+        "checkin_code": "K7PQM"
+      },
+      {
+        "id": "bk-juha-2026-09-30-1900",
+        "owner": "juha@dev",
+        "class": "cls-2026-09-30-1900",
+        "booking": "booked",
+        "attendance": "attended",
+        "checkin_code": "K7PQM"
+      },
+      {
+        "id": "bk-juha-2026-10-09-0700",
+        "owner": "juha@dev",
+        "class": "cls-2026-10-09-0700",
+        "booking": "booked",
+        "attendance": "attended",
+        "checkin_code": "K7PQM"
+      },
+      {
+        "id": "bk-juha-2026-10-06-1900",
+        "owner": "juha@dev",
+        "class": "cls-2026-10-06-1900",
+        "booking": "booked",
+        "attendance": "attended",
+        "checkin_code": "K7PQM"
+      },
+      {
+        "id": "bk-juha-2026-10-14-0700",
+        "owner": "juha@dev",
+        "class": "cls-2026-10-14-0700",
+        "booking": "booked",
+        "attendance": "pending",
+        "checkin_code": ""
+      },
+      {
+        "id": "bk-juha-2026-10-13-1900",
+        "owner": "juha@dev",
+        "class": "cls-2026-10-13-1900",
+        "booking": "booked",
+        "attendance": "pending",
+        "checkin_code": ""
+      },
+      {
+        "id": "bk-mari-2026-09-15-1730",
+        "owner": "mari@dev",
+        "class": "cls-2026-09-15-1730",
+        "booking": "booked",
+        "attendance": "attended",
+        "checkin_code": "K7PQM"
+      },
+      {
+        "id": "bk-mari-2026-09-14-1730",
+        "owner": "mari@dev",
+        "class": "cls-2026-09-14-1730",
+        "booking": "booked",
+        "attendance": "attended",
+        "checkin_code": "K7PQM"
+      },
+      {
+        "id": "bk-mari-2026-09-21-1730",
+        "owner": "mari@dev",
+        "class": "cls-2026-09-21-1730",
+        "booking": "booked",
+        "attendance": "no_show",
+        "checkin_code": ""
+      },
+      {
+        "id": "bk-mari-2026-10-01-1730",
+        "owner": "mari@dev",
+        "class": "cls-2026-10-01-1730",
+        "booking": "booked",
+        "attendance": "no_show",
+        "checkin_code": ""
+      },
+      {
+        "id": "bk-mari-2026-09-29-1730",
+        "owner": "mari@dev",
+        "class": "cls-2026-09-29-1730",
+        "booking": "booked",
+        "attendance": "attended",
+        "checkin_code": "K7PQM"
+      },
+      {
+        "id": "bk-mari-2026-10-08-1730",
+        "owner": "mari@dev",
+        "class": "cls-2026-10-08-1730",
+        "booking": "booked",
+        "attendance": "attended",
+        "checkin_code": "K7PQM"
+      },
+      {
+        "id": "bk-mari-2026-10-06-1730",
+        "owner": "mari@dev",
+        "class": "cls-2026-10-06-1730",
+        "booking": "booked",
+        "attendance": "attended",
+        "checkin_code": "K7PQM"
+      },
+      {
+        "id": "bk-mari-2026-10-12-1730",
+        "owner": "mari@dev",
+        "class": "cls-2026-10-12-1730",
+        "booking": "booked",
+        "attendance": "pending",
+        "checkin_code": ""
+      },
+      {
+        "id": "bk-tuomas-2026-09-15-1900",
+        "owner": "tuomas@dev",
+        "class": "cls-2026-09-15-1900",
+        "booking": "booked",
+        "attendance": "attended",
+        "checkin_code": "K7PQM"
+      },
+      {
+        "id": "bk-tuomas-2026-09-22-1900",
+        "owner": "tuomas@dev",
+        "class": "cls-2026-09-22-1900",
+        "booking": "booked",
+        "attendance": "attended",
+        "checkin_code": "K7PQM"
+      },
+      {
+        "id": "bk-tuomas-2026-09-21-1900",
+        "owner": "tuomas@dev",
+        "class": "cls-2026-09-21-1900",
+        "booking": "booked",
+        "attendance": "no_show",
+        "checkin_code": ""
+      },
+      {
+        "id": "bk-tuomas-2026-09-30-1900",
+        "owner": "tuomas@dev",
+        "class": "cls-2026-09-30-1900",
+        "booking": "booked",
+        "attendance": "attended",
+        "checkin_code": "K7PQM"
+      },
+      {
+        "id": "bk-tuomas-2026-10-02-1900",
+        "owner": "tuomas@dev",
+        "class": "cls-2026-10-02-1900",
+        "booking": "booked",
+        "attendance": "attended",
+        "checkin_code": "K7PQM"
+      },
+      {
+        "id": "bk-tuomas-2026-10-07-1900",
+        "owner": "tuomas@dev",
+        "class": "cls-2026-10-07-1900",
+        "booking": "booked",
+        "attendance": "attended",
+        "checkin_code": "K7PQM"
+      },
+      {
+        "id": "bk-tuomas-2026-10-12-1900",
+        "owner": "tuomas@dev",
+        "class": "cls-2026-10-12-1900",
+        "booking": "booked",
+        "attendance": "pending",
+        "checkin_code": ""
+      },
+      {
+        "id": "bk-emma-2026-09-18-1830",
+        "owner": "emma@dev",
+        "class": "cls-2026-09-18-1830",
+        "booking": "booked",
+        "attendance": "attended",
+        "checkin_code": "K7PQM"
+      },
+      {
+        "id": "bk-emma-2026-09-20-1830",
+        "owner": "emma@dev",
+        "class": "cls-2026-09-20-1830",
+        "booking": "booked",
+        "attendance": "attended",
+        "checkin_code": "K7PQM"
+      },
+      {
+        "id": "bk-emma-2026-09-22-1830",
+        "owner": "emma@dev",
+        "class": "cls-2026-09-22-1830",
+        "booking": "booked",
+        "attendance": "attended",
+        "checkin_code": "K7PQM"
+      },
+      {
+        "id": "bk-emma-2026-09-24-1830",
+        "owner": "emma@dev",
+        "class": "cls-2026-09-24-1830",
+        "booking": "booked",
+        "attendance": "attended",
+        "checkin_code": "K7PQM"
+      },
+      {
+        "id": "bk-emma-2026-09-26-1830",
+        "owner": "emma@dev",
+        "class": "cls-2026-09-26-1830",
+        "booking": "booked",
+        "attendance": "attended",
+        "checkin_code": "K7PQM"
+      },
+      {
+        "id": "bk-emma-2026-10-03-1830",
+        "owner": "emma@dev",
+        "class": "cls-2026-10-03-1830",
+        "booking": "booked",
+        "attendance": "attended",
+        "checkin_code": "K7PQM"
+      },
+      {
+        "id": "bk-emma-2026-10-04-1830",
+        "owner": "emma@dev",
+        "class": "cls-2026-10-04-1830",
+        "booking": "booked",
+        "attendance": "attended",
+        "checkin_code": "K7PQM"
+      },
+      {
+        "id": "bk-emma-2026-10-02-1830",
+        "owner": "emma@dev",
+        "class": "cls-2026-10-02-1830",
+        "booking": "booked",
+        "attendance": "no_show",
+        "checkin_code": ""
+      },
+      {
+        "id": "bk-emma-2026-10-07-1830",
+        "owner": "emma@dev",
+        "class": "cls-2026-10-07-1830",
+        "booking": "booked",
+        "attendance": "attended",
+        "checkin_code": "K7PQM"
+      },
+      {
+        "id": "bk-emma-2026-10-11-1830",
+        "owner": "emma@dev",
+        "class": "cls-2026-10-11-1830",
+        "booking": "booked",
+        "attendance": "no_show",
+        "checkin_code": ""
+      },
+      {
+        "id": "bk-emma-2026-10-06-1830",
+        "owner": "emma@dev",
+        "class": "cls-2026-10-06-1830",
+        "booking": "booked",
+        "attendance": "attended",
+        "checkin_code": "K7PQM"
+      },
+      {
+        "id": "bk-emma-2026-10-12-1830",
+        "owner": "emma@dev",
+        "class": "cls-2026-10-12-1830",
+        "booking": "booked",
+        "attendance": "pending",
+        "checkin_code": ""
+      },
+      {
+        "id": "bk-ville-2026-09-16-0700",
+        "owner": "ville@dev",
+        "class": "cls-2026-09-16-0700",
+        "booking": "booked",
+        "attendance": "attended",
+        "checkin_code": "K7PQM"
+      },
+      {
+        "id": "bk-ville-2026-09-24-0700",
+        "owner": "ville@dev",
+        "class": "cls-2026-09-24-0700",
+        "booking": "booked",
+        "attendance": "attended",
+        "checkin_code": "K7PQM"
+      },
+      {
+        "id": "bk-ville-2026-10-02-0700",
+        "owner": "ville@dev",
+        "class": "cls-2026-10-02-0700",
+        "booking": "booked",
+        "attendance": "attended",
+        "checkin_code": "K7PQM"
+      },
+      {
+        "id": "bk-ville-2026-10-01-0700",
+        "owner": "ville@dev",
+        "class": "cls-2026-10-01-0700",
+        "booking": "booked",
+        "attendance": "attended",
+        "checkin_code": "K7PQM"
+      },
+      {
+        "id": "bk-ville-2026-10-06-0700",
+        "owner": "ville@dev",
+        "class": "cls-2026-10-06-0700",
+        "booking": "booked",
+        "attendance": "attended",
+        "checkin_code": "K7PQM"
+      },
+      {
+        "id": "bk-ville-2026-10-08-0700",
+        "owner": "ville@dev",
+        "class": "cls-2026-10-08-0700",
+        "booking": "booked",
+        "attendance": "attended",
+        "checkin_code": "K7PQM"
+      },
+      {
+        "id": "bk-ville-2026-10-14-0700",
+        "owner": "ville@dev",
+        "class": "cls-2026-10-14-0700",
+        "booking": "booked",
+        "attendance": "pending",
+        "checkin_code": ""
+      },
+      {
+        "id": "bk-sara-2026-09-20-1830",
+        "owner": "sara@dev",
+        "class": "cls-2026-09-20-1830",
+        "booking": "booked",
+        "attendance": "attended",
+        "checkin_code": "K7PQM"
+      },
+      {
+        "id": "bk-sara-2026-09-24-1900",
+        "owner": "sara@dev",
+        "class": "cls-2026-09-24-1900",
+        "booking": "booked",
+        "attendance": "attended",
+        "checkin_code": "K7PQM"
+      },
+      {
+        "id": "bk-sara-2026-09-28-1830",
+        "owner": "sara@dev",
+        "class": "cls-2026-09-28-1830",
+        "booking": "booked",
+        "attendance": "no_show",
+        "checkin_code": ""
+      },
+      {
+        "id": "bk-sara-2026-09-30-1900",
+        "owner": "sara@dev",
+        "class": "cls-2026-09-30-1900",
+        "booking": "booked",
+        "attendance": "attended",
+        "checkin_code": "K7PQM"
+      },
+      {
+        "id": "bk-sara-2026-10-09-1900",
+        "owner": "sara@dev",
+        "class": "cls-2026-10-09-1900",
+        "booking": "booked",
+        "attendance": "attended",
+        "checkin_code": "K7PQM"
+      },
+      {
+        "id": "bk-sara-2026-10-10-1830",
+        "owner": "sara@dev",
+        "class": "cls-2026-10-10-1830",
+        "booking": "booked",
+        "attendance": "attended",
+        "checkin_code": "K7PQM"
+      },
+      {
+        "id": "bk-sara-2026-10-13-1830",
+        "owner": "sara@dev",
+        "class": "cls-2026-10-13-1830",
+        "booking": "booked",
+        "attendance": "pending",
+        "checkin_code": ""
+      },
+      {
+        "id": "bk-oskari-2026-09-14-0700",
+        "owner": "oskari@dev",
+        "class": "cls-2026-09-14-0700",
+        "booking": "booked",
+        "attendance": "attended",
+        "checkin_code": "K7PQM"
+      },
+      {
+        "id": "bk-oskari-2026-09-23-0700",
+        "owner": "oskari@dev",
+        "class": "cls-2026-09-23-0700",
+        "booking": "booked",
+        "attendance": "attended",
+        "checkin_code": "K7PQM"
+      },
+      {
+        "id": "bk-oskari-2026-10-15-0700",
+        "owner": "oskari@dev",
+        "class": "cls-2026-10-15-0700",
+        "booking": "booked",
+        "attendance": "pending",
+        "checkin_code": ""
+      },
+      {
+        "id": "bk-helmi-2026-09-14-1730",
+        "owner": "helmi@dev",
+        "class": "cls-2026-09-14-1730",
+        "booking": "booked",
+        "attendance": "no_show",
+        "checkin_code": ""
+      },
+      {
+        "id": "bk-helmi-2026-09-14-1830",
+        "owner": "helmi@dev",
+        "class": "cls-2026-09-14-1830",
+        "booking": "booked",
+        "attendance": "attended",
+        "checkin_code": "K7PQM"
+      },
+      {
+        "id": "bk-helmi-2026-09-24-1830",
+        "owner": "helmi@dev",
+        "class": "cls-2026-09-24-1830",
+        "booking": "booked",
+        "attendance": "attended",
+        "checkin_code": "K7PQM"
+      },
+      {
+        "id": "bk-helmi-2026-09-28-0700",
+        "owner": "helmi@dev",
+        "class": "cls-2026-09-28-0700",
+        "booking": "booked",
+        "attendance": "attended",
+        "checkin_code": "K7PQM"
+      },
+      {
+        "id": "bk-helmi-2026-10-05-1730",
+        "owner": "helmi@dev",
+        "class": "cls-2026-10-05-1730",
+        "booking": "booked",
+        "attendance": "no_show",
+        "checkin_code": ""
+      },
+      {
+        "id": "bk-helmi-2026-10-06-1830",
+        "owner": "helmi@dev",
+        "class": "cls-2026-10-06-1830",
+        "booking": "booked",
+        "attendance": "attended",
+        "checkin_code": "K7PQM"
+      },
+      {
+        "id": "bk-helmi-2026-10-14-0700",
+        "owner": "helmi@dev",
+        "class": "cls-2026-10-14-0700",
+        "booking": "booked",
+        "attendance": "pending",
+        "checkin_code": ""
+      },
+      {
+        "id": "bk-niko-2026-09-16-1900",
+        "owner": "niko@dev",
+        "class": "cls-2026-09-16-1900",
+        "booking": "booked",
+        "attendance": "attended",
+        "checkin_code": "K7PQM"
+      },
+      {
+        "id": "bk-niko-2026-10-01-1900",
+        "owner": "niko@dev",
+        "class": "cls-2026-10-01-1900",
+        "booking": "booked",
+        "attendance": "attended",
+        "checkin_code": "K7PQM"
+      },
+      {
+        "id": "bk-niko-2026-10-15-1900",
+        "owner": "niko@dev",
+        "class": "cls-2026-10-15-1900",
+        "booking": "booked",
+        "attendance": "pending",
+        "checkin_code": ""
       }
     ],
     "visits": [
@@ -1464,6 +2866,86 @@
         "start_on": "2026-10-20",
         "order_state": "submitted",
         "membership_status": "pending"
+      },
+      {
+        "id": "ms-liisa-1",
+        "owner": "liisa@dev",
+        "plan": "Monthly",
+        "start_on": "2026-06-01",
+        "order_state": "submitted",
+        "membership_status": "active"
+      },
+      {
+        "id": "ms-juha-1",
+        "owner": "juha@dev",
+        "plan": "12 months",
+        "start_on": "2026-05-01",
+        "order_state": "submitted",
+        "membership_status": "active"
+      },
+      {
+        "id": "ms-mari-1",
+        "owner": "mari@dev",
+        "plan": "6 months",
+        "start_on": "2026-07-01",
+        "order_state": "submitted",
+        "membership_status": "active"
+      },
+      {
+        "id": "ms-tuomas-1",
+        "owner": "tuomas@dev",
+        "plan": "Monthly",
+        "start_on": "2026-08-01",
+        "order_state": "submitted",
+        "membership_status": "active"
+      },
+      {
+        "id": "ms-emma-1",
+        "owner": "emma@dev",
+        "plan": "12 months",
+        "start_on": "2026-07-01",
+        "order_state": "submitted",
+        "membership_status": "active"
+      },
+      {
+        "id": "ms-ville-1",
+        "owner": "ville@dev",
+        "plan": "12 months",
+        "start_on": "2026-04-01",
+        "order_state": "submitted",
+        "membership_status": "active"
+      },
+      {
+        "id": "ms-sara-1",
+        "owner": "sara@dev",
+        "plan": "6 months",
+        "start_on": "2026-07-01",
+        "order_state": "submitted",
+        "membership_status": "active"
+      },
+      {
+        "id": "ms-oskari-1",
+        "owner": "oskari@dev",
+        "plan": "12 months",
+        "start_on": "2026-01-01",
+        "order_state": "submitted",
+        "membership_status": "active"
+      },
+      {
+        "id": "ms-helmi-1",
+        "owner": "helmi@dev",
+        "plan": "12 months",
+        "start_on": "2026-08-01",
+        "order_state": "submitted",
+        "membership_status": "active"
+      },
+      {
+        "id": "ms-niko-1",
+        "owner": "niko@dev",
+        "plan": "Monthly",
+        "start_on": "2026-03-01",
+        "order_state": "submitted",
+        "membership_status": "active"
       }
     ],
     "pt_sessions": [

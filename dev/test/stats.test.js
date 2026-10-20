@@ -376,4 +376,15 @@ describe('stats.js — distinct', () => {
     const rows = [{ who: 'a' }, { who: 'b' }, { who: 'a' }, { who: '' }];
     assert.equal(Stats.build(rows, { tiles: [{ agg: 'distinct', column: 'who' }] }).tiles[0].value, 2);
   });
+
+  it('`plus` adds counts and sums over other rows: booked check-ins plus walk-ins', () => {
+    const rows = [
+      { attendance: 'attended' }, { attendance: 'attended' }, { attendance: 'no_show' },
+      { walk_ins: 2 }, { walk_ins: 1 }, { walk_ins: '' }
+    ];
+    const t = Stats.build(rows, { tiles: [{ agg: 'count', when: { attendance: 'attended' }, plus: [{ agg: 'sum', column: 'walk_ins' }] }] }).tiles[0];
+    assert.equal(t.value, 5);
+    // A part that adds nothing still leaves the tile's own number.
+    assert.equal(Stats.build([{ attendance: 'attended' }], { tiles: [{ agg: 'count', plus: [{ agg: 'sum', column: 'walk_ins' }] }] }).tiles[0].value, 1);
+  });
 });

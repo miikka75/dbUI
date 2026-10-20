@@ -206,3 +206,13 @@ test('a table\'s computed column: shown in views and forms, never edited, never 
   await expect.poll(() => page.evaluate(() => (appInstance.currentData[0] || {}).ready_on)).toBe('2026-11-05');
   expect(await page.evaluate(() => appInstance.cellReadonly(appInstance.currentData[0], 'ready_on', 'mine'))).toBe(true);
 });
+
+test('a cards column in a table row is a dropdown', async ({ page }) => {
+  await setup(page);
+  await page.request.post('/api/putRow', { data: { tableId: 'claims', tab: 'active', data: { id: 'c1', owner: 'ann@x', reward: 'Bottle' } }, headers: ADMIN });
+  await boot(page, 'org@x');
+  await page.evaluate(() => appInstance.selectTab('claims'));
+  await expect(page.locator('tbody tr').filter({ hasText: 'ann' }).first()).toBeVisible();
+  await expect(page.locator('tbody [data-testid="pick-card"]')).toHaveCount(0);
+  await expect(page.locator('tbody').locator('.v-autocomplete, .v-select').first()).toBeVisible();
+});
