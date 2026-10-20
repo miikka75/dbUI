@@ -278,8 +278,7 @@ function validateSchema() {
     if (!aa) continue;
     var acols = SCHEMA[at].columns || {};
     if (!SCHEMA[at].archivable) errors.push('table "' + at + '": `archiveAfter` needs `archivable: true` (there is no archive partition to move rows into)');
-    // Two clocks: the row's own `dateColumn`, or `updated_at` behind a finished `column`/`values`. With a
-    // dateColumn the status pair is optional; without one it is the only thing that says "finished".
+    // Two clocks: `dateColumn`, or `updated_at` behind a finished `column`/`values`.
     var aaDate = aa.dateColumn !== undefined;
     if (aaDate) {
       var adef = acols[aa.dateColumn], aty = adef && (typeof adef === 'object' ? adef.type : adef);
@@ -289,8 +288,7 @@ function validateSchema() {
       if (!aa.column || !(aa.column in acols)) errors.push('table "' + at + '": `archiveAfter.column` "' + (aa.column || '') + '" is not a column of the table');
       if (!Array.isArray(aa.values) || !aa.values.length) errors.push('table "' + at + '": `archiveAfter.values` must be a non-empty array of the values that count as finished');
     }
-    // How long: `after`, a duration. `days` was its first form and is gone; one left in a schema would
-    // be ignored and nothing would ever archive, so name the replacement.
+    // `days` is gone: a leftover would be ignored and nothing would archive.
     if (aa.days !== undefined) errors.push('table "' + at + '": `archiveAfter.days` is gone -- write `after: "' + aa.days + 'd"`');
     if (aa.after === undefined) errors.push('table "' + at + '": `archiveAfter` needs `after` -- how long before a row is filed away: "30min", "2h", "1d", "2w", "1m"');
     else if (!Rotation.parseDuration(aa.after)) errors.push('table "' + at + '": `archiveAfter.after` "' + aa.after + '" is not a duration -- a whole number and a unit: min, h, d, w, m (months), y. Minutes are "min"; "m" is months, as in every interval');
@@ -787,8 +785,7 @@ function validateSchema() {
         else if (ag !== 'count' && !t.column) errors.push('stats "' + v + '" ' + at + ': `' + ag + '` needs a `column`');
         stCol(t.column, at);
         stGoalOk(t.goal, at, false);
-        // `plus` adds to the tile, so only what adds up: a count or a sum. A `latest` or a streak in it
-        // would add a status or a run length to a number, and still render as one.
+        // `plus` must add up: count or sum only.
         if (t.plus !== undefined) {
           if (!Array.isArray(t.plus) || !t.plus.length) errors.push('stats "' + v + '" ' + at + ': `plus` must be a list like [{ "agg": "sum", "column": "walk_ins" }]');
           else t.plus.forEach(function(p, pi) {
@@ -812,13 +809,11 @@ function validateSchema() {
         }
       });
     }
-    // `rsvp.ahead`: how far the booking list reaches before Show more. Unreadable, it would quietly show
-    // everything -- the very list it was set to shorten.
+    // `rsvp.ahead` must be a duration, or the list silently shows everything.
     if (view.rsvp && view.rsvp.ahead !== undefined && !Rotation.parseDuration(view.rsvp.ahead)) {
       errors.push('rsvp "' + v + '": `ahead` "' + view.rsvp.ahead + '" is not a duration -- a whole number and a unit: min, h, d, w, m (months), y');
     }
-    // `copy` (Copying events): one table to add to, a date to move, and resets that are its columns.
-    // Each mistake would otherwise show a button whose dialog previews nothing, or copy what should reset.
+    // `copy`: one source, a date column, reset columns of it.
     if (view.copy !== undefined) {
       var cp = view.copy, csrc = (view.sources || [])[0], ccols = (SCHEMA[csrc] && SCHEMA[csrc].columns) || {};
       if (!cp || typeof cp !== 'object') errors.push('view "' + v + '": `copy` must be an object like { "dateColumn": "starts_at", "reset": ["booked"] }');

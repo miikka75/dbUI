@@ -14,8 +14,7 @@
 //
 //   tiles   — explicit tiles over the WHOLE row set. Each names an aggregate:
 //               { label, agg, column, goal, when, display, decimals, plus }
-//             `plus: [{ agg, column, when }]` adds more counts/sums to the tile's own -- a total over two
-//             kinds of row (booked check-ins + walk-ins), which one `when` cannot select.
+//             `plus: [{ agg, column, when }]` adds more counts/sums to the tile's own.
 //             `agg` is count | sum | avg | min | max | latest | streak. `column` is required by all but count.
 //             `streak` counts PERIODS, not rows: how many `interval`s in a row (daily | weekly | monthly,
 //             default weekly), ending now, have at least one row dated in them by `column`.
@@ -204,8 +203,7 @@
       (opts.tiles || []).forEach(function(t) {
         var bucket = t.when ? rows.filter(function(r) { return Rows.condMatches(r, t.when); }) : rows;
         var v = t.agg === 'streak' ? streak(bucket, t.column, t.interval || 'weekly', now) : reduce(bucket, t.agg || 'count', t.column);
-        // `plus`: more counts or sums added to this one, each over its own rows -- booked check-ins plus
-        // the walk-ins typed on the class, which live in different rows of one union view.
+        // `plus`: more counts or sums, each over its own rows.
         (t.plus || []).forEach(function(p) {
           var pv = reduce(p.when ? rows.filter(function(r) { return Rows.condMatches(r, p.when); }) : rows, p.agg || 'count', p.column);
           if (typeof pv === 'number') v = (typeof v === 'number' ? v : 0) + pv;

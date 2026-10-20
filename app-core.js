@@ -742,15 +742,12 @@ function createVueApp() {
         var n = this.currentTable, p = this.pagePicks[n]; if (p) return p;
         try { return JSON.parse(localStorage.getItem('page_filter:' + n) || '{}') || {}; } catch (e) { return {}; }
       },
-      // Comparing statistics (ROADMAP): rows of saved picks, each shown as one line of the page's stats
-      // tiles. Kept in this browser for now -- read here and written only in addCompareRow /
-      // removeCompareRow, so a store shared with the page replaces those three and nothing else.
+      // Comparison rows, kept in this browser; only addCompareRow/removeCompareRow write them.
       pageCompareRows: function() {
         var n = this.currentTable, r = this.pageCompares[n]; if (r) return r;
         try { var v = JSON.parse(localStorage.getItem('page_compare:' + n) || '[]'); return Array.isArray(v) ? v : []; } catch (e) { return []; }
       },
-      // The stats views on this page a row is measured by: whole-set `tiles` only -- a `rowTiles` view is
-      // already a comparison, one bar per row. Empty on a page without filters, which offers no rows.
+      // Stats views on the page with whole-set `tiles` (rowTiles already compare).
       pageCompareViews: function() {
         if (!this.pageFilterCols.length) return [];
         var out = [];
@@ -1056,9 +1053,7 @@ function createVueApp() {
       scanTargets: function() {
         var self = this, list = (this.navConfig && Array.isArray(this.navConfig.scan)) ? this.navConfig.scan : [];
         if (this.selfUnregistered) return [];
-        // Scanning CLAIMS a code. Whoever confirms that code -- stamps a class's check-ins, verifies the
-        // door -- is the one showing it, not one claiming it: the front desk checking itself into a class
-        // it is running. Such a view is not theirs to scan to (a plain logging scan still is).
+        // Whoever confirms a code (stamps check-ins, verifies the door) doesn't scan it.
         return list.filter(function(n) { return VIEWS[n] && !self.rsvpCanStamp(n) && !self.scanCanVerify(n); }).map(function(n) {
           var v = VIEWS[n], kind = SchemaNormalize.viewKind(v);
           var label = kind === 'scan' ? self.tOr(v.scan.label, self.t('scan.code')) : self.t('rsvp.checkin_code');
@@ -1192,7 +1187,7 @@ function createVueApp() {
         return Leftovers.corpus([doc, VIEWS, this.pageCache, cfg], [doc.tables || {}], [doc.views || [], VIEWS]);
       },
       staticTranslationKeys: function() {
-        return ['app.title', 'btn.add', 'btn.show_more', 'btn.compare_add', 'compare.all', 'copy.events', 'copy.from', 'copy.to', 'copy.target', 'copy.times', 'copy.count', 'copy.skipped', 'copy.done', 'btn.show_active', 'btn.show_archived', 'btn.show_all', 'btn.show_fewer', 'btn.decrease', 'btn.increase', 'settings.linked_list', 'auth.sign_in', 'auth.with_google', 'auth.or', 'auth.email', 'auth.send_email', 'auth.check_email', 'auth.check_email_code', 'auth.code', 'kiosk.fullscreen', 'kiosk.exit', 'kiosk.lock', 'kiosk.unlock', 'kiosk.pin', 'kiosk.pin_short', 'kiosk.wrong_pin', 'btn.more',
+        return ['app.title', 'btn.add', 'btn.show_more', 'btn.compare_add', 'copy.events', 'copy.from', 'copy.to', 'copy.target', 'copy.times', 'copy.count', 'copy.skipped', 'btn.show_active', 'btn.show_archived', 'btn.show_all', 'btn.show_fewer', 'btn.decrease', 'btn.increase', 'settings.linked_list', 'auth.sign_in', 'auth.with_google', 'auth.or', 'auth.email', 'auth.send_email', 'auth.check_email', 'auth.check_email_code', 'auth.code', 'kiosk.fullscreen', 'kiosk.exit', 'kiosk.lock', 'kiosk.unlock', 'kiosk.pin', 'kiosk.pin_short', 'kiosk.wrong_pin', 'btn.more',
          'btn.edit', 'btn.copy', 'btn.show', 'btn.hide', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'cal.feed_url', 'feed.subscribe', 'feed.link_pending', 'feed.unsubscribe', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.no_blob_store', 'msg.feed_cap_reached', 'settings.feeds', 'settings.feed_regenerate', 'settings.feed_unpublish', 'settings.feed_not_republishing', 'settings.feed_all_personal', 'settings.feed_subscribers', 'settings.feed_revoking', 'settings.feed_over_cap', 'settings.feed_unpublished', 'settings.feed_revoked', 'settings.feed_sweep', 'settings.csp_reports', 'settings.csp_token', 'settings.csp_bad_token', 'settings.csp_read_failed', 'settings.csp_none', 'settings.csp_extensions', 'settings.csp_directive', 'settings.csp_blocked', 'settings.csp_count', 'settings.csp_last_seen', 'btn.refresh', 'settings.csp_rotate', 'msg.feed_swept', 'cal.err_no_source', 'cal.err_table', 'cal.err_date_col', 'cal.err_not_date', 'cal.err_title_col', 'settings.add_calendar', 'settings.cal_title', 'settings.cal_table', 'settings.cal_date_col', 'settings.cal_title_cols', 'settings.cal_add_source', 'btn.delete', 'btn.confirm_delete', 'cal.err_not_rotation', 'settings.cal_rotations', 'msg.name_taken', 'cal.err_name', 'lang.add_language', 'btn.cancel', 'timeline.empty', 'col.switch_list',
          'img.replace', 'img.upload', 'img.remove', 'img.url', 'img.view', 'img.open_original',
          'btn.close', 'btn.previous', 'btn.next',
@@ -1484,11 +1479,7 @@ function createVueApp() {
         if (SCHEMA[id]) return self.canReachTable(id);
         return true;
       },
-      // A nav entry under `requiresGrant`: shown only on a GRANT on the tables it works -- a staff screen.
-      // Owning rows of your own (a member's membership, PT request, claim) and a table being public are
-      // what every signed-in account has, so neither counts: the door tablet, an editor granted only the
-      // visit log, sees Door code and not the desk's boards, empty as those would be. Tidiness, like
-      // `roles`; the rules decide what anyone reads. A page counts by the views and tables it embeds.
+      // `requiresGrant`: needs a real grant on the entry's tables; own rows and public tables don't count.
       navGranted: function(id) {
         var allowed = this.userAllowedTables;
         if (!allowed) return true;                                   // admin / unrestricted
@@ -1940,9 +1931,7 @@ function createVueApp() {
       _gridFor: function(table) {
         var self = this, hit = null, page = null;
         var edits = function(v) { return v && !v.markdown && !v.board && (v.sources || []).length === 1 && v.sources[0] === table && !v.readonly; };
-        // A PAGE that embeds such a view (or the table itself) shows the new row as well -- My calendar
-        // embeds the workout log. Without this a log reachable only inside a page sent the add to the
-        // bare table: a screen in no nav, and for an admin every member's rows.
+        // A page embedding that view shows the new row too (My calendar's workout log).
         var pageShows = function(name) {
           var v = VIEWS[name]; if (!v || typeof v.markdown !== 'string') return false;
           var body = self.pageCache[name] != null ? self.pageCache[name] : v.markdown;
@@ -3089,9 +3078,7 @@ function createVueApp() {
         var w = this.userWritableTables;
         return !w || w.indexOf(t) >= 0;
       },
-      // The organizer of events that take walk-ins counts people at the door rather than booking a place:
-      // the booking list gives them the walk-in counter, and a calendar showing the same events (`respond`)
-      // gives them no booking control. One answer for both, or the desk books itself from the Timetable.
+      // The organizer of walk-in events counts at the door instead of booking, on lists and calendars.
       rsvpCountsWalkIns: function(name) {
         var v = VIEWS[name], c = v && v.rsvp && this.rsvpCapacity(v.rsvp);
         return !!(c && c.reserved) && this.rsvpOrganizer(name);
@@ -3444,9 +3431,7 @@ function createVueApp() {
           var parts = (s && s.durationColumn) ? String(s.durationColumn).split('.') : [];
           for (var i = 0; i < parts.length - 1; i++) { var pr = getColumnRef(null, parts[i]); if (!pr || !pr.table) break; push(pr.table); }
         });
-        // A page's or a calendar's `filters` offer a column's choices (filterOptionsFor), read from the
-        // cache: a ref's catalogue, or a list backed by a lookup table. Nothing else names that table when
-        // the column reaches the view only through a lookup -- a page of bookings filtered by class type.
+        // Filter choices come from the cache, so load the catalogue each filter column refers to.
         [].concat(v.filters || [], (v.calendar && v.calendar.filters) || []).forEach(function(c) {
           var fr = getColumnRef(null, c), fl = Columns.colIsList(SCHEMA, c);
           if (fr && fr.table) push(fr.table);
@@ -6983,8 +6968,7 @@ function createVueApp() {
         var n = this.currentTable, all = Object.assign({}, this.pageCompares); all[n] = rows; this.pageCompares = all;
         try { localStorage.setItem('page_compare:' + n, JSON.stringify(rows)); } catch (e) {}
       },
-      // The live picks become a row. Only the columns this page filters by, and only non-empty ones, so
-      // the same question asked twice is recognised and not added again.
+      // Save the live picks as a row, unless already saved.
       addCompareRow: function() {
         var picked = this.pagePicked, picks = {};
         this.pageFilterCols.forEach(function(c) { if ((picked[c] || []).length) picks[c] = picked[c].slice(); });
@@ -6998,18 +6982,13 @@ function createVueApp() {
         this.pendingConfirm = null;
         this._setCompareRows(this.pageCompareRows.filter(function(r) { return r.id !== row.id; }));
       },
-      // A page's `search`: the box beside its filters narrows the lists embedded on it, as the filters do --
-      // only where a list is drawn, never in embedRows itself, which also feeds lookups and pivots that
-      // must see every row. The same columns and rendered labels a list's own search uses (an owner is
-      // found by the name on screen as well as the email).
+      // A page's `search` narrows the lists drawn on it (not embedRows, which lookups also read).
       pageSearched: function(rows, name) {
         var p = VIEWS[this.currentTable];
         if (!p || typeof p.markdown !== 'string' || name === this.currentTable || !this.searchable || !this.searchTerm) return rows;
         return Rows.searchRows(rows, this.searchTerm, this.searchCols, this.searchLabeler);
       },
-      // Copying events (ROADMAP): a data view's `copy`, offered where the view sits on a page. Null unless
-      // the viewer may ADD to its table on their own grant -- a self-service owner adds their own rows,
-      // not a timetable's.
+      // A data view's `copy`, for viewers who may add rows on their own grant.
       copySpec: function(name) {
         var v = VIEWS[name], c = v && v.copy;
         if (!c || !c.dateColumn || (v.sources || []).length !== 1) return null;
@@ -7019,8 +6998,7 @@ function createVueApp() {
         var keep = getColumns(t).filter(function(col) { return skip.indexOf(col) < 0 && reset.indexOf(col) < 0 && !Columns.isDerived(SCHEMA, t, col); });
         return { table: t, dateColumn: c.dateColumn, keep: keep };
       },
-      // The rows a copy reads: the view's filter and the page's picks over the table, archived included --
-      // last week's classes have been filed away by the time anyone copies them.
+      // Rows a copy reads: view filter and page picks, archived included.
       _copyRows: function(name) {
         var v = this._viewWithMe(VIEWS[name]), t = v.sources[0];
         var raw = Rows.partitionRows(this.dataCache, t, 'active').concat(Rows.partitionRows(this.dataCache, t, 'archive'));
@@ -7036,7 +7014,7 @@ function createVueApp() {
         var self = this, s = this.copySpec(name), plan = this.copyPlanFor(name, form);
         if (!s || !plan.rows.length) return 0;
         Undo.action('copy', function() { plan.rows.forEach(function(p) { self._createBlankRow(s.table, { prefill: p }); }); });
-        this.notify(this.t('copy.done') + ': ' + plan.rows.length);
+        this.notify(this.t('msg.copied') + ': ' + plan.rows.length);
         return plan.rows.length;
       },
       // "Harbour · Mikko, Sanna": each picked column's labels, in the filters' order.
@@ -7047,10 +7025,9 @@ function createVueApp() {
           var opts = self.filterOptionsFor(c);
           parts.push(vals.map(function(v) { var o = opts.find(function(x) { return x.value === v; }); return o ? o.title : v; }).join(', '));
         });
-        return parts.length ? parts.join(' · ') : this.t('compare.all');
+        return parts.length ? parts.join(' · ') : this.t('settings.all');
       },
-      // One number per tile, in pageCompareCols' order: each stats view run with the row's picks, through
-      // the embed pipeline every {{view:x}} on the page takes (unmemoised: the memo is keyed by view).
+      // One value per tile: each stats view run with the row's picks.
       compareRowValues: function(row) {
         var self = this, ctx = Object.assign({}, this._embedCtx(), { rowsMemo: null, viewWithMe: function(v) { return self._viewWithMe(v, row.picks || {}); } });
         var out = [];
@@ -7061,10 +7038,7 @@ function createVueApp() {
         });
         return out;
       },
-      // A filter column's choices -- a ref's catalogue, a list's values -- and its label: shared by a
-      // calendar's and a page's filters. Each value ONCE: a `filterBy` ref names one row per parent
-      // ("Main hall (Harbour)", "Main hall (City Centre)"), but a filter narrows by the stored value,
-      // so those were one pick shown twice. Pick the parent too to tell them apart.
+      // A filter column's choices and label; a filterBy ref's repeated names are offered once.
       filterOptionsFor: function(col) {
         if (!this.colIsRef(col)) return this.getListOptions(col);
         var self = this, ref = getColumnRef(null, col), seen = {};
@@ -7073,11 +7047,7 @@ function createVueApp() {
           return (seen[o.value] = true);
         }).map(function(o) { return ref.filterBy ? { title: self.listLabel(ref.table, o.value), value: o.value } : o; });
       },
-      // A page's filters narrow one another: a value is offered while some row on the page still has it
-      // under the other picks -- pick Harbour and the rooms and classes are Harbour's. Read from the
-      // page's tables that STORE the column and every other picked one (a lookup copy is not on the
-      // cached row), archive included; with no such table the choices stay whole rather than vanish.
-      // A value already picked stays offered, so its chip can still be taken off.
+      // Page filters narrow one another: offer values still present in the page's rows under the other picks.
       pageFilterOptions: function(col) {
         var self = this, opts = this.filterOptionsFor(col), picked = this.pagePicked;
         var others = this.pageFilterCols.filter(function(c) { return c !== col && (picked[c] || []).length; });
@@ -9019,8 +8989,7 @@ function createVueApp() {
       embed: { type: Boolean, default: false },
       // An image cell whose picture is already on screen (a gallery tile): its controls without the thumbnail.
       noThumb: { type: Boolean, default: false },
-      // A cell in a table ROW. `cards` lays every option out as a card, which is a form's picker: in a grid
-      // it stretched each row to the height of the whole catalogue, so there it is the dropdown.
+      // In a table row a `cards` picker is a dropdown.
       inGrid: { type: Boolean, default: false }
     },
     methods: Object.assign({}, ROOT_PROXY, {
@@ -10867,8 +10836,7 @@ function createVueApp() {
       a: function() { return appInstance; },
       viewName: function() { return this.name || appInstance.currentTable; },
       cfg: function() { return (VIEWS[this.viewName] && VIEWS[this.viewName].rsvp) || {}; },
-      // `ahead`: the list shows that far from today, and Show more adds the same again. Without it, every
-      // upcoming event -- a gym's whole term of classes in one list.
+      // `ahead`: show that far from today; Show more adds another span.
       before: function() { return this.cfg.ahead ? Rotation.dayAfter(fmtDate(new Date()), this.cfg.ahead, this.spans) : null; },
       data: function() { return appInstance.rsvpFor(this.viewName, this.before); },
       canStamp: function() { return appInstance.rsvpCanStamp(this.viewName); },
@@ -10998,7 +10966,7 @@ function createVueApp() {
       + '</v-card>'
       + '<div v-if="!events.length" class="pa-2" style="opacity:0.6">{{ a.t(\'rsvp.none\') }}</div>'
       + '</div>'
-      // After both layouts: between the table and its v-else it split the pair and rendered both.
+      // After both layouts, so it doesn't split the v-if/v-else pair.
       + '<v-btn v-if="data.later" variant="text" size="small" prepend-icon="mdi-chevron-down" data-testid="rsvp-more" @click="spans++">{{ a.t(\'btn.show_more\') }} ({{ data.later }})</v-btn>'
       + '</component>'
   });
@@ -11283,9 +11251,7 @@ function createVueApp() {
       + '</component>'
   });
 
-  // Copy events (ROADMAP: Copying events): a section action under a view with `copy`, and its dialog --
-  // the range, where it lands, how many times, and a preview of what that will do before anything is
-  // written. The page's picks already narrow which rows; the dialog only adds the dates.
+  // Copy events: the button and dialog under a view with `copy`.
   app.component('copy-events', {
     props: { view: String },
     data: function() {
@@ -11296,8 +11262,7 @@ function createVueApp() {
       a: function() { return appInstance; },
       plan: function() { return this.open ? this.a.copyPlanFor(this.view, this.form) : { rows: [], skipped: 0, first: '', last: '' }; }
     },
-    // `to` never sits before `from`: moving the start past the end brings the end along (a one-day range),
-    // and the end's picker starts at the start.
+    // Keep `to` on or after `from`.
     watch: {
       'form.from': function(v) { if (v && (!this.form.to || this.form.to < v)) this.form.to = v; }
     },
@@ -11329,10 +11294,7 @@ function createVueApp() {
       + '</div>'
   });
 
-  // A page's comparison rows (ROADMAP: Comparing statistics): the Add button and the table of saved
-  // picks, one line of the page's stats tiles each. Its own component because it sorts its own lines
-  // (SORT_UI, like rsvp and pivot): by a tile's number; unsorted, in the order they were added. The
-  // choice is kept per page in this browser -- a viewer's preference, which stays here once rows are shared.
+  // Comparison rows: Add button and table, sortable by tile; the sort is kept per page in this browser.
   app.component('compare-rows', {
     props: { page: String },
     data: function() {
@@ -11390,7 +11352,7 @@ function createVueApp() {
       + '<template v-for="(blk, bi) in a.pageBlocks" :key="bi">'
       + '<div v-if="blk.html" v-html="blk.html"></div>'
       + '<embed-view v-else :type="blk.embedType" :name="blk.embedName" :part="blk.embedPart" :both="blk.embedBoth"></embed-view>'
-      // The comparison sits under the stats it compares, so the live tiles read first and the saved rows after.
+      // The comparison sits under the stats it compares.
       + '<compare-rows v-if="!blk.html && blk.embedName === a.pageCompareAnchor" :page="a.currentTable" :key="\'cmp-\' + a.currentTable"></compare-rows>'
       + '<copy-events v-if="!blk.html && blk.embedType === \'view\' && a.copySpec(blk.embedName)" :view="blk.embedName"></copy-events>'
       + '</template>'

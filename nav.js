@@ -50,9 +50,7 @@
       // "my chores", "my rewards" — which an admin who only approves is not. Both are TIDINESS, not
       // access control: what a member may read or write is decided by their table grants, and these only
       // keep the wrong menu out of the wrong hands. Put either on a group to hide the whole branch.
-      // `roles` names who sees it, for a deployment whose staff are not admins (a front desk running as an
-      // editor): ["admin", "editor"] for staff screens, ["viewer"] for a member's own pages. The two flags
-      // above are its shorthand, ["admin"] and everyone-but-admins.
+      // `roles`: who sees the entry; the two flags above are its shorthand.
       var role = opts.role || (opts.isAdmin ? 'admin' : '');
       if (Array.isArray(it.roles) && it.roles.indexOf(role) < 0) return null;
       if (it.adminOnly && !opts.isAdmin) return null;
@@ -94,8 +92,7 @@
       if (it.adminOnly !== undefined && typeof it.adminOnly !== 'boolean') errs.push('Nav -> `adminOnly` must be true or false (got ' + JSON.stringify(it.adminOnly) + ')');
       if (it.requiresGrant !== undefined && typeof it.requiresGrant !== 'boolean') errs.push('Nav -> "' + (it.view || it.table || it.group) + '": `requiresGrant` must be true or false');
       if (it.hideFromAdmin !== undefined && typeof it.hideFromAdmin !== 'boolean') errs.push('Nav -> `hideFromAdmin` must be true or false (got ' + JSON.stringify(it.hideFromAdmin) + ')');
-      // `roles`: a non-empty list of the three roles, and the one form -- beside a flag, one of them is a
-      // second answer to the same question.
+      // `roles`: some of the three roles, and not beside a flag.
       if (it.roles !== undefined) {
         var ROLES = ['admin', 'editor', 'viewer'];
         if (!Array.isArray(it.roles) || !it.roles.length || it.roles.some(function(r) { return ROLES.indexOf(r) < 0; })) errs.push('Nav -> "' + (it.view || it.table || it.group) + '": `roles` must list some of "admin", "editor", "viewer" (got ' + JSON.stringify(it.roles) + ')');

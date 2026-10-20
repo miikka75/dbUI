@@ -145,9 +145,7 @@
   // schema -> schema labels -> app UI labels -> sample rows, and each step is meant to layer onto the
   // one before it (translations merge per language, exactly as importing them one at a time does).
   //
-  // A file's `asOf` moves ITS rows to `opts.today` (rebaseDates). The column types come from the schema
-  // among the files, else `opts.tables` (the schema already installed): the file picker sorts by name,
-  // so gym-data.json arrives before gym-schema.json and the schema has to be found first.
+  // A file's `asOf` moves its rows to `opts.today`; column types come from the schema among the files, else `opts.tables`.
   function mergeFiles(files, opts) {
     opts = opts || {};
     var out = {};
@@ -205,14 +203,8 @@
     return out;
   }
 
-  // --- Sample rows that stay current ---------------------------------------------------------------
-  // A data file may say which day it was written for (`"asOf": "2026-10-12"`). Its rows are then moved
-  // so that day lands on `today`: the class booked "tomorrow" stays tomorrow and last week's attendance
-  // stays last week's, however old the file is. Without it every "this week" tile drifts to zero as the
-  // file ages. Only the columns the schema types `date` or `datetime` move, plus the row stamps; ids that
-  // happen to contain a date are names, not dates, and stay as they are.
+  // --- Sample rows that stay current: `asOf` -> today, date/datetime columns and stamps only (local days, so DST keeps the time).
   //
-  // A datetime moves by calendar days in local time, so a 07:00 class is still at 07:00 across a DST change.
   var STAMPS = ['created_at', 'updated_at'];
   function ymd(d) { return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
   function dayNumber(s) { var p = String(s).split('-'); return Date.UTC(+p[0], +p[1] - 1, +p[2]) / 864e5; }

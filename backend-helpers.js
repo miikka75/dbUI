@@ -315,18 +315,8 @@
     },
 
 
-    // Rows a table's `archiveAfter` policy has aged out of the ACTIVE partition. Two clocks:
-    //   "archiveAfter": { "column": "status", "values": ["approved","rejected"], "after": "7d" }
-    //     A row qualifies once `column` holds one of `values` AND the row has gone that long without an
-    //     edit. The clock is `updated_at`, which every write stamps -- so it is "settled for N days", not
-    //     "N days since the status changed": correcting a note afterwards restarts it, which is the
-    //     forgiving reading (a row someone is still touching is not finished with).
-    //   "archiveAfter": { "dateColumn": "starts_at", "after": "2h" }
-    //     The row's OWN date: a class is over two hours after it starts, whoever edits it since (the
-    //     desk's walk-in count must not restart it). `column`/`values` may narrow it further.
-    // How long is `after`, a duration ("30min", "2h", "1d", "2w", "1m" -- Rotation.parseDuration). A row
-    // with no readable clock is left alone rather than archived on sight.
-    // Pure over (rows, cfg, now) so it is testable in Node and identical wherever it runs.
+    // Rows `archiveAfter` has aged out of the active partition: a finished `column`/`values` idle for `after`
+    // (clock: updated_at), or `after` past the row's own `dateColumn`. Pure over (rows, cfg, now).
     autoArchiveIds: function(rows, cfg, now) {
       if (!cfg) return [];
       var byValue = !!cfg.column || cfg.values !== undefined;
@@ -335,7 +325,7 @@
       var c = Rot().minusDuration(now, cfg.after);
       if (!c) return [];
       var cutoff = c.getTime();
-      // A bare date is the START of that day where the reader is, like every other date in the app.
+      // A bare date counts from the start of that day, local time.
       var when = function(v) {
         var m = /^(\d{4})-(\d\d)-(\d\d)$/.exec(String(v || ''));
         return m ? new Date(+m[1], +m[2] - 1, +m[3]).getTime() : Date.parse(v);

@@ -132,15 +132,8 @@
     h ^= h >>> 16;
     return pal[(h >>> 0) % pal.length];
   }
-  // Copying dated rows forward (ROADMAP: Copying events). Pure: which rows to create, never a write.
-  //   rows      the candidates (the page's rows, archived included); `existing` is every row of the table
-  //   o         { dateColumn, from, to, target, times, keep } -- dates are 'YYYY-MM-DD'
-  // A row dated in [from, to] is copied `times` times: first so `from` lands on `target`, then one span
-  // (to - from + 1 days) further each time. It moves by whole days in LOCAL time, so a 07:00 class stays
-  // 07:00 across a DST change. Only the `keep` columns and the date are carried -- the caller leaves out
-  // ids, stamps and what a copy starts without. A copy that already exists (the same kept values at the
-  // same moment) is skipped, so running it twice adds nothing.
-  //   -> { rows: [prefill], skipped, first, last } -- first/last: the dates the copies span
+  // Plan a copy of the rows dated in [from, to], `times` spans on from `target`, by local days.
+  // Carries only `keep` + the date; skips copies that already exist. -> { rows, skipped, first, last }
   function copyPlan(rows, existing, o) {
     var none = { rows: [], skipped: 0, first: '', last: '' };
     var isDay = function(s) { return /^\d{4}-\d\d-\d\d$/.test(String(s || '')); };

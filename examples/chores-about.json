@@ -2,6 +2,6 @@
   "description": "A household chore tracker — points, approvals, rewards, a weekly rota and a shopping list.",
   "notes": {
     "18": "Adds My calendar: your own chores and weekly tasks, and a Subscribe button that puts them in your phone or computer calendar. Each person gets their own private link, in the language they pick; unsubscribing empties it. Links are only issued where the deployment has file storage.",
-    "19": "No change in how it works: approved and rejected chores are still filed away after 7 days, and bought shopping after 3; the schema now says so as a duration (\"7d\")."
+    "19": "No visible change: archive timing is written as a duration (\"7d\")."
   }
 }

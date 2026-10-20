@@ -12,9 +12,7 @@
 // board demo (tickets/ticket_stages) was added to the JSON and never to the generator, so regenerating
 // silently deleted it. The files are the only copy now, and this only applies them.
 //
-// Dates: a data file that names the day it was written for (`"asOf"`) is moved so that day is today
-// (Examples.rebaseDates, the same step the example picker runs), so "this week" and "upcoming" stay
-// current however old the file is. A file without `asOf` keeps the dates it says.
+// Dates: a data file's `asOf` moves its rows to today (Examples.rebaseDates).
 //
 // Users, profiles and user-linked-list links are seeded here too but are DELIBERATELY NOT in the bundle:
 // access grants and identity are per-deployment security data, not portable content you would import.
@@ -50,14 +48,11 @@ const CHORES_MEMBER = { chore_log: 'rw', reward_claim: 'rw', home_shopping: 'rw'
 // A member's access is the gym schema's own `newUser` grant -- what approving a request gives -- so a
 // seeded member and an approved one read exactly the same tables.
 const GYM_MEMBER = require('../examples/gym-schema.json').newUser.tables;
-// The front desk is an EDITOR, not an admin: it writes the tables it works and reads the catalogues, and has
-// no grant at all on a member's training (workouts, steps) -- private by the rules, not by a hidden page.
-// Approving members, the schema and settings stay with the owner (local@dev, the admin).
+// The front desk is an editor: no grant on members' training; approvals stay with the owner admin.
 const GYM_DESK = { classes: 'rw', bookings: 'rw', visits: 'rw', memberships: 'rw', pt_sessions: 'rw', reward_claims: 'rw',
   news: 'rw', coach_library: 'rw', pauses: 'r', ref_gyms: 'r', ref_rooms: 'r', ref_class_types: 'r', ref_plans: 'r',
   ref_exercises: 'r', ref_rewards: 'r' };
-// The tablet at the door: it shows the changing door code and confirms members' claims, so it writes the
-// visit log and reads the gyms it picks from -- nothing else. Lock it in the code's Full screen with a PIN.
+// The door tablet: writes the visit log, reads the gyms.
 const GYM_DOOR = { visits: 'rw', ref_gyms: 'r' };
 // The members whose bookings fill the front desk's statistics (examples/gym-data.json).
 const GYM_MORE = ['Liisa', 'Juha', 'Mari', 'Tuomas', 'Emma', 'Ville', 'Sara', 'Oskari', 'Helmi', 'Niko'];

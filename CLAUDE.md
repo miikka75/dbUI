@@ -49,6 +49,10 @@ e.g. why a link is not there yet.
 
 ## Workflow
 
+- Keep text short: a code comment is one line saying why, only where the code doesn't; ROADMAP and
+  SCHEMA.md entries are a few bullets; PR descriptions list the changes and the test results. Don't copy
+  the length of existing comments.
+
 - Proposals go into `ROADMAP.md` before they are implemented.
 - Tests: `cd dev && npm test` (Node), `npx playwright test --config=playwright.config.js` (UI),
   `npm run typecheck`.

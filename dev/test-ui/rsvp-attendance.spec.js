@@ -581,8 +581,6 @@ test('a viewer adds their own row from a calendar day (self-service is decided b
   await expect.poll(async () => ((await (await page.request.post('/api/getTableData', { data: { tableId: 'logs', tab: 'active' }, headers: ADMIN })).json()).rows || []).map((r) => r.owner)).toEqual(['ann@x']);
 });
 
-// The log is reachable only inside the page that holds the calendar (the gym's My calendar): the add
-// stays there, where the embedded log shows the new row, instead of opening the bare table.
 test('a day-add on a page that embeds the log stays on that page', async ({ page }) => {
   const schema = JSON.parse(JSON.stringify(SCHEMA));
   schema.tables.logs = { ownerWritable: ['done_on', 'what'], columns: [{ name: 'owner', type: 'owner' }, { name: 'done_on', type: 'date' }, { name: 'what', type: 'text' }] };
@@ -735,8 +733,6 @@ test('ahead: the next days only, with Show more counting the rest', async ({ pag
   await expect(page.locator('[data-testid="rsvp-more"]')).toHaveCount(0);   // nothing left beyond
 });
 
-// Scanning claims a code; whoever stamps the check-ins is the one showing it. The organizer has no scan
-// target here, so no Scan button, while a member keeps both.
 test('the organizer who stamps check-ins does not scan to check in', async ({ page, browser }) => {
   await setupCheckin(page);
   const schema = JSON.parse(JSON.stringify(SCHEMA));
@@ -758,8 +754,6 @@ test('the organizer who stamps check-ins does not scan to check in', async ({ pa
   await member.close();
 });
 
-// The Timetable shows the booking list's events with their booking control (`respond`). The organizer who
-// counts walk-ins books nothing there either: places left, no buttons. A member keeps the buttons.
 test('a calendar of walk-in events gives the organizer no booking control', async ({ page, browser }) => {
   const schema = JSON.parse(JSON.stringify(SCHEMA));
   schema.tables.practices.columns.push({ name: 'capacity', type: 'number' }, { name: 'booked', type: 'number' }, { name: 'walk_ins', type: 'number' });

@@ -209,27 +209,16 @@ page bodies, or any other table. `validateSchema` refuses a public table with an
 own rows) or with a `ref` to a table that is not public (a visitor would see its keys).
 
 ### A page's `search`
-A page may carry `search` like a list does (`["owner"]`, or `true` for every column): a search box above
-its `filters` narrows the lists embedded on it — by the stored value and by what the list shows (a member
-is found by name as well as email). It narrows lists only; stats tiles and lookups read every row.
+`search` on a page (`["owner"]`, or `true`) puts a search box above its filters that narrows its embedded
+lists, by stored value and shown label. Stats and lookups are not narrowed.
 
 ### `copy` — copy a range of dated rows forward
 ```json
-{ "name": "class_list", "kind": "data", "sources": ["classes"],
-  "copy": { "dateColumn": "starts_at", "reset": ["booked", "walk_ins"] } }
+"copy": { "dateColumn": "starts_at", "reset": ["booked", "walk_ins"] }
 ```
-Embedded on a page with `filters`, the view gets a **Copy events** button for anyone who may add rows to
-its table on their own grant (a self-service owner does not). The dialog takes **from**, **to**, **copy to**
-(where `from` lands) and **times** (how many spans in a row), and previews the count before writing.
-
-- Copies the rows the page shows — the view's `filter` and the page's picks — dated in the range,
-  **archived rows included**. Each moves by whole days in local time (07:00 stays 07:00 across DST);
-  `times: 4` lays the range down four times, one span apart.
-- Not copied: ids, stamps, archive status, the owner, computed columns and the **`reset`** columns, which
-  start at their `default` (no bookings, no walk-ins).
-- A copy that already exists — same values at the same moment — is skipped, so running it twice adds
-  nothing. One undo takes the whole copy back.
-- `validateSchema` requires one source, a `date`/`datetime` `dateColumn`, and `reset` columns of it.
+On a data view embedded in a page with `filters`: a **Copy events** button for viewers with a write grant.
+It copies the rows the page shows (archived included) dated from–to, `times` spans on from the target
+date, by whole local days. `reset` columns start at their default; existing copies are skipped.
 
 ### `archiveAfter` — file finished rows away on their own
 ```json
@@ -255,17 +244,9 @@ hand. Reversible from the archive tab like any other archived row.
   anyway (write access to the whole mirror cluster), and does nothing on a read-only grant. There is no
   server-side scheduler, so rows age out the next time somebody with rights opens the app — a
   concurrent second run is harmless.
-- **`after` — how long, as a duration:** `"30min"`, `"2h"`, `"1d"`, `"2w"`, `"1m"`, `"1y"` — a whole
-  number and a unit. The interval vocabulary (`m` is months there too; minutes are `min`), so a string
-  means one thing across a schema. `"0d"` archives as soon as the row reaches a listed value. Both
-  clocks are timestamps, so nothing is rounded to whole days. (`days: 7` was the first form of
-  `after: "7d"`; it is rejected at load.)
-- **`dateColumn` — the row's own date as the clock.** `{ "dateColumn": "starts_at", "after": "2h" }` files a
-  class away two hours after it started, however often the desk edits it since (a walk-in count would
-  restart the `updated_at` clock). `column`/`values` are optional with it (both given: both must hold),
-  and the table needs no `updated_at`. A bare date counts from the start of that day.
-- **Archived is not gone.** Calendars and lookups read archived rows too, so a class filed away still
-  dates its bookings on members' calendars; views with `includeArchive` keep counting it.
+- **`after`**: `"30min"`, `"2h"`, `"1d"`, `"2w"`, `"1m"` (months), `"1y"`; `"0d"` archives at once.
+- **`dateColumn`**: age from the row's own date instead of `updated_at` (`column`/`values` optional).
+- Calendars and lookups still read archived rows.
 - **Mind what totals the table feeds.** Archiving removes a row from every ordinary view, so a
   leaderboard or balance over the same table needs `includeArchive: true` or it will quietly shed
   points as rows age out — the chores example turns it on for exactly that reason.
@@ -299,7 +280,7 @@ This list is **closed** — a property not on it is never read, and `validateSch
 | `allowNew` | Allow adding new list values (combobox) |
 | `sorted` | Sort dropdown items alphabetically |
 | `multiple` | Hold **several** values instead of one; stored as an **array** of strings, edited as a chip input. Cardinality is all that ever separated `multiselect` from `select`, so it is a flag rather than a type — which means it also composes with **`ref`**: `{"type": "ref", "table": "ref_chores", "valueCol": "chore", "multiple": true}` is a reference holding several values, which no type name could express. Before this, a schema wanting that had to point a `multiselect` at the lookup table through `list`; the values were right but nothing knew a reference was involved — `filterBy` could not apply, the ref editor did not see it, and the lookup table was invisible to the dependency loader. Ignored with `picker` (a multi-value cell is already chips) |
-| `picker` | **How the value is chosen** — one vocabulary for every choice in the app (an rsvp view's `picker` uses it too): `"dropdown"` (the default; same as omitting it), `"chips"` (selectable chips), `"toggle"` (segmented buttons), `"cards"` (each option's catalogue row as a card showing its other columns — a price, a duration — the chosen one outlined). Every widget but the dropdown lays out the dropdown's own options, so it works on a `list` or a `ref` column alike (and `filterBy` narrows them identically); `cards` needs a catalogue row behind each option, so a `ref` or a `list` naming a lookup table. In a table row `cards` is the dropdown: a card per option belongs to a form, and in a grid it made every row as tall as the catalogue. Pressing the chosen option again clears it. A picker that cannot apply — no options (a text column), `multiple` (already chips), `allowNew` (needs typing), cards over a plain list — is named by `validateSchema` rather than quietly falling back to a dropdown |
+| `picker` | **How the value is chosen** — one vocabulary for every choice in the app (an rsvp view's `picker` uses it too): `"dropdown"` (the default; same as omitting it), `"chips"` (selectable chips), `"toggle"` (segmented buttons), `"cards"` (each option's catalogue row as a card showing its other columns — a price, a duration — the chosen one outlined). Every widget but the dropdown lays out the dropdown's own options, so it works on a `list` or a `ref` column alike (and `filterBy` narrows them identically); `cards` needs a catalogue row behind each option, so a `ref` or a `list` naming a lookup table. In a table row `cards` is a dropdown. Pressing the chosen option again clears it. A picker that cannot apply — no options (a text column), `multiple` (already chips), `allowNew` (needs typing), cards over a plain list — is named by `validateSchema` rather than quietly falling back to a dropdown |
 | `syncFrom` | Mirror this column's value from another table |
 | `listSwitch` | An **alternate** list the cell can be toggled to: `{ "label": "External", "list": "external_workers" }`. The label is the toggle's text; the list is auto-seeded like any other |
 | `stamped` | The app fills this column in and **nobody rewrites it** — it binds a grant-holder, not just an owner. Needs `defaultFrom: "@me"` and a `list`; at most one per table, because the rules layers resolve ONE column and cannot loop a map. See **`stamped`** below |
@@ -1343,9 +1324,8 @@ workouts. The picks are kept in the reader's browser, per calendar — a conveni
 A source may name an rsvp view over its own table — `{ "table": "classes", "dateColumn": "starts_at", "respond":
 "class_booking" }` — and each event then carries that view's booking control and places left, under the same
 rules as the booking list (full, `closeBefore`, frozen once attendance is marked). A past event, which the
-rsvp view no longer lists, gets none. The rules are the root's (`rsvpLocked` & co.), shared by both screens —
-including that the organizer of events taking walk-ins (`capacity.reserved`) counts people at the door
-rather than booking: the list gives them the walk-in counter, the calendar the places left and no control.
+rsvp view no longer lists, gets none. The rules are the root's (`rsvpLocked` & co.), shared by both screens;
+an organizer of walk-in events gets no booking control.
 
 The other half — a member's bookings on their own calendar — needs no calendar feature: a booking has no
 date of its own, so give the responses table a computed column that reads its event's, and use it as the
@@ -1509,11 +1489,8 @@ The events live in one table; responses in another that has an **`owner` column*
   opened this way.
 
 ### `ahead` — the next few days, and Show more
-`"ahead": "3d"` lists the events from today up to (not including) three days on — today and the next
-two — and **Show more (N)** below the list adds the same span again, N being how many upcoming events are
-still beyond it. The duration vocabulary `archiveAfter` uses (`"1w"`, `"2d"`; `"12h"` counts from now).
-Without it the list shows every upcoming event. The window is the list's only: check-in and scanning see
-today regardless.
+`"ahead": "3d"` lists today and the next two days; **Show more (N)** adds another span. Without it, every
+upcoming event.
 
 ### `closeBefore` — booking from home stops before the start
 
@@ -1878,7 +1855,7 @@ The two are mutually exclusive; declaring both is a load-time error.
 
 | Key | Meaning |
 |-----|---------|
-| `tiles` | Explicit tiles. Each: `{ label, agg, column, when, goal, display, decimals, divide, plus }`; `agg: "distinct"` counts different values (people, not visits). `plus: [{ agg, column, when }]` adds more counts or sums, each over its own rows — a total over two kinds of row, e.g. check-ins (`when: { attendance: "attended" }`) plus `{ "agg": "sum", "column": "walk_ins" }`. `divide` shows the number in a bigger unit — `"divide": 60` turns minutes into hours — rounded to `decimals` (default 1) |
+| `tiles` | Explicit tiles. Each: `{ label, agg, column, when, goal, display, decimals, divide, plus }`; `agg: "distinct"` counts different values (people, not visits). `plus: [{ agg, column, when }]` adds more counts or sums, each over its own rows. `divide` shows the number in a bigger unit — `"divide": 60` turns minutes into hours — rounded to `decimals` (default 1) |
 | `rowTiles` | `{ label, value, goal?, order?, skipUntargeted? }` — one tile per row instead |
 | `goal` | Default bar target for every tile: a positive number, `"max"` (scale to the largest tile), a **ladder** of levels (below), or `{ "column": "<col>" }` to read the target off each row (`rowTiles` only). No goal = no bar, just a number |
 | `display` | `"bar"` (default) or `"number"`. Per-tile, or view-wide as a default |
@@ -3097,14 +3074,9 @@ the role is `viewer` or `editor`, never `admin`. `validateSchema` names an unkno
   reading "My tasks". Hiding the page is what keeps that exemption correct in the one place it belongs
   (the standalone matrix).
 - Setting **both** on one entry hides it from every user, which is never the intent — rejected at load.
-- **`roles`** (`["admin", "editor", "viewer"]`, any of them) — who sees the entry, when staff are not all
-  admins: a front desk running as an editor gets `["admin", "editor"]` screens, members `["viewer"]` ones.
-  `adminOnly` is `["admin"]` and `hideFromAdmin` everyone but admins; an entry uses one form, not both.
-- **`requiresGrant`** (boolean; on a group, its whole branch) — show the entry only to an account with a
-  **grant** on the tables it works (every source of a view; every view a page embeds). Owning rows of your
-  own and a table being public do not count, since every signed-in account has those: a door tablet
-  granted only `visits` sees Door code, not the desk's boards over tables where it merely could keep rows
-  of its own. Admins always pass. Tidiness, like `roles`.
+- **`roles`** (some of `"admin"`, `"editor"`, `"viewer"`) — who sees the entry; not beside `adminOnly`/`hideFromAdmin`.
+- **`requiresGrant`** (boolean, inherited by a group's branch) — needs a real grant on the entry's tables;
+  own rows and public tables don't count.
 - Both are **tidiness, not access control**: what a member may read or write is decided by their table
   grants, and an entry hidden here is still reachable if something else links to it. Pair `adminOnly`
   with a read-only (`'r'`) grant when the point is that members must not change the data.
@@ -3114,10 +3086,8 @@ the role is `viewer` or `editor`, never `admin`. `validateSchema` names an unkno
   app's default; else `"add"`, the add-a-row button grids have always had on a phone. `"scan"` needs
   `nav.scan`. The gym sets `"scan"`, so its corner button opens the camera everywhere.
 - **`scan`** (string[], optional) — **where the scan button sends codes**: scan views, and rsvp views with
-  `checkin`. The button is the corner button with `fab: "scan"`. Scanning CLAIMS a code, so a view is left
-  out for whoever CONFIRMS its codes — the organizer who stamps a class's check-ins, the account that
-  verifies a door scan (`verify`). The front desk has nothing to scan to and no scan button; a plain
-  logging scan (no `verify`) stays. It opens the camera where the browser can decode codes in the page
+  `checkin`. The button is the corner button with `fab: "scan"`. Left out for whoever confirms the codes
+  (stamps check-ins, verifies a door). It opens the camera where the browser can decode codes in the page
   (`BarcodeDetector`: Android Chrome), and a typing field where it cannot (iPhone Safari, desktop Chrome
   on Windows) or when the picture held no code. A QR the app drew carries `?view=…&scan=…` and goes to
   its own view. A **typed** code finds its own way too, with no question asked: a printed code is

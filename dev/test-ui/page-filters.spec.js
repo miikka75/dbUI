@@ -54,8 +54,6 @@ test('page filters narrow the embeds: a coach only the rows that have one, a ven
   await expect.poll(values).toEqual(['1', '1']);          // remembered in this browser
 });
 
-// The filter's catalogue is named by no embedded source: bookings reach the class type only through a
-// lookup into classes, so opening the page has to load it for the filter itself (the gym's statistics).
 test('a ref filter reached only through a lookup lists its catalogue', async ({ page }) => {
   await setup(page);
   const schema = {
@@ -125,8 +123,6 @@ test('Approve grants the schema\'s newUser access: a viewer with the tables it n
   expect(err).toContain('missing table "nope"');
 });
 
-// A room belongs to a gym, so two gyms may each have a "Hall". The editor names the row ("Hall (North)");
-// a filter narrows by the stored value, so it offers "Hall" once.
 test('a filter on a filterBy ref offers each value once', async ({ page }) => {
   await setup(page);
   const schema = {
@@ -229,7 +225,7 @@ test('comparison rows: the picks saved as rows, each with its own numbers, kept 
   await page.keyboard.press('Escape');
   await page.locator('[data-testid="compare-add"]').click();
   const table = async () => (await page.locator('[data-testid="compare-row"]').allInnerTexts()).map((t) => t.split(/\s+/).join(' ').trim());
-  const all = await page.evaluate(() => appInstance.t('compare.all'));
+  const all = await page.evaluate(() => appInstance.t('settings.all'));
   // visits are left alone by a coach pick, and narrowed by a venue one
   await expect.poll(table).toEqual([all + ' 3 2', 'Kim 3 1', 'South · Lee 2 1']);
   await page.reload();
@@ -253,8 +249,6 @@ test('comparison rows: the picks saved as rows, each with its own numbers, kept 
   await expect.poll(table).toEqual([all + ' 3 2', 'South · Lee 2 1']);
 });
 
-// Copy events: the page's picks choose which rows, the dialog the dates; archived rows count, a second run
-// adds nothing, and one undo takes the copy back.
 test('copy events: a filtered range copied forward, once however often it runs', async ({ page }) => {
   await setup(page);
   const schema = {
@@ -309,8 +303,6 @@ test('copy events: a filtered range copied forward, once however often it runs',
   await expect.poll(async () => (await rows()).length).toBe(3);                      // one undo, the whole copy
 });
 
-// A page's `search` narrows the lists on it, by what is stored and what is shown (a member's name), and
-// leaves its stats tiles reading every row.
 test('a page search narrows its lists, by email or by the name on screen', async ({ page }) => {
   await setup(page);
   const schema = {

@@ -207,8 +207,6 @@ test('a table\'s computed column: shown in views and forms, never edited, never 
   expect(await page.evaluate(() => appInstance.cellReadonly(appInstance.currentData[0], 'ready_on', 'mine'))).toBe(true);
 });
 
-// In a table ROW the cards are the dropdown: a card per option is a form's picker, and in a grid it made
-// every row as tall as the catalogue (the front desk's memberships list).
 test('a cards column in a table row is a dropdown', async ({ page }) => {
   await setup(page);
   await page.request.post('/api/putRow', { data: { tableId: 'claims', tab: 'active', data: { id: 'c1', owner: 'ann@x', reward: 'Bottle' } }, headers: ADMIN });

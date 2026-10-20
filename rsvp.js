@@ -16,8 +16,7 @@
 //   today        'YYYY-MM-DD' — events with dateColumn < today are dropped unless upcoming === false
 //   upcoming     default true (only future/today events); false = all
 //   limit        max events after sorting (optional)
-//   before       'YYYY-MM-DD' -- events on or after it are left out and counted as `later` (optional):
-//                a booking list showing the next few days, with the rest one press away
+//   before       'YYYY-MM-DD': later events are left out and counted as `later` (optional)
 //   checkinColumn response column a member types the event's shared check-in code into (optional)
 //   capacity     { column, count, holds } from the response table's `capacity` (optional): each event
 //                then carries its limit, how many hold a place (the server's count), whether it is full,

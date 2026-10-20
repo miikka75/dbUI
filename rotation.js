@@ -94,17 +94,13 @@
     return { count: n, unit: u };
   }
 
-  // A DURATION in the same vocabulary, plus the units an interval never needed: "30min", "2h", "1d", "2w",
-  // "1m", "1y". `m` stays MONTHS, as in every interval, so one string means one thing across a schema;
-  // minutes are `min`. Whole numbers only ("90min", not "1.5h"). -> { count, unit } or null.
+  // A duration: whole number + min|h|d|w|m|y (`m` is months, as in intervals) -> { count, unit } or null.
   function parseDuration(spec) {
     var m = /^(\d+)\s*(min|h|d|w|m|y)$/.exec(String(spec == null ? '' : spec).trim().toLowerCase());
     return m ? { count: parseInt(m[1], 10), unit: m[2] } : null;
   }
 
-  // `when` moved back by a duration: minutes to weeks by the clock, months and years on the calendar --
-  // never days/30. A day the shorter month lacks becomes its last (a month back from 31 March is 28 or 29
-  // February, not Date's overflow into 3 March). Null when the spec or the instant is unreadable.
+  // `when` minus a duration; months clamp to the month's last day (31 Mar - 1m = 28/29 Feb).
   function minusDuration(when, spec) {
     var p = parseDuration(spec);
     var d = new Date(when instanceof Date ? when.getTime() : Date.parse(when));
@@ -119,9 +115,7 @@
     return new Date(d.getTime() - p.count * { min: 60000, h: 3600000, d: 86400000, w: 604800000 }[p.unit]);
   }
 
-  // A DAY a duration ahead of `day` ('YYYY-MM-DD'), on the calendar: "3d" from Monday is Thursday, whatever
-  // a DST change does to the hours between. Units below a day are measured from now instead, since a day
-  // has no hour -- "12h" ahead is the day it will be in twelve hours. `times` repeats the duration.
+  // The day a duration (x `times`) after `day`, in calendar days; h/min count from now.
   function dayAfter(day, spec, times) {
     var p = parseDuration(spec), n = (times > 0 ? times : 1);
     if (!p) return null;
