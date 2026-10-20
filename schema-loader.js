@@ -278,10 +278,23 @@ function validateSchema() {
     if (!aa) continue;
     var acols = SCHEMA[at].columns || {};
     if (!SCHEMA[at].archivable) errors.push('table "' + at + '": `archiveAfter` needs `archivable: true` (there is no archive partition to move rows into)');
-    if (!aa.column || !(aa.column in acols)) errors.push('table "' + at + '": `archiveAfter.column` "' + (aa.column || '') + '" is not a column of the table');
-    if (!Array.isArray(aa.values) || !aa.values.length) errors.push('table "' + at + '": `archiveAfter.values` must be a non-empty array of the values that count as finished');
-    if (!isFinite(Number(aa.days)) || Number(aa.days) < 0) errors.push('table "' + at + '": `archiveAfter.days` must be a non-negative number');
-    if (!('updated_at' in acols)) errors.push('table "' + at + '": `archiveAfter` measures from `updated_at`, so the table must declare that column (`{ "name": "updated_at", "type": "text", "hidden": true }`)');
+    // Two clocks: the row's own `dateColumn`, or `updated_at` behind a finished `column`/`values`. With a
+    // dateColumn the status pair is optional; without one it is the only thing that says "finished".
+    var aaDate = aa.dateColumn !== undefined;
+    if (aaDate) {
+      var adef = acols[aa.dateColumn], aty = adef && (typeof adef === 'object' ? adef.type : adef);
+      if (aty !== 'date' && aty !== 'datetime') errors.push('table "' + at + '": `archiveAfter.dateColumn` "' + aa.dateColumn + '" must be a date or datetime column of the table');
+    }
+    if (!aaDate || aa.column !== undefined || aa.values !== undefined) {
+      if (!aa.column || !(aa.column in acols)) errors.push('table "' + at + '": `archiveAfter.column` "' + (aa.column || '') + '" is not a column of the table');
+      if (!Array.isArray(aa.values) || !aa.values.length) errors.push('table "' + at + '": `archiveAfter.values` must be a non-empty array of the values that count as finished');
+    }
+    // How long: `after`, a duration. `days` was its first form and is gone; one left in a schema would
+    // be ignored and nothing would ever archive, so name the replacement.
+    if (aa.days !== undefined) errors.push('table "' + at + '": `archiveAfter.days` is gone -- write `after: "' + aa.days + 'd"`');
+    if (aa.after === undefined) errors.push('table "' + at + '": `archiveAfter` needs `after` -- how long before a row is filed away: "30min", "2h", "1d", "2w", "1m"');
+    else if (!Rotation.parseDuration(aa.after)) errors.push('table "' + at + '": `archiveAfter.after` "' + aa.after + '" is not a duration -- a whole number and a unit: min, h, d, w, m (months), y. Minutes are "min"; "m" is months, as in every interval');
+    if (!aaDate && !('updated_at' in acols)) errors.push('table "' + at + '": `archiveAfter` measures from `updated_at`, so the table must declare that column (`{ "name": "updated_at", "type": "text", "hidden": true }`) -- or name the row\'s own `dateColumn`');
   }
   // `partitionLabels` renames the two tabs of a `{{view:x@both}}` embed. Its values are TRANSLATION
   // KEYS, and both halves of it fail silently: an unknown partition key is simply never read, and a
@@ -774,6 +787,18 @@ function validateSchema() {
         else if (ag !== 'count' && !t.column) errors.push('stats "' + v + '" ' + at + ': `' + ag + '` needs a `column`');
         stCol(t.column, at);
         stGoalOk(t.goal, at, false);
+        // `plus` adds to the tile, so only what adds up: a count or a sum. A `latest` or a streak in it
+        // would add a status or a run length to a number, and still render as one.
+        if (t.plus !== undefined) {
+          if (!Array.isArray(t.plus) || !t.plus.length) errors.push('stats "' + v + '" ' + at + ': `plus` must be a list like [{ "agg": "sum", "column": "walk_ins" }]');
+          else t.plus.forEach(function(p, pi) {
+            var pa = (p && p.agg) || 'count';
+            if (!p || typeof p !== 'object') errors.push('stats "' + v + '" ' + at + ': `plus` ' + pi + ' must be an object');
+            else if (['count', 'sum'].indexOf(pa) < 0) errors.push('stats "' + v + '" ' + at + ': `plus` ' + pi + ' agg "' + pa + '" — use count or sum');
+            else if (pa === 'sum' && !p.column) errors.push('stats "' + v + '" ' + at + ': `plus` ' + pi + ' `sum` needs a `column`');
+            else stCol(p.column, at + ' plus ' + pi);
+          });
+        }
         // An unknown interval would silently be weekly; a streak of the wrong unit still looks right.
         if (t.interval !== undefined && ['daily', 'weekly', 'monthly'].indexOf(t.interval) < 0) errors.push('stats "' + v + '" ' + at + ': `interval` is "' + t.interval + '" — use daily, weekly or monthly');
         if (t.interval !== undefined && ag !== 'streak') errors.push('stats "' + v + '" ' + at + ': `interval` is read only by `agg: "streak"`');
@@ -786,6 +811,23 @@ function validateSchema() {
             ip = r.at; }); }
         }
       });
+    }
+    // `rsvp.ahead`: how far the booking list reaches before Show more. Unreadable, it would quietly show
+    // everything -- the very list it was set to shorten.
+    if (view.rsvp && view.rsvp.ahead !== undefined && !Rotation.parseDuration(view.rsvp.ahead)) {
+      errors.push('rsvp "' + v + '": `ahead` "' + view.rsvp.ahead + '" is not a duration -- a whole number and a unit: min, h, d, w, m (months), y');
+    }
+    // `copy` (Copying events): one table to add to, a date to move, and resets that are its columns.
+    // Each mistake would otherwise show a button whose dialog previews nothing, or copy what should reset.
+    if (view.copy !== undefined) {
+      var cp = view.copy, csrc = (view.sources || [])[0], ccols = (SCHEMA[csrc] && SCHEMA[csrc].columns) || {};
+      if (!cp || typeof cp !== 'object') errors.push('view "' + v + '": `copy` must be an object like { "dateColumn": "starts_at", "reset": ["booked"] }');
+      else {
+        if ((view.sources || []).length !== 1) errors.push('view "' + v + '": `copy` needs exactly one source -- the table the copies are added to');
+        var cdef = ccols[cp.dateColumn], cty = cdef && (typeof cdef === 'object' ? cdef.type : cdef);
+        if (cty !== 'date' && cty !== 'datetime') errors.push('view "' + v + '": `copy.dateColumn` "' + (cp.dateColumn || '') + '" must be a date or datetime column of "' + (csrc || '') + '"');
+        if (cp.reset !== undefined && (!Array.isArray(cp.reset) || cp.reset.some(function(c) { return !(c in ccols); }))) errors.push('view "' + v + '": `copy.reset` must list columns of "' + (csrc || '') + '"');
+      }
     }
     // `board.laneWhen`: a condition per lane. A lane naming nothing, or a condition that is not one, would
     // refuse every move into it or none, with nothing on screen to say which.

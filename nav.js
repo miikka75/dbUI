@@ -42,26 +42,33 @@
       tb.display = it.display || opts.display || 'list';
       return tb;
     }
-    function node(it) {
+    // `need`: a `requiresGrant` above this entry (a group's flag reaches its whole branch).
+    function node(it, need) {
+      need = !!(need || it.requiresGrant);
       // `adminOnly` hides an entry (a group and everything under it, or a single view/table) from
       // non-admins; `hideFromAdmin` is its mirror, for the views that are about being a PARTICIPANT —
       // "my chores", "my rewards" — which an admin who only approves is not. Both are TIDINESS, not
       // access control: what a member may read or write is decided by their table grants, and these only
       // keep the wrong menu out of the wrong hands. Put either on a group to hide the whole branch.
+      // `roles` names who sees it, for a deployment whose staff are not admins (a front desk running as an
+      // editor): ["admin", "editor"] for staff screens, ["viewer"] for a member's own pages. The two flags
+      // above are its shorthand, ["admin"] and everyone-but-admins.
+      var role = opts.role || (opts.isAdmin ? 'admin' : '');
+      if (Array.isArray(it.roles) && it.roles.indexOf(role) < 0) return null;
       if (it.adminOnly && !opts.isAdmin) return null;
       if (it.hideFromAdmin && opts.isAdmin) return null;
       if (it.group) {
-        var ch = (it.items || []).map(node).filter(Boolean);
+        var ch = (it.items || []).map(function(c) { return node(c, need); }).filter(Boolean);
         return ch.length ? withKids(look(describe({ id: 'grp:' + it.group, title: t('nav.' + it.group) || it.group, icon: it.icon || 'mdi-folder' }, it, it.group), it), it, ch) : null;
       }
       var gid = it.view || it.table;
-      if (!gid || !canAccess(gid)) return null;
+      if (!gid || !canAccess(gid, need)) return null;
       if (it.view && !views[gid]) return null;
       if (it.table && !schema[gid]) return null;
       var isV = !!it.view, isDoc = isV && typeof views[gid].markdown === 'string';
       var isRot = isV && !!views[gid].rotation;
       var tb = { id: gid, title: t((isV ? 'view.' : 'tab.') + gid) || gid, icon: it.icon || (isDoc ? 'mdi-file-document-outline' : (isRot ? 'mdi-calendar-clock' : (isV ? 'mdi-view-list' : 'mdi-table'))) };
-      return withKids(look(describe(tb, it, gid), it), it, (it.items || []).map(node).filter(Boolean));
+      return withKids(look(describe(tb, it, gid), it), it, (it.items || []).map(function(c) { return node(c, need); }).filter(Boolean));
     }
     var tabs = [];
     (navItems || []).forEach(function(it) { var tb = node(it); if (tb) tabs.push(tb); });
@@ -85,7 +92,15 @@
       // A truthy non-boolean (e.g. "admin") would hide the entry too, but silently reads as a role name
       // rather than the flag it is — say so rather than let it look like it does something finer.
       if (it.adminOnly !== undefined && typeof it.adminOnly !== 'boolean') errs.push('Nav -> `adminOnly` must be true or false (got ' + JSON.stringify(it.adminOnly) + ')');
+      if (it.requiresGrant !== undefined && typeof it.requiresGrant !== 'boolean') errs.push('Nav -> "' + (it.view || it.table || it.group) + '": `requiresGrant` must be true or false');
       if (it.hideFromAdmin !== undefined && typeof it.hideFromAdmin !== 'boolean') errs.push('Nav -> `hideFromAdmin` must be true or false (got ' + JSON.stringify(it.hideFromAdmin) + ')');
+      // `roles`: a non-empty list of the three roles, and the one form -- beside a flag, one of them is a
+      // second answer to the same question.
+      if (it.roles !== undefined) {
+        var ROLES = ['admin', 'editor', 'viewer'];
+        if (!Array.isArray(it.roles) || !it.roles.length || it.roles.some(function(r) { return ROLES.indexOf(r) < 0; })) errs.push('Nav -> "' + (it.view || it.table || it.group) + '": `roles` must list some of "admin", "editor", "viewer" (got ' + JSON.stringify(it.roles) + ')');
+        else if (it.adminOnly || it.hideFromAdmin) errs.push('Nav -> "' + (it.view || it.table || it.group) + '": use `roles` or `adminOnly`/`hideFromAdmin`, not both');
+      }
       // Both together hides the entry from EVERYONE, which is never what anyone means by writing them.
       if (it.adminOnly && it.hideFromAdmin) errs.push('Nav -> "' + (it.view || it.table || it.group) + '" sets both `adminOnly` and `hideFromAdmin`, which hides it from every user');
       if (it.display !== undefined && DISPLAYS.indexOf(it.display) < 0) errs.push('Nav -> "' + (it.view || it.table || it.group) + '": `display` must be "list" or "tiles" (got ' + JSON.stringify(it.display) + ')');

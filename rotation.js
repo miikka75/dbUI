@@ -94,6 +94,52 @@
     return { count: n, unit: u };
   }
 
+  // A DURATION in the same vocabulary, plus the units an interval never needed: "30min", "2h", "1d", "2w",
+  // "1m", "1y". `m` stays MONTHS, as in every interval, so one string means one thing across a schema;
+  // minutes are `min`. Whole numbers only ("90min", not "1.5h"). -> { count, unit } or null.
+  function parseDuration(spec) {
+    var m = /^(\d+)\s*(min|h|d|w|m|y)$/.exec(String(spec == null ? '' : spec).trim().toLowerCase());
+    return m ? { count: parseInt(m[1], 10), unit: m[2] } : null;
+  }
+
+  // `when` moved back by a duration: minutes to weeks by the clock, months and years on the calendar --
+  // never days/30. A day the shorter month lacks becomes its last (a month back from 31 March is 28 or 29
+  // February, not Date's overflow into 3 March). Null when the spec or the instant is unreadable.
+  function minusDuration(when, spec) {
+    var p = parseDuration(spec);
+    var d = new Date(when instanceof Date ? when.getTime() : Date.parse(when));
+    if (!p || isNaN(d.getTime())) return null;
+    if (p.unit === 'm' || p.unit === 'y') {
+      var day = d.getDate();
+      d.setDate(1);
+      d.setMonth(d.getMonth() - p.count * (p.unit === 'y' ? 12 : 1));
+      d.setDate(Math.min(day, new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()));
+      return d;
+    }
+    return new Date(d.getTime() - p.count * { min: 60000, h: 3600000, d: 86400000, w: 604800000 }[p.unit]);
+  }
+
+  // A DAY a duration ahead of `day` ('YYYY-MM-DD'), on the calendar: "3d" from Monday is Thursday, whatever
+  // a DST change does to the hours between. Units below a day are measured from now instead, since a day
+  // has no hour -- "12h" ahead is the day it will be in twelve hours. `times` repeats the duration.
+  function dayAfter(day, spec, times) {
+    var p = parseDuration(spec), n = (times > 0 ? times : 1);
+    if (!p) return null;
+    if (p.unit === 'min' || p.unit === 'h') {
+      var t = new Date(Date.now() + n * p.count * (p.unit === 'h' ? 3600000 : 60000));
+      return fmtDate(t);
+    }
+    var q = String(day).split('-'), d = new Date(+q[0], +q[1] - 1, +q[2]);
+    if (p.unit === 'd' || p.unit === 'w') d.setDate(d.getDate() + n * p.count * (p.unit === 'w' ? 7 : 1));
+    else {
+      var dd = d.getDate();
+      d.setDate(1);
+      d.setMonth(d.getMonth() + n * p.count * (p.unit === 'y' ? 12 : 1));
+      d.setDate(Math.min(dd, new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()));   // 31 Jan + 1m: 28 Feb
+    }
+    return fmtDate(d);
+  }
+
   // True if `interval` is an accepted spec (named alias or "<n><d|w|m|y>"). Validation uses this so
   // typos surface at load instead of silently resolving to weekly.
   function isValidInterval(interval) {
@@ -288,6 +334,7 @@
   var M = {
     resolveByOccurrence: resolveByOccurrence, sortRosterRows: sortRosterRows, resolveByCalendar: resolveByCalendar,
     resolveAnchorDate: resolveAnchorDate, parseInterval: parseInterval, isValidInterval: isValidInterval,
+    parseDuration: parseDuration, minusDuration: minusDuration, dayAfter: dayAfter,
     wholeIntervalsBetween: wholeIntervalsBetween, addIntervals: addIntervals, buildRotationViewRows: buildRotationViewRows,
     rosterGroups: rosterGroups, isSlot: isSlot, isEmptyGroup: isEmptyGroup
   };

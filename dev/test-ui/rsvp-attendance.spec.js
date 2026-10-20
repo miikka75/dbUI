@@ -581,6 +581,25 @@ test('a viewer adds their own row from a calendar day (self-service is decided b
   await expect.poll(async () => ((await (await page.request.post('/api/getTableData', { data: { tableId: 'logs', tab: 'active' }, headers: ADMIN })).json()).rows || []).map((r) => r.owner)).toEqual(['ann@x']);
 });
 
+// The log is reachable only inside the page that holds the calendar (the gym's My calendar): the add
+// stays there, where the embedded log shows the new row, instead of opening the bare table.
+test('a day-add on a page that embeds the log stays on that page', async ({ page }) => {
+  const schema = JSON.parse(JSON.stringify(SCHEMA));
+  schema.tables.logs = { ownerWritable: ['done_on', 'what'], columns: [{ name: 'owner', type: 'owner' }, { name: 'done_on', type: 'date' }, { name: 'what', type: 'text' }] };
+  schema.views.push({ name: 'mycal', kind: 'calendar', calendar: { sources: [{ table: 'logs', dateColumn: 'done_on', titleColumns: ['what'] }], defaultView: 'month', addTo: 'logs' } });
+  schema.views.push({ name: 'mylog', sources: ['logs'], mode: 'union', filter: { owner: '@me' }, columns: ['done_on', 'what'] });
+  schema.views.push({ name: 'mypage', kind: 'page', markdown: '{{view:mycal}}\n\n{{view:mylog}}\n' });
+  schema.nav.items.push({ view: 'mypage' });
+  await setup(page);
+  await page.request.post('/api/saveSchema', { data: { schema }, headers: ADMIN });
+  await page.request.post('/api/setUserRole', { data: { uid: 'ann@x', role: 'viewer', user: 'ann@x', tables: { practices: 'r' } }, headers: ADMIN });
+  await bootAs(page, 'ann@x');
+  await page.evaluate(() => appInstance.selectTab('mypage'));
+  await page.locator('[data-testid="cal-add-on-day"]').click();
+  await expect.poll(() => page.evaluate(() => appInstance.embedRows('view', 'mylog').length)).toBe(1);
+  expect(await page.evaluate(() => appInstance.currentTable)).toBe('mypage');
+});
+
 test('a row that lasts (endColumn) is on every day it spans, with its range; a pause blocks booking those days', async ({ page }) => {
   const schema = JSON.parse(JSON.stringify(SCHEMA));
   schema.tables.leaves = { ownerWritable: ['starts_on', 'ends_on'], columns: [{ name: 'owner', type: 'owner' }, { name: 'starts_on', type: 'date' }, { name: 'ends_on', type: 'date' }] };
@@ -691,4 +710,75 @@ test('requires: booking needs a day inside one of my own active periods; staff a
   await bea.c.close();
   await bootAs(page, 'org@x');
   await expect(page.locator('tr', { hasText: 'Tuesday' }).locator('[data-testid="rsvp-places"]')).toHaveCount(0);
+});
+
+// `ahead`: the list reaches that far from today, and Show more adds the same span again.
+test('ahead: the next days only, with Show more counting the rest', async ({ page }) => {
+  const schema = JSON.parse(JSON.stringify(SCHEMA));
+  schema.views[0].rsvp.ahead = '2d';
+  await setup(page);
+  await page.request.post('/api/saveSchema', { data: { schema }, headers: ADMIN });
+  const day = (n) => { const d = new Date(); d.setDate(d.getDate() + n); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+  for (const [id, n] of [['t0', 0], ['t1', 1], ['t3', 3], ['t5', 5]]) {
+    await page.request.post('/api/putRow', { data: { tableId: 'practices', tab: 'active', data: { id, date: day(n), title: 'Day ' + n } }, headers: ADMIN });
+  }
+  await bootAs(page, 'ann@x');
+  const titles = async () => (await page.locator('[data-testid="rsvp-toggle"]').count());
+  await expect.poll(titles).toBe(2);                                         // today and tomorrow
+  await expect(page.locator('[data-testid="rsvp-more"]')).toContainText('(3)');   // day 3, day 5, and p1 a week out
+  await page.locator('[data-testid="rsvp-more"]').click();
+  await expect.poll(titles).toBe(3);                                         // + day 3
+  await page.locator('[data-testid="rsvp-more"]').click();                 // + day 5
+  await expect.poll(titles).toBe(4);
+  await page.locator('[data-testid="rsvp-more"]').click();                 // + p1, a week out
+  await expect.poll(titles).toBe(5);
+  await expect(page.locator('[data-testid="rsvp-more"]')).toHaveCount(0);   // nothing left beyond
+});
+
+// Scanning claims a code; whoever stamps the check-ins is the one showing it. The organizer has no scan
+// target here, so no Scan button, while a member keeps both.
+test('the organizer who stamps check-ins does not scan to check in', async ({ page, browser }) => {
+  await setupCheckin(page);
+  const schema = JSON.parse(JSON.stringify(SCHEMA));
+  schema.tables.practices.columns[0] = { name: 'date', type: 'date' };
+  schema.tables.rsvps.columns.push({ name: 'checkin_code', type: 'text' });
+  schema.tables.rsvps.ownerWritable.push('checkin_code');
+  Object.assign(schema.views[0], { fab: 'scan' });
+  schema.views[0].rsvp.checkin = { codeColumn: 'checkin_code', set: { attendance: 'attended' } };
+  schema.nav.scan = ['my_rsvp'];
+  await page.request.post('/api/saveSchema', { data: { schema }, headers: ADMIN });
+  const targets = async (p) => p.evaluate(() => appInstance.scanTargets.map((t) => t.view));
+  await bootAs(page, 'org@x');
+  expect(await targets(page)).toEqual([]);
+  expect(await page.evaluate(() => appInstance.fab)).toBe(null);
+  const member = await browser.newPage();
+  await bootAs(member, 'ann@x');
+  expect(await targets(member)).toEqual(['my_rsvp']);
+  expect(await member.evaluate(() => appInstance.fab && appInstance.fab.kind)).toBe('scan');
+  await member.close();
+});
+
+// The Timetable shows the booking list's events with their booking control (`respond`). The organizer who
+// counts walk-ins books nothing there either: places left, no buttons. A member keeps the buttons.
+test('a calendar of walk-in events gives the organizer no booking control', async ({ page, browser }) => {
+  const schema = JSON.parse(JSON.stringify(SCHEMA));
+  schema.tables.practices.columns.push({ name: 'capacity', type: 'number' }, { name: 'booked', type: 'number' }, { name: 'walk_ins', type: 'number' });
+  schema.tables.rsvps.capacity = { link: 'practice', status: 'response', column: 'capacity', count: 'booked', reserved: 'walk_ins', holds: ['coming'] };
+  schema.views.push({ name: 'timetable', kind: 'calendar', calendar: { sources: [{ table: 'practices', dateColumn: 'date', titleColumns: ['title'], respond: 'my_rsvp' }], defaultView: 'list' } });
+  schema.nav.items.push({ view: 'timetable' });
+  await setup(page);
+  await page.request.post('/api/saveSchema', { data: { schema }, headers: ADMIN });
+  await page.request.post('/api/putRow', { data: { tableId: 'practices', tab: 'active', data: { id: 'p1', date: future, title: 'Tuesday', capacity: 5, booked: 0, walk_ins: 0 } }, headers: ADMIN });
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); localStorage.setItem('test_user', 'org@x'); });
+  await page.goto('/');
+  await page.waitForFunction(() => window.appInstance && !appInstance.loading, { timeout: 30000 });
+  await page.evaluate(() => appInstance.selectTab('timetable'));
+  await expect(page.locator('[data-testid="cal-book"]').first()).toContainText('5');      // places left still shown
+  await expect(page.locator('[data-testid="cal-book"] button')).toHaveCount(0);
+  const member = await browser.newPage();
+  await bootAs(member, 'ann@x');
+  await member.evaluate(() => appInstance.selectTab('timetable'));
+  await expect(member.locator('[data-testid="cal-book"]').first().locator('button', { hasText: 'coming' })).toBeVisible();
+  await member.close();
 });

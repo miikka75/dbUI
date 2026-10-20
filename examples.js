@@ -17,6 +17,7 @@
 //                 two of the three points a merge needs, and this supplies the third — what the unit
 //                 looked like when it was installed — in ~1-2 kB instead of a copy of the bundle.
 //   compare     — which of an installed bundle's files have moved on in the manifest.
+//   rebaseDates — a data file's rows moved from the day it was written for (`asOf`) to today.
 //
 //   Browser: <script src="/examples.js"> — defines the global Examples.
 //   Node   : require('./examples') — the same object (scripts/examples-manifest.js and the tests).
@@ -143,14 +144,25 @@
   // Fold files, IN APPLY ORDER, into one import object. Later files win: the documented order is
   // schema -> schema labels -> app UI labels -> sample rows, and each step is meant to layer onto the
   // one before it (translations merge per language, exactly as importing them one at a time does).
-  function mergeFiles(files) {
+  //
+  // A file's `asOf` moves ITS rows to `opts.today` (rebaseDates). The column types come from the schema
+  // among the files, else `opts.tables` (the schema already installed): the file picker sorts by name,
+  // so gym-data.json arrives before gym-schema.json and the schema has to be found first.
+  function mergeFiles(files, opts) {
+    opts = opts || {};
     var out = {};
-    (files || []).forEach(function (file) {
-      var b = asBundle(file);
+    var bundles = (files || []).map(asBundle);
+    var found = null;
+    bundles.forEach(function (b) { if (b.schema) found = b.schema; });
+    var schemaTables = (found && found.tables) || opts.tables;
+    bundles.forEach(function (b) {
       if (b.schema) out.schema = b.schema;
       if (b.config) out.config = Object.assign(out.config || {}, b.config);
       if (b.lists) { out.lists = out.lists || {}; Object.keys(b.lists).forEach(function (n) { out.lists[n] = b.lists[n]; }); }
-      if (b.tables) { out.tables = out.tables || {}; Object.keys(b.tables).forEach(function (t) { mergeRows(out.tables, t, b.tables[t]); }); }
+      if (b.tables) {
+        var tables = rebaseDates(b.tables, b.asOf, schemaTables, opts.today);
+        out.tables = out.tables || {}; Object.keys(tables).forEach(function (t) { mergeRows(out.tables, t, tables[t]); });
+      }
       if (b.translations) {
         out.translations = out.translations || {};
         Object.keys(b.translations).forEach(function (code) {
@@ -189,6 +201,44 @@
           });
         }
       }
+    });
+    return out;
+  }
+
+  // --- Sample rows that stay current ---------------------------------------------------------------
+  // A data file may say which day it was written for (`"asOf": "2026-10-12"`). Its rows are then moved
+  // so that day lands on `today`: the class booked "tomorrow" stays tomorrow and last week's attendance
+  // stays last week's, however old the file is. Without it every "this week" tile drifts to zero as the
+  // file ages. Only the columns the schema types `date` or `datetime` move, plus the row stamps; ids that
+  // happen to contain a date are names, not dates, and stay as they are.
+  //
+  // A datetime moves by calendar days in local time, so a 07:00 class is still at 07:00 across a DST change.
+  var STAMPS = ['created_at', 'updated_at'];
+  function ymd(d) { return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
+  function dayNumber(s) { var p = String(s).split('-'); return Date.UTC(+p[0], +p[1] - 1, +p[2]) / 864e5; }
+  function rebaseDates(tables, asOf, schemaTables, today) {
+    if (!asOf || !/^\d{4}-\d\d-\d\d$/.test(asOf) || !tables) return tables;
+    var shift = dayNumber(ymd(today || new Date())) - dayNumber(asOf);
+    if (!shift) return tables;
+    var moveDate = function(v) { var d = new Date(dayNumber(v.slice(0, 10)) * 864e5 + shift * 864e5); return d.toISOString().slice(0, 10); };
+    var moveTime = function(v) { var d = new Date(v); if (isNaN(d.getTime())) return v; d.setDate(d.getDate() + shift); return d.toISOString(); };
+    var out = {};
+    Object.keys(tables).forEach(function(key) {
+      var def = (schemaTables || {})[key.split('__')[0]] || {};
+      var cols = Array.isArray(def.columns) ? def.columns : Object.keys(def.columns || {}).map(function(n) { return Object.assign({ name: n }, def.columns[n]); });
+      var kinds = {};
+      cols.forEach(function(c) { if (c && (c.type === 'date' || c.type === 'datetime')) kinds[c.name] = c.type; });
+      STAMPS.forEach(function(n) { kinds[n] = 'datetime'; });
+      if (!Array.isArray(tables[key])) { out[key] = tables[key]; return; }
+      out[key] = tables[key].map(function(row) {
+        var r = Object.assign({}, row);
+        Object.keys(kinds).forEach(function(n) {
+          var v = r[n];
+          if (typeof v !== 'string' || !/^\d{4}-\d\d-\d\d/.test(v)) return;
+          r[n] = (kinds[n] === 'date' && v.length === 10) ? moveDate(v) : moveTime(v);
+        });
+        return r;
+      });
     });
     return out;
   }
@@ -312,7 +362,7 @@
 
   var E = {
     hash: hash, hashText: hashText, canonical: canonical,
-    asBundle: asBundle, mergeFiles: mergeFiles, listsForInstall: listsForInstall, lookupRowId: lookupRowId,
+    asBundle: asBundle, mergeFiles: mergeFiles, rebaseDates: rebaseDates, listsForInstall: listsForInstall, lookupRowId: lookupRowId,
     fingerprint: fingerprint, compare: compare, fileHashes: fileHashes
   };
   if (isNode) module.exports = E;

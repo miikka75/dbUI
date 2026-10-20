@@ -5,13 +5,13 @@
       "code": "en",
       "name": "English",
       "file": "app-lang-en.json",
-      "hash": "5d852c8fbd645419"
+      "hash": "5f068c60805a6e4a"
     },
     {
       "code": "fi",
       "name": "Suomi",
       "file": "app-lang-fi.json",
-      "hash": "7faecca3b1e87649"
+      "hash": "2f9c802d135b340f"
     }
   ],
   "bundles": [
@@ -67,12 +67,12 @@
       "title": "Our Home",
       "description": "A household chore tracker — points, approvals, rewards, a weekly rota and a shopping list.",
       "icon": "./examples/chores-favicon.svg",
-      "revision": 18,
+      "revision": 19,
       "tables": 7,
       "views": 20,
       "schema": {
         "file": "chores-schema.json",
-        "hash": "476a0f2baeb3284d"
+        "hash": "f3eed3e93f63502b"
       },
       "languages": [
         {
@@ -94,10 +94,11 @@
       },
       "about": {
         "file": "chores-about.json",
-        "hash": "94312ccf5fa286d9"
+        "hash": "c0b34b4b54072c89"
       },
       "notes": {
-        "18": "Adds My calendar: your own chores and weekly tasks, and a Subscribe button that puts them in your phone or computer calendar. Each person gets their own private link, in the language they pick; unsubscribing empties it. Links are only issued where the deployment has file storage."
+        "18": "Adds My calendar: your own chores and weekly tasks, and a Subscribe button that puts them in your phone or computer calendar. Each person gets their own private link, in the language they pick; unsubscribing empties it. Links are only issued where the deployment has file storage.",
+        "19": "No change in how it works: approved and rejected chores are still filed away after 7 days, and bought shopping after 3; the schema now says so as a duration (\"7d\")."
       }
     },
     {
@@ -157,37 +158,38 @@
       "title": "Fitness Club",
       "description": "A gym's member app — class booking with door check-in, a training log and stats, memberships, personal training and a workout video library.",
       "icon": "./examples/gym-favicon.svg",
-      "revision": 1,
-      "tables": 17,
+      "revision": 2,
+      "tables": 18,
       "views": 37,
       "schema": {
         "file": "gym-schema.json",
-        "hash": "ed4331a821b7c822"
+        "hash": "41bb942f71b6fff9"
       },
       "languages": [
         {
           "code": "en",
           "name": "English",
           "file": "gym-lang-en.json",
-          "hash": "d38fca5607237e4c"
+          "hash": "7ee4e59eaa43f18c"
         },
         {
           "code": "fi",
           "name": "Suomi",
           "file": "gym-lang-fi.json",
-          "hash": "27b20e4d9c46c6eb"
+          "hash": "fd5d9de9216767c3"
         }
       ],
       "data": {
         "file": "gym-data.json",
-        "hash": "d820c82b9f53c989"
+        "hash": "77917a2470405cde"
       },
       "about": {
         "file": "gym-about.json",
-        "hash": "accb579b3e68ef7d"
+        "hash": "d48ceec45f7217aa"
       },
       "notes": {
-        "1": "First release: anyone can open the app and see the timetable, gyms, prices and news without an account; signing in makes you a member-to-be at once, and the member pages open when a membership is active (your history stays through a lapse); book group classes (with a valid membership; the door code needs one too), with places left, a full class refused, and booking from home closing 30 minutes before the start (after that, at the gym); check in to classes by scanning the room code, and log gym visits by scanning the door code; My calendar with your classes, workouts, visits, pauses and PT sessions, where the workout log and gym visits (the latest 5, with Show all), the totals (hours, exercises, visits, km), steps and your top 3 exercises follow the week, month or year the calendar shows; subscribe to your booked classes and workouts in your phone's calendar; coins earned by attending classes (1 per class, plus 1 per streak level reached), spent in a reward shop; buying a membership or a single visit, and pausing it (the pause shows on My calendar across its days, and while it lasts classes cannot be booked or checked in to and the door code is refused); requesting a personal trainer; trainers linked to accounts see their classes and PT clients on their own My calendar; news and a library of workouts and multi-week programmes. Approving a sign-up request makes the person a member in one press. The front desk gets the door code screen, class check-in (the changing code, walk-ins, and ticking people off by hand), membership, PT and reward boards, and statistics (visits, members, attendance by class and by trainer, visits by gym) filtered by gym, class and trainer."
+        "1": "First release: anyone can open the app and see the timetable, gyms, prices and news without an account; signing in makes you a member-to-be at once, and the member pages open when a membership is active (your history stays through a lapse); book group classes (with a valid membership; the door code needs one too), with places left, a full class refused, and booking from home closing 30 minutes before the start (after that, at the gym); check in to classes by scanning the room code, and log gym visits by scanning the door code; My calendar with your classes, workouts, visits, pauses and PT sessions, where the workout log and gym visits (the latest 5, with Show all), the totals (hours, exercises, visits, km), steps and your top 3 exercises follow the week, month or year the calendar shows; subscribe to your booked classes and workouts in your phone's calendar; coins earned by attending classes (1 per class, plus 1 per streak level reached), spent in a reward shop; buying a membership or a single visit, and pausing it (the pause shows on My calendar across its days, and while it lasts classes cannot be booked or checked in to and the door code is refused); requesting a personal trainer; trainers linked to accounts see their classes and PT clients on their own My calendar; news and a library of workouts and multi-week programmes. Approving a sign-up request makes the person a member in one press. The front desk gets the door code screen, class check-in (the changing code, walk-ins, and ticking people off by hand), membership, PT and reward boards, and statistics (visits, members, attendance by class and by trainer, visits by gym) filtered by gym, class and trainer.",
+        "2": "Statistics are one view about class attendance only: total attendance, check-ins (booked), walk-ins (no booking), members attending and no-shows, narrowed by gym, room, class and trainer (several of each at once). Gym visits stay on each member's own pages. Rooms now belong to a gym (a Rooms catalogue), so a class offers only its own gym's rooms and two gyms can each have a Main hall. The sample rows now follow today: they are moved so the day they were written for is the day you install them, with four weeks of past classes and ten more members booking them. My calendar is a member's and a trainer's page, so the front desk no longer has it, and adding a workout on a day stays on My calendar instead of opening the workouts table. A class is filed away two hours after it starts: it leaves the desk's lists but stays in members' My calendar, their history and Statistics. The front desk's Class schedule is a page with the same gym, room, class and trainer filters, upcoming and past classes, and Copy events: copy a range of classes (last week, say) to a new start date, as many times over as needed, skipping any already there. Memberships at the front desk is a list instead of a board, with a search for the member and filters by status and plan, so it stays usable with hundreds of members. Booking and class check-in list today and the next two days, with Show more for the days after. A member's own level, coins and pauses count only their own rows, so the front desk's Home no longer shows the whole gym's classes as its level. The menu goes by role, so the front desk can be its own account without being an admin: it sees the Front desk screens and none of a member's own pages, and has no access to members' training. Front desk screens show only to accounts granted their tables, so a door tablet signed in with just the visit log sees the door code and nothing of the desk's."
       }
     }
   ]

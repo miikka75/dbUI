@@ -8,6 +8,10 @@
   // so `root.Columns` does not exist yet while this IIFE runs — but it always does by the time a
   // backend calls one of these.
   var _Cols = null;
+  var _Rot = null;
+  function Rot() {
+    return _Rot || (_Rot = (typeof module !== 'undefined' && module.exports) ? require('./rotation') : root.Rotation);
+  }
   function Cols() {
     return _Cols || (_Cols = (typeof module !== 'undefined' && module.exports) ? require('./columns') : root.Columns);
   }
@@ -311,23 +315,34 @@
     },
 
 
-    // Rows a table's `archiveAfter` policy has aged out of the ACTIVE partition:
-    //   "archiveAfter": { "column": "status", "values": ["approved","rejected"], "days": 7 }
-    // A row qualifies once `column` holds one of `values` AND the row has gone `days` without an edit.
-    // The clock is `updated_at`, which every write stamps -- so it is "settled for N days", not "N days
-    // since the status changed": correcting a note afterwards restarts it, which is the forgiving
-    // reading (a row someone is still touching is not finished with). Rows with no `updated_at` are
-    // left alone rather than archived on sight. Pure over (rows, cfg, now) so it is testable in Node
-    // and identical wherever it runs.
+    // Rows a table's `archiveAfter` policy has aged out of the ACTIVE partition. Two clocks:
+    //   "archiveAfter": { "column": "status", "values": ["approved","rejected"], "after": "7d" }
+    //     A row qualifies once `column` holds one of `values` AND the row has gone that long without an
+    //     edit. The clock is `updated_at`, which every write stamps -- so it is "settled for N days", not
+    //     "N days since the status changed": correcting a note afterwards restarts it, which is the
+    //     forgiving reading (a row someone is still touching is not finished with).
+    //   "archiveAfter": { "dateColumn": "starts_at", "after": "2h" }
+    //     The row's OWN date: a class is over two hours after it starts, whoever edits it since (the
+    //     desk's walk-in count must not restart it). `column`/`values` may narrow it further.
+    // How long is `after`, a duration ("30min", "2h", "1d", "2w", "1m" -- Rotation.parseDuration). A row
+    // with no readable clock is left alone rather than archived on sight.
+    // Pure over (rows, cfg, now) so it is testable in Node and identical wherever it runs.
     autoArchiveIds: function(rows, cfg, now) {
-      if (!cfg || !cfg.column || !Array.isArray(cfg.values) || !cfg.values.length) return [];
-      var days = Number(cfg.days);
-      if (!isFinite(days) || days < 0) return [];
-      var cutoff = (now instanceof Date ? now.getTime() : Date.parse(now)) - days * 86400000;
-      if (isNaN(cutoff)) return [];
+      if (!cfg) return [];
+      var byValue = !!cfg.column || cfg.values !== undefined;
+      if (byValue && (!cfg.column || !Array.isArray(cfg.values) || !cfg.values.length)) return [];
+      if (!byValue && !cfg.dateColumn) return [];
+      var c = Rot().minusDuration(now, cfg.after);
+      if (!c) return [];
+      var cutoff = c.getTime();
+      // A bare date is the START of that day where the reader is, like every other date in the app.
+      var when = function(v) {
+        var m = /^(\d{4})-(\d\d)-(\d\d)$/.exec(String(v || ''));
+        return m ? new Date(+m[1], +m[2] - 1, +m[3]).getTime() : Date.parse(v);
+      };
       return (rows || []).filter(function(r) {
-        if (!r || !r.id || cfg.values.indexOf(r[cfg.column]) < 0) return false;
-        var t = Date.parse(r.updated_at);
+        if (!r || !r.id || (byValue && cfg.values.indexOf(r[cfg.column]) < 0)) return false;
+        var t = cfg.dateColumn ? when(r[cfg.dateColumn]) : Date.parse(r.updated_at);
         return !isNaN(t) && t <= cutoff;
       }).map(function(r) { return r.id; });
     },

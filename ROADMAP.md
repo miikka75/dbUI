@@ -1672,6 +1672,157 @@ Phases 2 and 3 can swap. Phase 4 depends on nothing and could be built at any po
 because it is the only expensive one and, until the offline case is actually in front of someone,
 phase 3 does the same job for free.
 
+### Sample rows that stay current — a data file's `asOf` *(landed 2026-10-18)*
+
+An example's rows are written for one day, and every "this week" tile, "upcoming" class and streak
+drifts out of the current period as the file ages (`dev/seed-import.js` used to regenerate the demo
+relative to today, and was given that up so the dataset would exist once). Instead a data file names
+the day it was written for — `"asOf": "2026-10-12"` — and the import moves its `date`/`datetime`
+columns (and the row stamps) by the days from then to today: `Examples.rebaseDates`, run by
+`mergeFiles` (the example picker and Settings → Import) and by `npm run seed:import`. A file without
+`asOf` — every backup — keeps its dates. Ids that contain a date are names and stay. First user:
+`gym-data.json`.
+
+### Gym example: rooms belong to a gym, and Statistics filters by room *(landed 2026-10-18)*
+
+The gym's rooms were one flat `rooms` list, so City Centre's "Main hall" and Harbour's were the same
+value, the class editor offered every room at every gym, and bookings carried no room at all — a
+Room filter on Statistics would have narrowed the walk-ins and nothing else. Now:
+
+- **`ref_rooms`**, a 2-D lookup (`hierarchy: { parent: "gym", value: "room" }`): the Lookups editor
+  shows each gym with its rooms under it. `gym` is a ref to `ref_gyms`, so the group IS a gym.
+- **`classes.room`** is a ref to it with `filterBy: { gym: "gym" }`: the editor offers the class's
+  gym's rooms only. Values stay room NAMES, so two gyms may each have a "Main hall".
+- **`bookings.room`**, a lookup through the class like its gym, class type and instructor, and **Room**
+  as a fourth filter on Statistics.
+
+A page or calendar filter on such a ref offers each value ONCE (`filterOptionsFor`): the editor's
+"Main hall (Harbour)" disambiguation named one row, but the filter narrows by the stored value, so
+two entries with one value were the same pick shown twice. Pick the gym as well to tell the halls apart.
+
+**The filters narrow one another** (`pageFilterOptions`): a dropdown offers the values that still occur
+in the page's rows under the other picks — pick Harbour and Room offers Harbour's rooms, Class the
+classes held there. Read from the page's tables that store every column involved, archive included:
+`classes`, and `ref_rooms` itself, so a gym's room with no classes yet is still one of its rooms. A
+booking's lookup copies are not on the cached row and do not take part.
+
+### Comparing statistics — saved rows of picks *(step 1 landed 2026-10-19: rows kept in this browser)*
+
+A page's filters answer one question at a time: pick Mikko and Sanna and the tiles show the two
+together, not side by side. To compare, the reader saves the current picks as a **row**; the page shows a
+table under its filters — one line per saved set of picks, labelled by them ("Mikko", "Harbour · Yoga"),
+one column per tile of the stats views it embeds — and each line has the two-press delete. A row with
+nothing picked is the baseline ("All").
+
+- **Shape.** A row is `{ id, picks }`, `picks` the same `{ column: [values] }` the dropdowns hold, so a
+  row's numbers are the embedded stats view run through `_viewWithMe(view, picks)` — the narrowing the
+  dropdowns already apply, with that row's picks instead of the live ones. Whole-set `tiles` only: a
+  `rowTiles` view is already a comparison, one bar per row.
+- **No schema key.** Any page with `filters` that embeds a stats view with `tiles` offers it.
+
+**Step 1 (built): kept in this browser**, like the live picks (`localStorage` `page_compare:<page>`). Read
+in `pageCompareRows` and written only in `addCompareRow` / `removeCompareRow`, so step 2 replaces those
+three and nothing else. Not shared, not on another device.
+
+**Step 2 (proposed): shared with the page**, so every front-desk account sees the same comparison and it
+survives devices. What it adds beyond swapping the store:
+- **Where:** stored beside the page's body (the server-side `_pages` record that holds an edited page),
+  one entry per row keyed by its `id`, so two people adding rows at once each add theirs instead of
+  saving over the other's list.
+- **Who:** adding and removing take the page-edit right (`canEditPages`, the `_pages` write rule); other
+  readers see the rows read-only.
+- **Moving:** rows already in a browser are offered once as "share these", or left where they are.
+
+**Sorting (built):** a tile's header sorts the rows by its number, a second click reverses — the
+shared `SORT_UI` contract every sortable header follows. Unsorted, rows keep the order they were
+added. The choice is the viewer's (`page_compare_sort:<page>` in this browser) and stays so in step 2.
+
+**Later:** a period per row (this month against last), since Statistics has no date filter yet.
+
+### `archiveAfter` by the row's own date, and as a duration *(landed 2026-10-19)*
+
+`archiveAfter` filed a row away once a status column said it was finished and it had gone N days without
+an edit (`updated_at`). That clock cannot express "a class is over": a class has no finished status, and
+the desk's walk-in count is an edit that would restart it. Same feature, a second clock and a finer unit:
+
+- **`dateColumn`** — age from the row's own `date`/`datetime` instead of its last edit:
+  `{ "dateColumn": "starts_at", "after": "2h" }` files a class away two hours after it started. `column` +
+  `values` become optional with it (both given: both must hold); without it they stay required, and so
+  does a declared `updated_at`.
+- **`after`, a duration string** — `"30min"`, `"2h"`, `"1d"`, `"2w"`, `"1m"`, `"1y"` — on either clock. It is
+  the interval vocabulary rotations and timelines already speak (`"<n><d|w|m|y>"`) plus `h` and `min`, and
+  `m` stays MONTHS: reading `"30m"` as minutes here would give one string two meanings in one schema.
+  Months and years go back on the calendar, the rest by the clock (`Rotation.parseDuration` /
+  `minusDuration`, beside `parseInterval`). `days` is gone, with no migration: no deployment had a
+  schema using it (chores, its only user, was not delivered anywhere yet), so the examples were rewritten
+  and a leftover `days` is rejected at load, naming `after`. Both clocks are timestamps, so nothing was
+  ever measured in whole days; `days` was only the unit.
+- One implementation: `BackendHelpers.autoArchiveIds` picks the rows, `_autoArchive` sweeps, validateSchema
+  checks the shape — each extended, none duplicated.
+
+The sweep is still client-side and best-effort: it runs when someone allowed to archive opens the app (or
+a table loads), not on a timer, so "after 2 hours" means "at the next load after 2 hours". First user: the
+gym's `classes`, which leave the desk's lists but stay in calendars, members' history and Statistics
+(calendars and lookups read archived rows; the statistics views `includeArchive`).
+
+### Copying events — a range of dated rows, forward *(landed 2026-10-19)*
+
+A gym's timetable is one week repeated, with exceptions. Two ways to get there were weighed: a weekly
+**template** table that generates classes on a rolling horizon, and **copying** a range of existing
+classes forward. Both make real rows — bookings point at a class id, the rules check capacity on the class
+row, and check-in, archiving, Statistics and My calendar all read rows, so a computed repeat would need a
+special case in each — and both leave every class individually editable. Copying is the smaller, general
+piece (any table with a date column, no new table), so it came first; the template stays open below.
+
+**Shape.** A data view declares it: `"copy": { "dateColumn": "starts_at", "reset": ["booked", "walk_ins"] }`.
+A page with `filters` that embeds the view shows **Copy events** under it, for someone who may add rows
+to the table (a real grant — self-service owners do not copy). The dialog takes **from**, **to**, **copy
+to** (the date `from` lands on) and **times** (how many spans in a row), and previews how many rows it will
+copy and how many are already there.
+
+- **What is copied:** the rows the page shows — the view's filter and the page's picks — in the date range,
+  **archived rows included** (classes archive two hours after they start, so last week has left the list
+  by the time it is copied). Each moves by whole days in local time, so 07:00 stays 07:00 across a DST
+  change; with `times: 4` the range is laid down four times, one span apart.
+- **What is not:** ids, stamps, archive status, the owner, computed columns, and the `reset` columns —
+  those start at their default (no bookings, no walk-ins).
+- **Twice is once:** a copy whose kept values and moment already exist is skipped, so re-running adds
+  nothing. A target someone has since edited (another instructor) is not recognised as the same class.
+- **One undo** takes the whole copy back.
+- Pure planning in `Calendar.copyPlan`, Node-tested; the app gathers the rows and writes.
+
+The gym's **Class schedule** became a page: the four filters Statistics has, the class list
+(`{{view:class_list@both}}`, upcoming and past), and Copy events.
+
+**Open:** a weekly template with a rolling horizon (`class_schedule` → `classes`, `ahead: "4w"`), for a
+timetable that should keep itself going; "every other week" and holiday closures with it.
+
+### Staff who are not admins — `roles` on a menu entry, and the gym's desk as an editor *(landed 2026-10-20)*
+
+The gym's front desk ran as an **admin**, so every restriction on it was tidiness: hidden menus, buttons
+not drawn. An admin can still write anything, and reads every member's workouts. The fix is the
+deployment's, not the app's — run the desk as an **editor** with grants on exactly the tables it works
+(classes, bookings, visits, memberships, PT, reward claims, news, the coach library; the catalogues to
+read) and keep one **owner** admin for approvals, schema and settings. Workouts and steps then stay the
+members' own by the rules, not by a hidden page.
+
+What stood in the way was the menu: `adminOnly` / `hideFromAdmin` split users into admin and everyone
+else, so an editor desk lost the Front desk group and gained the member pages. A menu entry may now say
+**`roles`** — `["admin", "editor"]` for staff screens, `["viewer"]` for a member's own pages. The two flags
+stay as what they always meant (`["admin"]`, and everyone but admins); an entry uses one form, not both.
+Still tidiness, not access: grants decide what anyone may read or write.
+
+**`requiresGrant`** finishes it for the door tablet (an editor granted only `visits`): `roles` showed it the
+whole Front desk group, because a view over an owner-column table is reachable by ANY signed-in account
+(its own rows). Under `requiresGrant` an entry needs a real grant on the tables it works — every source,
+every view a page embeds — so the door sees Door code and nothing else.
+
+**Open — self-service by role, in the rules.** Any signed-in account may still create rows of its OWN in an
+owner table: the door can file a pending membership for itself (tested: own row accepted; another's and
+the status refused). Harmless, but a deployment that wants staff accounts out of self-service entirely
+needs a table-level "who may own rows here" (`ownerRoles: ["viewer"]`), mirrored into both rule layers
+with their tests. Not built: the door is locked to its code in kiosk mode, and its own rows reveal nothing.
+
 ### Prose that names its rows — a per-row template for an embed
 
 A `markdown` view is prose **plus** grids: `{{self}}` and `{{view:x}}` render a table, a card stack or

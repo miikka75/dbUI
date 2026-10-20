@@ -132,6 +132,49 @@
     h ^= h >>> 16;
     return pal[(h >>> 0) % pal.length];
   }
+  // Copying dated rows forward (ROADMAP: Copying events). Pure: which rows to create, never a write.
+  //   rows      the candidates (the page's rows, archived included); `existing` is every row of the table
+  //   o         { dateColumn, from, to, target, times, keep } -- dates are 'YYYY-MM-DD'
+  // A row dated in [from, to] is copied `times` times: first so `from` lands on `target`, then one span
+  // (to - from + 1 days) further each time. It moves by whole days in LOCAL time, so a 07:00 class stays
+  // 07:00 across a DST change. Only the `keep` columns and the date are carried -- the caller leaves out
+  // ids, stamps and what a copy starts without. A copy that already exists (the same kept values at the
+  // same moment) is skipped, so running it twice adds nothing.
+  //   -> { rows: [prefill], skipped, first, last } -- first/last: the dates the copies span
+  function copyPlan(rows, existing, o) {
+    var none = { rows: [], skipped: 0, first: '', last: '' };
+    var isDay = function(s) { return /^\d{4}-\d\d-\d\d$/.test(String(s || '')); };
+    if (!o || !o.dateColumn || !isDay(o.from) || !isDay(o.to) || !isDay(o.target)) return none;
+    var dayNum = function(s) { var p = String(s).split('-'); return Date.UTC(+p[0], +p[1] - 1, +p[2]) / 864e5; };
+    var plus = function(s, n) { var p = String(s).split('-'); return fmtDate(new Date(+p[0], +p[1] - 1, +p[2] + n)); };
+    var from = dayNum(o.from), to = dayNum(o.to), times = Math.floor(Number(o.times));
+    if (to < from || !(times >= 1)) return none;
+    var span = to - from + 1, lead = dayNum(o.target) - from, dc = o.dateColumn, keep = o.keep || [];
+    var shift = function(v, n) {
+      var s = String(v);
+      if (s.length === 10) return plus(s, n);
+      var d = new Date(s); d.setDate(d.getDate() + n); return d.toISOString();
+    };
+    var moment = function(v) { var s = String(v || ''); return s.length === 10 ? s : new Date(s).toISOString(); };
+    var key = function(r, when) { return JSON.stringify([keep.map(function(c) { return r[c] == null ? '' : r[c]; }), moment(when)]); };
+    var seen = {};
+    (existing || []).forEach(function(r) { if (r && r[dc]) seen[key(r, r[dc])] = 1; });
+    var out = [], skipped = 0;
+    (rows || []).forEach(function(r) {
+      var d = r && toDateStr(r[dc]); if (!d) return;
+      var dn = dayNum(d); if (dn < from || dn > to) return;
+      for (var k = 0; k < times; k++) {
+        var when = shift(r[dc], lead + k * span), kk = key(r, when);
+        if (seen[kk]) { skipped++; continue; }
+        seen[kk] = 1;
+        var p = {}; keep.forEach(function(c) { if (r[c] !== undefined) p[c] = r[c]; });
+        p[dc] = when;
+        out.push(p);
+      }
+    });
+    return { rows: out, skipped: skipped, first: plus(o.target, 0), last: plus(o.target, times * span - 1) };
+  }
+
   // A calendar view's source specs (single-source `source` sugar -> one-element list).
   function sources(views, name) {
     var v = views[name]; if (!v || !v.calendar) return [];
@@ -143,7 +186,7 @@
 
   var C = {
     fmtDate: fmtDate, toDateStr: toDateStr, dateLabel: dateLabel, dateTimeLabel: dateTimeLabel, toLocalInput: toLocalInput, fromLocalInput: fromLocalInput, cellsMonth: cellsMonth, cellsWeek: cellsWeek, windowFor: windowFor, periodFor: periodFor,
-    hashColor: hashColor, paletteAt: paletteAt, sources: sources, rotationSources: rotationSources
+    hashColor: hashColor, paletteAt: paletteAt, sources: sources, rotationSources: rotationSources, copyPlan: copyPlan
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = C;
   else { root.Calendar = C; root.fmtDate = fmtDate; root.toDateStr = toDateStr; }

@@ -195,8 +195,52 @@ describe('backend-helpers - pageAccessOf (restricted doc-view map)', () => {
   });
 });
 
+describe('backend-helpers - autoArchiveIds by the row own date, after a duration', () => {
+  const R = require('../../rotation');
+  const NOW = new Date('2026-10-19T18:00:00Z');
+  const classes = [
+    { id: 'morning', starts_at: '2026-10-19T04:00:00Z', updated_at: '2026-10-19T17:59:00Z' },   // edited a minute ago: still goes
+    { id: 'boundary', starts_at: '2026-10-19T16:00:00Z' },                                         // exactly 2 h
+    { id: 'running', starts_at: '2026-10-19T17:00:00Z' },
+    { id: 'tomorrow', starts_at: '2026-10-20T04:00:00Z' },
+    { id: 'undated', starts_at: '' }
+  ];
+  it('a class goes `after` its start, whatever was edited since; the boundary is inclusive', () => {
+    assert.deepEqual(H.autoArchiveIds(classes, { dateColumn: 'starts_at', after: '2h' }, NOW), ['morning', 'boundary']);
+    assert.deepEqual(H.autoArchiveIds(classes, { dateColumn: 'starts_at', after: '120min' }, NOW), ['morning', 'boundary']);
+  });
+  it('a status pair still narrows it; a `days` left over is no duration at all', () => {
+    const rows = [{ id: 'a', starts_at: '2026-10-01', state: 'held' }, { id: 'b', starts_at: '2026-10-01', state: 'planned' }];
+    assert.deepEqual(H.autoArchiveIds(rows, { dateColumn: 'starts_at', column: 'state', values: ['held'], after: '1d' }, NOW), ['a']);
+    assert.deepEqual(H.autoArchiveIds(rows, { dateColumn: 'starts_at', column: 'state', values: ['held'], days: 1 }, NOW), []);
+  });
+  it('a bare date counts from the start of that day where the reader is', () => {
+    const today = new Date(2026, 9, 19, 9, 0);   // 09:00 local
+    assert.deepEqual(H.autoArchiveIds([{ id: 'd', day: '2026-10-19' }], { dateColumn: 'day', after: '8h' }, today), ['d']);
+    assert.deepEqual(H.autoArchiveIds([{ id: 'd', day: '2026-10-19' }], { dateColumn: 'day', after: '10h' }, today), []);
+  });
+  it('no duration, or an unreadable one, archives nothing rather than everything', () => {
+    assert.deepEqual(H.autoArchiveIds(classes, { dateColumn: 'starts_at' }, NOW), []);
+    assert.deepEqual(H.autoArchiveIds(classes, { dateColumn: 'starts_at', after: 'soon' }, NOW), []);
+  });
+  it('the updated_at clock takes a duration too', () => {
+    const rows = [{ id: 'x', status: 'done', updated_at: '2026-10-19T15:00:00Z' }];
+    assert.deepEqual(H.autoArchiveIds(rows, { column: 'status', values: ['done'], after: '3h' }, NOW), ['x']);
+    assert.deepEqual(H.autoArchiveIds(rows, { column: 'status', values: ['done'], after: '4h' }, NOW), []);
+  });
+  it('durations: the interval vocabulary plus h and min, `m` still months, whole numbers', () => {
+    assert.deepEqual(['30min', '2h', '1d', '2w', '1m', '1y', ' 3 H '].map((x) => R.parseDuration(x)), [
+      { count: 30, unit: 'min' }, { count: 2, unit: 'h' }, { count: 1, unit: 'd' }, { count: 2, unit: 'w' },
+      { count: 1, unit: 'm' }, { count: 1, unit: 'y' }, { count: 3, unit: 'h' }]);
+    assert.deepEqual(['1.5h', '2 hours', 'h', '', null, -1].map((x) => R.parseDuration(x)), [null, null, null, null, null, null]);
+    const t = new Date(2026, 2, 31, 12);
+    assert.equal(R.minusDuration(t, '1m').getDate(), 28);                  // the end of February, not 3 March
+    assert.equal(R.minusDuration(t, '30min').getTime(), t.getTime() - 30 * 60000);
+  });
+});
+
 describe('backend-helpers - autoArchiveIds (age a terminal row out of the active partition)', () => {
-  const CFG = { column: 'status', values: ['approved', 'rejected'], days: 7 };
+  const CFG = { column: 'status', values: ['approved', 'rejected'], after: '7d' };
   const NOW = new Date('2026-08-20T12:00:00Z');
   const at = (iso) => iso;
   const rows = [
@@ -207,7 +251,7 @@ describe('backend-helpers - autoArchiveIds (age a terminal row out of the active
     { id: 'no-timestamp', status: 'approved' }
   ];
 
-  it('picks terminal rows that have been settled for at least `days`', () => {
+  it('picks terminal rows that have been settled for at least `after`', () => {
     assert.deepEqual(H.autoArchiveIds(rows, CFG, NOW), ['old-approved', 'old-rejected']);
   });
 
@@ -222,22 +266,23 @@ describe('backend-helpers - autoArchiveIds (age a terminal row out of the active
     assert.deepEqual(H.autoArchiveIds([{ id: 'x', status: 'approved', updated_at: 'soon' }], CFG, NOW), []);
   });
 
-  it('the boundary is inclusive: exactly `days` old qualifies', () => {
+  it('the boundary is inclusive: exactly `after` old qualifies', () => {
     const exactly = [{ id: 'edge', status: 'approved', updated_at: '2026-08-13T12:00:00Z' }];
     assert.deepEqual(H.autoArchiveIds(exactly, CFG, NOW), ['edge']);
     const hairEarly = [{ id: 'edge', status: 'approved', updated_at: '2026-08-13T12:00:01Z' }];
     assert.deepEqual(H.autoArchiveIds(hairEarly, CFG, NOW), []);
   });
 
-  it('days: 0 archives as soon as the row is in a terminal state', () => {
-    const cfg0 = { column: 'status', values: ['approved'], days: 0 };
+  it('after: "0d" archives as soon as the row is in a terminal state', () => {
+    const cfg0 = { column: 'status', values: ['approved'], after: '0d' };
     assert.deepEqual(H.autoArchiveIds([{ id: 'a', status: 'approved', updated_at: '2026-08-20T11:59:00Z' }], cfg0, NOW), ['a']);
   });
 
   it('a malformed or absent policy archives nothing', () => {
     for (const bad of [null, {}, { column: 'status' }, { column: 'status', values: [] },
-                       { column: 'status', values: ['approved'], days: -1 },
-                       { column: 'status', values: ['approved'], days: 'soon' }]) {
+                       { column: 'status', values: ['approved'], after: '-1d' },
+                       { column: 'status', values: ['approved'], after: 'soon' },
+                       { column: 'status', values: ['approved'], days: 7 }]) {
       assert.deepEqual(H.autoArchiveIds(rows, bad, NOW), [], JSON.stringify(bad));
     }
   });
