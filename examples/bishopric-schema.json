@@ -153,6 +153,10 @@
         ]
       },
       "meeting_agenda": {
+        "archiveAfter": {
+          "dateColumn": "date",
+          "after": "1d"
+        },
         "columns": [
           {
             "name": "date",
@@ -272,6 +276,10 @@
       },
       "admin_reminders": {
         "archivable": true,
+        "archiveAfter": {
+          "dateColumn": "date",
+          "after": "1d"
+        },
         "columns": [
           {
             "name": "date",
@@ -1059,6 +1067,7 @@
       },
       {
         "name": "meeting_speakers",
+        "includeArchive": true,
         "collect": "date",
         "defaultSort": "previous1",
         "mode": "union",
