@@ -276,10 +276,6 @@
       },
       "admin_reminders": {
         "archivable": true,
-        "archiveAfter": {
-          "dateColumn": "date",
-          "after": "1d"
-        },
         "columns": [
           {
             "name": "date",
