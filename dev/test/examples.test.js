@@ -323,3 +323,38 @@ describe('what a <id>-schema.json is, which is what "export as example" has to p
     }
   });
 });
+
+describe('a data file\'s asOf moves its rows to today', () => {
+  const schema = { tables: {
+    classes: { columns: [{ name: 'starts_at', type: 'datetime' }, { name: 'note', type: 'text' }] },
+    visits: { columns: { visited_on: { type: 'date' } } }
+  } };
+  const data = { asOf: '2026-10-12', tables: {
+    classes: [{ id: 'cls-2026-10-12', starts_at: '2026-10-12T14:30:00.000Z', note: '2026-10-12', updated_at: '2026-10-11T08:00:00.000Z' }],
+    visits__archive: [{ id: 'v1', visited_on: '2026-10-01' }]
+  } };
+  const today = new Date(2026, 10, 3, 12);     // 3 Nov, local: 22 days on
+
+  it('date and datetime columns and the row stamps move; ids and text stay', () => {
+    // The file picker hands files over sorted by name: the data before its schema.
+    const m = Examples.mergeFiles([data, schema], { today });
+    const c = m.tables.classes[0];
+    assert.equal(m.tables.visits__archive[0].visited_on, '2026-10-23');
+    assert.equal(c.id, 'cls-2026-10-12');
+    assert.equal(c.note, '2026-10-12');
+    const moved = new Date(c.starts_at), was = new Date('2026-10-12T14:30:00.000Z');
+    assert.deepEqual([moved.getDate(), moved.getMonth(), moved.getHours()], [3, 10, was.getHours()]);   // same wall-clock time
+    assert.equal(c.updated_at.slice(0, 10), '2026-11-02');
+    assert.equal(m.asOf, undefined);
+  });
+
+  it('without asOf (every backup) the dates are what the file says', () => {
+    const backup = { tables: data.tables };
+    assert.equal(Examples.mergeFiles([schema, backup], { today }).tables.visits__archive[0].visited_on, '2026-10-01');
+  });
+
+  it('the schema already installed types the columns when the import carries none', () => {
+    const m = Examples.mergeFiles([data], { today, tables: schema.tables });
+    assert.equal(m.tables.visits__archive[0].visited_on, '2026-10-23');
+  });
+});

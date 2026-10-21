@@ -378,6 +378,8 @@ function createVueApp() {
       signInOpen: false, authEmail: '', authCode: '', authSent: false, authCodeAllowed: false, authBusy: false, authError: '', authLinkPending: false,
       // A page's `filters` picks, { page: { column: [values] } }, kept per viewer in their browser.
       pagePicks: {},
+      // A page's saved comparison rows, { page: [{ id, picks }] }; see pageCompareRows.
+      pageCompares: {},
       // Settings -> Users: what the admin narrowed the list to (a search, roles, linked lists).
       userFilter: { q: '', roles: [], lists: [] },
       // The scan button (nav.scan): its typing dialog, what is typed, and which view a typed code is for.
@@ -484,10 +486,10 @@ function createVueApp() {
       allGroupIds: function() { return this.sidebarTabs.filter(function(t) { return t.children; }).map(function(t) { return t.id; }); },
       sidebarTabs: function() {
         var self = this;
-        var canAccess = function(id) { return self.canAccessNavId(id); };
+        var canAccess = function(id, needGrant) { return self.canAccessNavId(id) && (!needGrant || self.navGranted(id)); };
         var navCfg = self.navConfig;
         var navItems = (navCfg && Array.isArray(navCfg.items)) ? navCfg.items : [];
-        return Nav.build(navItems, self.t.bind(self), canAccess, { isAdmin: self.isAdmin, hasLookup: self.canUseLookup, views: VIEWS, schema: SCHEMA, display: navCfg && navCfg.display, appearance: (self.appConfig && self.appConfig.navAppearance) || {} });
+        return Nav.build(navItems, self.t.bind(self), canAccess, { isAdmin: self.isAdmin, role: self.isAdmin ? 'admin' : (self.currentUserRole || ''), hasLookup: self.canUseLookup, views: VIEWS, schema: SCHEMA, display: navCfg && navCfg.display, appearance: (self.appConfig && self.appConfig.navAppearance) || {} });
       },
       bottomNavTabs: function() {
         // Schema can define explicit bottom nav items: nav.bottomNav = ["view1", "view2", ...]
@@ -739,6 +741,27 @@ function createVueApp() {
       pagePicked: function() {
         var n = this.currentTable, p = this.pagePicks[n]; if (p) return p;
         try { return JSON.parse(localStorage.getItem('page_filter:' + n) || '{}') || {}; } catch (e) { return {}; }
+      },
+      // Comparison rows, kept in this browser; only addCompareRow/removeCompareRow write them.
+      pageCompareRows: function() {
+        var n = this.currentTable, r = this.pageCompares[n]; if (r) return r;
+        try { var v = JSON.parse(localStorage.getItem('page_compare:' + n) || '[]'); return Array.isArray(v) ? v : []; } catch (e) { return []; }
+      },
+      // Stats views on the page with whole-set `tiles` (rowTiles already compare).
+      pageCompareViews: function() {
+        if (!this.pageFilterCols.length) return [];
+        var out = [];
+        this.pageBlocks.forEach(function(b) {
+          var v = b.embedType === 'view' && VIEWS[b.embedName];
+          if (v && v.stats && Array.isArray(v.stats.tiles) && v.stats.tiles.length && out.indexOf(b.embedName) < 0) out.push(b.embedName);
+        });
+        return out;
+      },
+      pageCompareAnchor: function() { var v = this.pageCompareViews; return v.length ? v[v.length - 1] : null; },
+      pageCompareCols: function() {
+        var self = this, out = [];
+        this.pageCompareViews.forEach(function(n) { VIEWS[n].stats.tiles.forEach(function(t) { out.push(self.tOr(t.label, t.label)); }); });
+        return out;
       },
       sortedUserList: function() {
         return this.userList.slice().sort(function(a, b) {
@@ -1030,7 +1053,8 @@ function createVueApp() {
       scanTargets: function() {
         var self = this, list = (this.navConfig && Array.isArray(this.navConfig.scan)) ? this.navConfig.scan : [];
         if (this.selfUnregistered) return [];
-        return list.filter(function(n) { return VIEWS[n]; }).map(function(n) {
+        // Whoever confirms a code (stamps check-ins, verifies the door) doesn't scan it.
+        return list.filter(function(n) { return VIEWS[n] && !self.rsvpCanStamp(n) && !self.scanCanVerify(n); }).map(function(n) {
           var v = VIEWS[n], kind = SchemaNormalize.viewKind(v);
           var label = kind === 'scan' ? self.tOr(v.scan.label, self.t('scan.code')) : self.t('rsvp.checkin_code');
           return { view: n, label: label };
@@ -1135,7 +1159,7 @@ function createVueApp() {
       // box, nobody can tell whether seven rows matched or seven were hidden. Two numbers and a slash
       // say which is which, and need no translating.
       searchCount: function() {
-        if (!this.searchable || !this.searchTerm) return '';
+        if (!this.searchable || !this.searchTerm || this.currentPage) return '';   // a page's term narrows its lists, not currentData
         var shown = Rows.searchRows(this.currentData, this.searchTerm, this.searchCols, this.searchLabeler).length;
         return shown + ' / ' + this.currentData.length;
       },
@@ -1163,7 +1187,7 @@ function createVueApp() {
         return Leftovers.corpus([doc, VIEWS, this.pageCache, cfg], [doc.tables || {}], [doc.views || [], VIEWS]);
       },
       staticTranslationKeys: function() {
-        return ['app.title', 'btn.add', 'btn.show_active', 'btn.show_archived', 'btn.show_all', 'btn.show_fewer', 'btn.decrease', 'btn.increase', 'settings.linked_list', 'auth.sign_in', 'auth.with_google', 'auth.or', 'auth.email', 'auth.send_email', 'auth.check_email', 'auth.check_email_code', 'auth.code', 'kiosk.fullscreen', 'kiosk.exit', 'kiosk.lock', 'kiosk.unlock', 'kiosk.pin', 'kiosk.pin_short', 'kiosk.wrong_pin', 'btn.more',
+        return ['app.title', 'btn.add', 'btn.show_more', 'btn.compare_add', 'copy.events', 'copy.from', 'copy.to', 'copy.target', 'copy.times', 'copy.count', 'copy.skipped', 'btn.show_active', 'btn.show_archived', 'btn.show_all', 'btn.show_fewer', 'btn.decrease', 'btn.increase', 'settings.linked_list', 'auth.sign_in', 'auth.with_google', 'auth.or', 'auth.email', 'auth.send_email', 'auth.check_email', 'auth.check_email_code', 'auth.code', 'kiosk.fullscreen', 'kiosk.exit', 'kiosk.lock', 'kiosk.unlock', 'kiosk.pin', 'kiosk.pin_short', 'kiosk.wrong_pin', 'btn.more',
          'btn.edit', 'btn.copy', 'btn.show', 'btn.hide', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'cal.feed_url', 'feed.subscribe', 'feed.link_pending', 'feed.unsubscribe', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.no_blob_store', 'msg.feed_cap_reached', 'settings.feeds', 'settings.feed_regenerate', 'settings.feed_unpublish', 'settings.feed_not_republishing', 'settings.feed_all_personal', 'settings.feed_subscribers', 'settings.feed_revoking', 'settings.feed_over_cap', 'settings.feed_unpublished', 'settings.feed_revoked', 'settings.feed_sweep', 'settings.csp_reports', 'settings.csp_token', 'settings.csp_bad_token', 'settings.csp_read_failed', 'settings.csp_none', 'settings.csp_extensions', 'settings.csp_directive', 'settings.csp_blocked', 'settings.csp_count', 'settings.csp_last_seen', 'btn.refresh', 'settings.csp_rotate', 'msg.feed_swept', 'cal.err_no_source', 'cal.err_table', 'cal.err_date_col', 'cal.err_not_date', 'cal.err_title_col', 'settings.add_calendar', 'settings.cal_title', 'settings.cal_table', 'settings.cal_date_col', 'settings.cal_title_cols', 'settings.cal_add_source', 'btn.delete', 'btn.confirm_delete', 'cal.err_not_rotation', 'settings.cal_rotations', 'msg.name_taken', 'cal.err_name', 'lang.add_language', 'btn.cancel', 'timeline.empty', 'col.switch_list',
          'img.replace', 'img.upload', 'img.remove', 'img.url', 'img.view', 'img.open_original',
          'btn.close', 'btn.previous', 'btn.next',
@@ -1454,6 +1478,24 @@ function createVueApp() {
         }
         if (SCHEMA[id]) return self.canReachTable(id);
         return true;
+      },
+      // `requiresGrant`: needs a real grant on the entry's tables; own rows and public tables don't count.
+      navGranted: function(id) {
+        var allowed = this.userAllowedTables;
+        if (!allowed) return true;                                   // admin / unrestricted
+        var has = function(t) { return allowed.indexOf(t) >= 0; };
+        var viewOk = function(n) {
+          var v = VIEWS[n]; if (!v) return has(n);
+          var ts = (v.sources && v.sources.length) ? v.sources : viewImplicitTables(v);
+          return ts.length > 0 && ts.every(has);
+        };
+        var v = VIEWS[id];
+        if (v && typeof v.markdown === 'string') {
+          var body = this.pageCache[id] != null ? this.pageCache[id] : v.markdown;
+          var refs = Embeds.blockRefs(body, id);
+          return refs.length > 0 && refs.every(function(r) { return r.kind === 'table' ? has(r.name) : viewOk(r.name); });
+        }
+        return viewOk(id);
       },
       t: function(key) { return this.strings[key] || key; },
       // Only for keys whose fallback is the DATA the key labels — a column/view/list value, which reads
@@ -1887,16 +1929,23 @@ function createVueApp() {
       // grid to fill in. Prefer somewhere they can actually navigate back to — a nav entry over this
       // table — and fall back to the table itself, which may not be in the menu at all.
       _gridFor: function(table) {
-        var hit = null;
+        var self = this, hit = null, page = null;
+        var edits = function(v) { return v && !v.markdown && !v.board && (v.sources || []).length === 1 && v.sources[0] === table && !v.readonly; };
+        // A page embedding that view shows the new row too (My calendar's workout log).
+        var pageShows = function(name) {
+          var v = VIEWS[name]; if (!v || typeof v.markdown !== 'string') return false;
+          var body = self.pageCache[name] != null ? self.pageCache[name] : v.markdown;
+          return Embeds.blockRefs(body, name).some(function(r) { return r.kind === 'table' ? r.name === table : edits(VIEWS[r.name]); });
+        };
+        if (pageShows(this.currentTable)) return this.currentTable;      // already on it: stay
         (this.sidebarTabs || []).forEach(function(t) {
           (t.children || [t]).forEach(function(e) {
             if (hit || !e || e.divider || !e.id) return;
-            var v = VIEWS[e.id];
-            if (e.id === table) { hit = e.id; return; }
-            if (v && !v.markdown && !v.board && (v.sources || []).length === 1 && v.sources[0] === table && !v.readonly) hit = e.id;
+            if (e.id === table || edits(VIEWS[e.id])) { hit = e.id; return; }
+            if (!page && pageShows(e.id)) page = e.id;
           });
         });
-        return hit || table;
+        return hit || page || table;
       },
       // Board: add a blank card pre-stamped with a lane value (like addRow, but prefilling board.lane so
       // the card lands in the clicked lane). Pushes into currentData so the board re-renders immediately.
@@ -2980,8 +3029,9 @@ function createVueApp() {
         var r = Columns.tableRefCol(SCHEMA, cfg.responses, cfg.events);
         return { linkColumn: r && r.name, eventKey: (r && r.valueCol) || 'id' };
       },
-      rsvpFor: function(name) {
-        var v = VIEWS[name]; if (!v || !v.rsvp) return { events: [], statuses: [] };
+      // `before`, when given, cuts the list at that day (the booking list's `ahead` window).
+      rsvpFor: function(name, before) {
+        var v = VIEWS[name]; if (!v || !v.rsvp) return { events: [], statuses: [], later: 0 };
         var cfg = v.rsvp;
         var events = VIEWS[cfg.events] ? this.embedRows('view', cfg.events) : (this.dataCache[cfg.events] || []);
         var responses = this.dataCache[cfg.responses] || [];
@@ -2989,7 +3039,7 @@ function createVueApp() {
           me: this.currentUserEmail || '', ownerCol: getOwnerCol(cfg.responses) || 'owner', today: fmtDate(new Date()),
           checkinColumn: cfg.checkin && cfg.checkin.codeColumn,
           capacity: this.rsvpCapacity(cfg)
-        }, cfg, this.rsvpLink(cfg)));
+        }, cfg, this.rsvpLink(cfg), { before: before || null }));
       },
       // The response table's `capacity`, as the engine reads it -- null when the table has none.
       rsvpCapacity: function(cfg) {
@@ -3027,6 +3077,11 @@ function createVueApp() {
         if (!t || this.currentUserRole === 'viewer' || this.canSelfServe(t)) return false;
         var w = this.userWritableTables;
         return !w || w.indexOf(t) >= 0;
+      },
+      // The organizer of walk-in events counts at the door instead of booking, on lists and calendars.
+      rsvpCountsWalkIns: function(name) {
+        var v = VIEWS[name], c = v && v.rsvp && this.rsvpCapacity(v.rsvp);
+        return !!(c && c.reserved) && this.rsvpOrganizer(name);
       },
       rsvpCanStamp: function(name) { var v = VIEWS[name]; return !!(v && v.rsvp && v.rsvp.checkin) && this.rsvpOrganizer(name); },
       // A status VALUE's words: `list.<statusList || the status column's list || the column>.<value>`.
@@ -3375,6 +3430,12 @@ function createVueApp() {
           if (s && s.respond) expand(s.respond);
           var parts = (s && s.durationColumn) ? String(s.durationColumn).split('.') : [];
           for (var i = 0; i < parts.length - 1; i++) { var pr = getColumnRef(null, parts[i]); if (!pr || !pr.table) break; push(pr.table); }
+        });
+        // Filter choices come from the cache, so load the catalogue each filter column refers to.
+        [].concat(v.filters || [], (v.calendar && v.calendar.filters) || []).forEach(function(c) {
+          var fr = getColumnRef(null, c), fl = Columns.colIsList(SCHEMA, c);
+          if (fr && fr.table) push(fr.table);
+          else if (fl && SCHEMA[fl] && SCHEMA[fl].isLookup) push(fl);
         });
         AccessFeatures.viewTables(v).forEach(expand);
         viewImplicitTables(v).forEach(expand);
@@ -6872,10 +6933,11 @@ function createVueApp() {
       },
       // Shallow view clone with @me resolved in view.filter + view.groupBy.filter (returns the original
       // untouched when no @me token is present, to avoid needless churn).
-      _viewWithMe: function(view) {
+      // `picks`, when given, narrow it instead of the page's live picks (a comparison row's).
+      _viewWithMe: function(view, picks) {
         if (!view) return view;
         var fs = JSON.stringify([view.filter || null, (view.groupBy && view.groupBy.filter) || null]);
-        var hasMe = fs.indexOf('"@me"') >= 0, hasCal = fs.indexOf('"calendar"') >= 0, narrow = this._pageNarrowing(view);
+        var hasMe = fs.indexOf('"@me"') >= 0, hasCal = fs.indexOf('"calendar"') >= 0, narrow = this._pageNarrowing(view, picks);
         if (!hasMe && !hasCal && !narrow) return view;
         var self = this, res = function(f) { if (hasMe) f = self.resolveMeTokens(f); return hasCal ? self.resolveCalendarPeriods(f) : f; };
         var v = Object.assign({}, view);
@@ -6887,9 +6949,9 @@ function createVueApp() {
       // A page's `filters`: the viewer's picks narrow every view embedded on it -- only the rows that HAVE
       // the column (a visit has a gym but no trainer, so a trainer pick leaves visits alone). Null when the
       // screen is not such a page, or nothing is picked.
-      _pageNarrowing: function(view) {
+      _pageNarrowing: function(view, picks) {
         var cols = this.pageFilterCols; if (!cols.length || view === VIEWS[this.currentTable]) return null;
-        var picked = this.pagePicked, out = [];
+        var picked = picks || this.pagePicked, out = [];
         cols.forEach(function(c) {
           var vals = picked[c] || []; if (!vals.length) return;
           var e = {}; e[c] = { empty: true };
@@ -6902,9 +6964,108 @@ function createVueApp() {
         var all = Object.assign({}, this.pagePicks); all[n] = p; this.pagePicks = all;
         try { localStorage.setItem('page_filter:' + n, JSON.stringify(p)); } catch (e) {}
       },
-      // A filter column's choices -- a ref's catalogue, a list's values -- and its label: shared by a
-      // calendar's and a page's filters.
-      filterOptionsFor: function(col) { return this.colIsRef(col) ? this.getRefOptions(col, {}).filter(function(o) { return o.value !== ''; }) : this.getListOptions(col); },
+      _setCompareRows: function(rows) {
+        var n = this.currentTable, all = Object.assign({}, this.pageCompares); all[n] = rows; this.pageCompares = all;
+        try { localStorage.setItem('page_compare:' + n, JSON.stringify(rows)); } catch (e) {}
+      },
+      // Save the live picks as a row, unless already saved.
+      addCompareRow: function() {
+        var picked = this.pagePicked, picks = {};
+        this.pageFilterCols.forEach(function(c) { if ((picked[c] || []).length) picks[c] = picked[c].slice(); });
+        var key = JSON.stringify(picks);
+        if (this.pageCompareRows.some(function(r) { return JSON.stringify(r.picks) === key; })) return;
+        this._setCompareRows(this.pageCompareRows.concat([{ id: 'cmp-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), picks: picks }]));
+      },
+      removeCompareRow: function(row) {
+        var k = 'compare:' + row.id;
+        if (!this.isArmed(k)) { this.armConfirm(k); return; }
+        this.pendingConfirm = null;
+        this._setCompareRows(this.pageCompareRows.filter(function(r) { return r.id !== row.id; }));
+      },
+      // A page's `search` narrows the lists drawn on it (not embedRows, which lookups also read).
+      pageSearched: function(rows, name) {
+        var p = VIEWS[this.currentTable];
+        if (!p || typeof p.markdown !== 'string' || name === this.currentTable || !this.searchable || !this.searchTerm) return rows;
+        return Rows.searchRows(rows, this.searchTerm, this.searchCols, this.searchLabeler);
+      },
+      // A data view's `copy`, for viewers who may add rows on their own grant.
+      copySpec: function(name) {
+        var v = VIEWS[name], c = v && v.copy;
+        if (!c || !c.dateColumn || (v.sources || []).length !== 1) return null;
+        if (this.embedSelfServeTable('view', name) || !this.canMutateEmbed('view', name)) return null;
+        var t = v.sources[0], reset = c.reset || [];
+        var skip = ['id', 'created_at', 'updated_at', '_status', '_source', 'rosterPublic', 'position', c.dateColumn, getOwnerCol(t)];
+        var keep = getColumns(t).filter(function(col) { return skip.indexOf(col) < 0 && reset.indexOf(col) < 0 && !Columns.isDerived(SCHEMA, t, col); });
+        return { table: t, dateColumn: c.dateColumn, keep: keep };
+      },
+      // Rows a copy reads: view filter and page picks, archived included.
+      _copyRows: function(name) {
+        var v = this._viewWithMe(VIEWS[name]), t = v.sources[0];
+        var raw = Rows.partitionRows(this.dataCache, t, 'active').concat(Rows.partitionRows(this.dataCache, t, 'archive'));
+        return v.filter ? Rows.filterRows(raw, v.filter) : raw;
+      },
+      copyPlanFor: function(name, form) {
+        var s = this.copySpec(name); if (!s) return { rows: [], skipped: 0, first: '', last: '' };
+        var all = Rows.partitionRows(this.dataCache, s.table, 'active').concat(Rows.partitionRows(this.dataCache, s.table, 'archive'));
+        return Calendar.copyPlan(this._copyRows(name), all, { dateColumn: s.dateColumn, from: form.from, to: form.to, target: form.target, times: form.times, keep: s.keep });
+      },
+      // One undo for the whole copy: the adds inside join this action rather than opening one each.
+      copyEvents: function(name, form) {
+        var self = this, s = this.copySpec(name), plan = this.copyPlanFor(name, form);
+        if (!s || !plan.rows.length) return 0;
+        Undo.action('copy', function() { plan.rows.forEach(function(p) { self._createBlankRow(s.table, { prefill: p }); }); });
+        this.notify(this.t('msg.copied') + ': ' + plan.rows.length);
+        return plan.rows.length;
+      },
+      // "Harbour · Mikko, Sanna": each picked column's labels, in the filters' order.
+      compareRowLabel: function(row) {
+        var self = this, parts = [];
+        this.pageFilterCols.forEach(function(c) {
+          var vals = (row.picks || {})[c] || []; if (!vals.length) return;
+          var opts = self.filterOptionsFor(c);
+          parts.push(vals.map(function(v) { var o = opts.find(function(x) { return x.value === v; }); return o ? o.title : v; }).join(', '));
+        });
+        return parts.length ? parts.join(' · ') : this.t('settings.all');
+      },
+      // One value per tile: each stats view run with the row's picks.
+      compareRowValues: function(row) {
+        var self = this, ctx = Object.assign({}, this._embedCtx(), { rowsMemo: null, viewWithMe: function(v) { return self._viewWithMe(v, row.picks || {}); } });
+        var out = [];
+        this.pageCompareViews.forEach(function(n) {
+          Stats.build(Embeds.embedRows('view', n, null, ctx), VIEWS[n].stats).tiles.forEach(function(t) {
+            out.push(t.value == null ? '—' : (t.column && typeof t.value !== 'number') ? self.displayValue(t.column, t.value) : t.value);
+          });
+        });
+        return out;
+      },
+      // A filter column's choices and label; a filterBy ref's repeated names are offered once.
+      filterOptionsFor: function(col) {
+        if (!this.colIsRef(col)) return this.getListOptions(col);
+        var self = this, ref = getColumnRef(null, col), seen = {};
+        return this.getRefOptions(col, {}).filter(function(o) {
+          if (o.value === '' || seen[o.value]) return false;
+          return (seen[o.value] = true);
+        }).map(function(o) { return ref.filterBy ? { title: self.listLabel(ref.table, o.value), value: o.value } : o; });
+      },
+      // Page filters narrow one another: offer values still present in the page's rows under the other picks.
+      pageFilterOptions: function(col) {
+        var self = this, opts = this.filterOptionsFor(col), picked = this.pagePicked;
+        var others = this.pageFilterCols.filter(function(c) { return c !== col && (picked[c] || []).length; });
+        if (!others.length) return opts;
+        var stored = function(defs, c) { return defs[c] && !(typeof defs[c] === 'object' && defs[c].computed); };
+        var have = {}, scanned = false;
+        this._viewTables(this.currentTable).forEach(function(t) {
+          var defs = Columns.columnDefs(SCHEMA[t] || {});
+          if (!stored(defs, col) || !others.every(function(c) { return stored(defs, c); })) return;
+          scanned = true;
+          (self.dataCache[t] || []).concat(self.dataCache[aKey(t)] || []).forEach(function(r) {
+            if (others.every(function(c) { return picked[c].indexOf(r[c]) >= 0; })) have[r[col]] = 1;
+          });
+        });
+        if (!scanned) return opts;
+        (picked[col] || []).forEach(function(v) { have[v] = 1; });
+        return opts.filter(function(o) { return have[o.value]; });
+      },
       fieldLabelFor: function(col) { return this.tOr('field.' + col, col); },
       // The period calendar `name` shows: the one on screen, or -- when it is not mounted -- its default
       // view around today, which is what it would show when opened.
@@ -7552,7 +7713,7 @@ function createVueApp() {
         // not merge differently because somebody ctrl-clicked upwards.
         files.sort(function(a, b) { return a.name.localeCompare(b.name); });
         Promise.all(files.map(read))
-          .then(function(parsed) { self.applyBundle(Examples.mergeFiles(parsed)); })
+          .then(function(parsed) { self.applyBundle(Examples.mergeFiles(parsed, { tables: SCHEMA })); })
           .catch(function(err) { self.importProgress = null; self.notify(self.t('msg.import_error') + ' ' + err.message); });
       },
       // THE import: everything that turns a parsed bundle into a database. Two callers -- the file
@@ -8683,7 +8844,7 @@ function createVueApp() {
       },
       rows: function() {
         if (this.spec) return (this.spec.config.filterBy && this.row) ? appInstance.embedRowsForItem(this.spec, this.row) : this.spec.rows;
-        return appInstance ? appInstance.embedRows(this.type, this.name, this.effPart) : [];
+        return appInstance ? appInstance.pageSearched(appInstance.embedRows(this.type, this.name, this.effPart), this.name) : [];
       },
       // What a table layout renders: `rows` (already in the embed's defaultSort) until the reader clicks a
       // header, then re-sorted through the same sortByCol the primary grid uses, so a ref or lookup-backed
@@ -8797,7 +8958,7 @@ function createVueApp() {
       + '<v-table v-else density="compact" class="my-2"><template v-slot:default>'
       + '<thead><tr><th v-for="c in cols" :key="c" style="cursor:pointer" @click="toggleSort(c)" :aria-sort="ariaSort(c)" :data-testid="\'embed-sort-\' + c">{{ t(\'field.\' + c) || c }}</th><th v-if="canMutate"></th></tr></thead>'
       + '<tbody><tr v-for="(item, ri) in shown" :key="item.id || ri"><td v-for="col in cols" :key="col">'
-      + '<data-cell v-if="!colHidden(col, item)" :item="item" :col="col" :owner="name" :readonly="!!effPart" :embed="true"></data-cell>'
+      + '<data-cell v-if="!colHidden(col, item)" :item="item" :col="col" :owner="name" :readonly="!!effPart" :embed="true" in-grid></data-cell>'
       + '</td><td v-if="canMutate" style="white-space:nowrap"><template v-if="canMutateRow(item)">'
       + '<confirm-x v-if="hasArchive" :armed="isArchArmed(item)" action="archive" dense @click="archRow(item)"></confirm-x>'
       + '<confirm-x :armed="isDelArmed(item)" dense @click="delRow(item)"></confirm-x>'
@@ -8827,7 +8988,9 @@ function createVueApp() {
       readonly: { type: Boolean, default: false },
       embed: { type: Boolean, default: false },
       // An image cell whose picture is already on screen (a gallery tile): its controls without the thumbnail.
-      noThumb: { type: Boolean, default: false }
+      noThumb: { type: Boolean, default: false },
+      // In a table row a `cards` picker is a dropdown.
+      inGrid: { type: Boolean, default: false }
     },
     methods: Object.assign({}, ROOT_PROXY, {
       cellRO: function(item, col) { return this.readonly || appInstance.cellReadonly(item, col, this.owner); },
@@ -8836,7 +8999,7 @@ function createVueApp() {
       colAllowNew: function(col) { return appInstance.colAllowNew(col); },
       colIsList: function(col) { return appInstance.colIsList(col); },
       colIsRef: function(col) { return appInstance.colIsRef(col); },
-      colPicker: function(col) { return appInstance.colPicker(col); },
+      colPicker: function(col) { var p = appInstance.colPicker(col); return (this.inGrid && p === 'cards') ? null : p; },
       colListSwitch: function(col) { return appInstance.colListSwitch(col); },
       getListOptions: function(col) { return appInstance.getListOptions(col); },
       // A dropdown option's second line: the role under a linked person's name (listRole).
@@ -9008,7 +9171,7 @@ function createVueApp() {
     template: ''
       + '<span v-if="ev" class="d-inline-flex align-center" style="gap:8px" data-testid="cal-book">'
       +   '<span v-if="a.rsvpPlacesShown(view, ev)" style="font-size:0.75rem;opacity:0.7">{{ a.rsvpPlacesText(view, ev) }}</span>'
-      +   '<rsvp-picker :options="a.rsvpOptions(view)" :picker="picker" :value="ev.myStatus" :disabled="a.rsvpLocked(view, ev)" @set="a.setRsvp(view, ev.key, $event || \'\')"></rsvp-picker>'
+      +   '<rsvp-picker v-if="!a.rsvpCountsWalkIns(view)" :options="a.rsvpOptions(view)" :picker="picker" :value="ev.myStatus" :disabled="a.rsvpLocked(view, ev)" @set="a.setRsvp(view, ev.key, $event || \'\')"></rsvp-picker>'
       + '</span>'
   });
 
@@ -10668,16 +10831,18 @@ function createVueApp() {
     // null = the engine's own order (chronological, upcoming first) -- the view's natural default.
     // `pageQr`: the organizer's "QR code for this page" dialog, for a tablet or a printout at the venue.
     // `now`: ticks every 30 s, so an event closes on screen when its booking window does.
-    data: function() { return { sortCol: null, sortAsc: true, pageQr: false }; },
+    data: function() { return { sortCol: null, sortAsc: true, pageQr: false, spans: 1 }; },
     computed: {
       a: function() { return appInstance; },
       viewName: function() { return this.name || appInstance.currentTable; },
       cfg: function() { return (VIEWS[this.viewName] && VIEWS[this.viewName].rsvp) || {}; },
-      data: function() { return appInstance.rsvpFor(this.viewName); },
+      // `ahead`: show that far from today; Show more adds another span.
+      before: function() { return this.cfg.ahead ? Rotation.dayAfter(fmtDate(new Date()), this.cfg.ahead, this.spans) : null; },
+      data: function() { return appInstance.rsvpFor(this.viewName, this.before); },
       canStamp: function() { return appInstance.rsvpCanStamp(this.viewName); },
       // The response table's `capacity.reserved` (walk-ins), which staff set where their own response would be.
       reservedCol: function() { var c = appInstance.rsvpCapacity(this.cfg); return (c && c.reserved) || ''; },
-      walkIns: function() { return !!this.reservedCol && this.organizer; },
+      walkIns: function() { return appInstance.rsvpCountsWalkIns(this.viewName); },
       organizer: function() { return appInstance.rsvpOrganizer(this.viewName); },
       pageLink: function() { return appInstance.viewDeepLink(this.viewName); },
       pageTitle: function() { return appInstance.t('view.' + this.viewName) || this.viewName; },
@@ -10801,6 +10966,8 @@ function createVueApp() {
       + '</v-card>'
       + '<div v-if="!events.length" class="pa-2" style="opacity:0.6">{{ a.t(\'rsvp.none\') }}</div>'
       + '</div>'
+      // After both layouts, so it doesn't split the v-if/v-else pair.
+      + '<v-btn v-if="data.later" variant="text" size="small" prepend-icon="mdi-chevron-down" data-testid="rsvp-more" @click="spans++">{{ a.t(\'btn.show_more\') }} ({{ data.later }})</v-btn>'
       + '</component>'
   });
 
@@ -11084,6 +11251,93 @@ function createVueApp() {
       + '</component>'
   });
 
+  // Copy events: the button and dialog under a view with `copy`.
+  app.component('copy-events', {
+    props: { view: String },
+    data: function() {
+      var today = fmtDate(new Date());
+      return { open: false, form: { from: today, to: today, target: today, times: 1 } };
+    },
+    computed: {
+      a: function() { return appInstance; },
+      plan: function() { return this.open ? this.a.copyPlanFor(this.view, this.form) : { rows: [], skipped: 0, first: '', last: '' }; }
+    },
+    // Keep `to` on or after `from`.
+    watch: {
+      'form.from': function(v) { if (v && (!this.form.to || this.form.to < v)) this.form.to = v; }
+    },
+    methods: {
+      label: function(d) { return d ? this.a.dateLabel(d) : ''; },
+      run: function() { if (this.a.copyEvents(this.view, this.form)) this.open = false; }
+    },
+    template: ''
+      + '<div class="mt-2 mb-3">'
+      + '<v-btn variant="outlined" size="small" prepend-icon="mdi-content-duplicate" data-testid="copy-events" @click="open = true">{{ a.t(\'copy.events\') }}</v-btn>'
+      + '<v-dialog v-model="open" max-width="460">'
+      + '<v-card class="pa-4" data-testid="copy-dialog">'
+      + '<v-card-title class="px-0 pt-0">{{ a.t(\'copy.events\') }}</v-card-title>'
+      + '<div class="d-flex flex-wrap" style="gap:8px">'
+      + '<v-text-field v-model="form.from" type="date" :label="a.t(\'copy.from\')" density="compact" variant="outlined" hide-details style="min-width:150px" data-testid="copy-from"></v-text-field>'
+      + '<v-text-field v-model="form.to" type="date" :min="form.from" :label="a.t(\'copy.to\')" density="compact" variant="outlined" hide-details style="min-width:150px" data-testid="copy-to"></v-text-field>'
+      + '<v-text-field v-model="form.target" type="date" :label="a.t(\'copy.target\')" density="compact" variant="outlined" hide-details style="min-width:150px" data-testid="copy-target"></v-text-field>'
+      + '</div>'
+      + '<div class="d-flex align-center mt-3" style="gap:8px"><span>{{ a.t(\'copy.times\') }}</span><count-stepper :value="form.times" @change="form.times = $event"></count-stepper></div>'
+      + '<div class="mt-3" style="font-variant-numeric:tabular-nums" data-testid="copy-preview">'
+      + '<div>{{ a.t(\'copy.count\') }}: <b data-testid="copy-count">{{ plan.rows.length }}</b><span v-if="plan.first" style="opacity:0.7"> · {{ label(plan.first) }} – {{ label(plan.last) }}</span></div>'
+      + '<div v-if="plan.skipped" style="opacity:0.7">{{ a.t(\'copy.skipped\') }}: <span data-testid="copy-skipped">{{ plan.skipped }}</span></div>'
+      + '</div>'
+      + '<div class="d-flex mt-4" style="gap:8px"><v-spacer></v-spacer>'
+      + '<v-btn @click="open = false">{{ a.t(\'btn.cancel\') }}</v-btn>'
+      + '<v-btn variant="flat" color="primary" :disabled="!plan.rows.length" data-testid="copy-run" @click="run()">{{ a.t(\'copy.events\') }}</v-btn>'
+      + '</div>'
+      + '</v-card></v-dialog>'
+      + '</div>'
+  });
+
+  // Comparison rows: Add button and table, sortable by tile; the sort is kept per page in this browser.
+  app.component('compare-rows', {
+    props: { page: String },
+    data: function() {
+      var s = {};
+      try { s = JSON.parse(localStorage.getItem('page_compare_sort:' + this.page) || '{}') || {}; } catch (e) {}
+      return { sortCol: s.col !== undefined ? s.col : null, sortAsc: s.asc !== false };
+    },
+    computed: {
+      a: function() { return appInstance; },
+      lines: function() {
+        var a = this.a, col = this.sortCol, dir = this.sortAsc ? 1 : -1;
+        var out = a.pageCompareRows.map(function(r) { return { row: r, label: a.compareRowLabel(r), values: a.compareRowValues(r) }; });
+        if (col === null) return out;
+        return out.slice().sort(function(x, y) {
+          var p = x.values[col], q = y.values[col];
+          var pn = typeof p === 'number', qn = typeof q === 'number';
+          if (pn !== qn) return pn ? -1 : 1;                                  // a number before an em dash, either way
+          if (pn && qn) return (p - q) * dir;
+          return String(p).localeCompare(String(q)) * dir;
+        });
+      }
+    },
+    watch: {
+      sortCol: function() { this.saveSort(); },
+      sortAsc: function() { this.saveSort(); }
+    },
+    methods: Object.assign({
+      saveSort: function() { try { localStorage.setItem('page_compare_sort:' + this.page, JSON.stringify({ col: this.sortCol, asc: this.sortAsc })); } catch (e) {} }
+    }, SORT_UI),
+    template: ''
+      + '<div class="mt-3 mb-3" data-testid="compare">'
+      + '<v-btn variant="outlined" size="small" prepend-icon="mdi-table-row-plus-after" data-testid="compare-add" @click="a.addCompareRow()">{{ a.t(\'btn.compare_add\') }}</v-btn>'
+      + '<v-table v-if="lines.length" density="compact" class="mt-2" data-testid="compare-table">'
+      + '<thead><tr><th></th>'
+      + '<th v-for="(c, ci) in a.pageCompareCols" :key="ci" class="text-right" style="cursor:pointer" @click="toggleSort(ci)" :aria-sort="ariaSort(ci)" :data-testid="\'compare-sort-\' + ci">{{ c }}</th><th></th></tr></thead>'
+      + '<tbody><tr v-for="l in lines" :key="l.row.id" data-testid="compare-row">'
+      + '<td data-testid="compare-label">{{ l.label }}</td>'
+      + '<td v-for="(v, vi) in l.values" :key="vi" class="text-right" style="font-variant-numeric:tabular-nums" data-testid="compare-value">{{ v }}</td>'
+      + '<td class="text-right" style="width:1%"><confirm-x dense :armed="a.isArmed(\'compare:\' + l.row.id)" @click="a.removeCompareRow(l.row)"></confirm-x></td>'
+      + '</tr></tbody></v-table>'
+      + '</div>'
+  });
+
   app.component('page-view', {
     computed: { a: function() { return appInstance; } },
     template: ''
@@ -11093,10 +11347,14 @@ function createVueApp() {
       + '<v-btn v-if="a.pageEditing" size="small" color="primary" prepend-icon="mdi-content-save" @click="a.savePage()" class="ml-2">{{ a.t(\'btn.save\') }}</v-btn></div>'
       + '<v-textarea v-if="a.pageEditing" :model-value="a.pageEditText" @update:model-value="a.pageEditText = $event" auto-grow variant="outlined" density="compact" placeholder="# Markdown — embed views with {{view:name}} or {{table:name}}"></v-textarea>'
       + '<template v-else>'
-      + '<pick-filters v-if="a.pageFilterCols.length" class="mb-3" data-testid="page-filters" :cols="a.pageFilterCols" :picked="a.pagePicked" :items="a.filterOptionsFor" :label="a.fieldLabelFor" test-prefix="page-filter" @set="a.setPagePick"></pick-filters>'
+      + '<v-text-field v-if="a.searchable" v-model="a.searchTerm" data-testid="view-search" density="compact" variant="outlined" hide-details clearable prepend-inner-icon="mdi-magnify" :label="a.t(\'btn.search\')" class="mb-3" style="max-width:420px"></v-text-field>'
+      + '<pick-filters v-if="a.pageFilterCols.length" class="mb-3" data-testid="page-filters" :cols="a.pageFilterCols" :picked="a.pagePicked" :items="a.pageFilterOptions" :label="a.fieldLabelFor" test-prefix="page-filter" @set="a.setPagePick"></pick-filters>'
       + '<template v-for="(blk, bi) in a.pageBlocks" :key="bi">'
       + '<div v-if="blk.html" v-html="blk.html"></div>'
       + '<embed-view v-else :type="blk.embedType" :name="blk.embedName" :part="blk.embedPart" :both="blk.embedBoth"></embed-view>'
+      // The comparison sits under the stats it compares.
+      + '<compare-rows v-if="!blk.html && blk.embedName === a.pageCompareAnchor" :page="a.currentTable" :key="\'cmp-\' + a.currentTable"></compare-rows>'
+      + '<copy-events v-if="!blk.html && blk.embedType === \'view\' && a.copySpec(blk.embedName)" :view="blk.embedName"></copy-events>'
       + '</template>'
       + '</template>'
       + '</v-card>'

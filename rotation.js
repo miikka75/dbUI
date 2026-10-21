@@ -94,6 +94,46 @@
     return { count: n, unit: u };
   }
 
+  // A duration: whole number + min|h|d|w|m|y (`m` is months, as in intervals) -> { count, unit } or null.
+  function parseDuration(spec) {
+    var m = /^(\d+)\s*(min|h|d|w|m|y)$/.exec(String(spec == null ? '' : spec).trim().toLowerCase());
+    return m ? { count: parseInt(m[1], 10), unit: m[2] } : null;
+  }
+
+  // `when` minus a duration; months clamp to the month's last day (31 Mar - 1m = 28/29 Feb).
+  function minusDuration(when, spec) {
+    var p = parseDuration(spec);
+    var d = new Date(when instanceof Date ? when.getTime() : Date.parse(when));
+    if (!p || isNaN(d.getTime())) return null;
+    if (p.unit === 'm' || p.unit === 'y') {
+      var day = d.getDate();
+      d.setDate(1);
+      d.setMonth(d.getMonth() - p.count * (p.unit === 'y' ? 12 : 1));
+      d.setDate(Math.min(day, new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()));
+      return d;
+    }
+    return new Date(d.getTime() - p.count * { min: 60000, h: 3600000, d: 86400000, w: 604800000 }[p.unit]);
+  }
+
+  // The day a duration (x `times`) after `day`, in calendar days; h/min count from now.
+  function dayAfter(day, spec, times) {
+    var p = parseDuration(spec), n = (times > 0 ? times : 1);
+    if (!p) return null;
+    if (p.unit === 'min' || p.unit === 'h') {
+      var t = new Date(Date.now() + n * p.count * (p.unit === 'h' ? 3600000 : 60000));
+      return fmtDate(t);
+    }
+    var q = String(day).split('-'), d = new Date(+q[0], +q[1] - 1, +q[2]);
+    if (p.unit === 'd' || p.unit === 'w') d.setDate(d.getDate() + n * p.count * (p.unit === 'w' ? 7 : 1));
+    else {
+      var dd = d.getDate();
+      d.setDate(1);
+      d.setMonth(d.getMonth() + n * p.count * (p.unit === 'y' ? 12 : 1));
+      d.setDate(Math.min(dd, new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()));   // 31 Jan + 1m: 28 Feb
+    }
+    return fmtDate(d);
+  }
+
   // True if `interval` is an accepted spec (named alias or "<n><d|w|m|y>"). Validation uses this so
   // typos surface at load instead of silently resolving to weekly.
   function isValidInterval(interval) {
@@ -288,6 +328,7 @@
   var M = {
     resolveByOccurrence: resolveByOccurrence, sortRosterRows: sortRosterRows, resolveByCalendar: resolveByCalendar,
     resolveAnchorDate: resolveAnchorDate, parseInterval: parseInterval, isValidInterval: isValidInterval,
+    parseDuration: parseDuration, minusDuration: minusDuration, dayAfter: dayAfter,
     wholeIntervalsBetween: wholeIntervalsBetween, addIntervals: addIntervals, buildRotationViewRows: buildRotationViewRows,
     rosterGroups: rosterGroups, isSlot: isSlot, isEmptyGroup: isEmptyGroup
   };

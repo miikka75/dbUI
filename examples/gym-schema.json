@@ -43,6 +43,7 @@
       "news": "r",
       "coach_library": "r",
       "ref_gyms": "r",
+      "ref_rooms": "r",
       "ref_class_types": "r",
       "ref_plans": "r",
       "ref_exercises": "r",
@@ -70,6 +71,26 @@
         },
         {
           "name": "code",
+          "type": "text"
+        }
+      ]
+    },
+    "ref_rooms": {
+      "isLookup": true,
+      "hierarchy": {
+        "parent": "gym",
+        "value": "room"
+      },
+      "public": true,
+      "columns": [
+        {
+          "name": "gym",
+          "type": "ref",
+          "table": "ref_gyms",
+          "valueCol": "gym"
+        },
+        {
+          "name": "room",
           "type": "text"
         }
       ]
@@ -140,6 +161,10 @@
     },
     "classes": {
       "archivable": true,
+      "archiveAfter": {
+        "dateColumn": "starts_at",
+        "after": "2h"
+      },
       "defaultSort": "starts_at",
       "public": true,
       "columns": [
@@ -161,10 +186,12 @@
         },
         {
           "name": "room",
-          "type": "select",
-          "list": "rooms",
-          "allowNew": true,
-          "sorted": true
+          "type": "ref",
+          "table": "ref_rooms",
+          "valueCol": "room",
+          "filterBy": {
+            "gym": "gym"
+          }
         },
         {
           "name": "instructor",
@@ -179,7 +206,8 @@
         },
         {
           "name": "booked",
-          "type": "number"
+          "type": "number",
+          "default": 0
         },
         {
           "name": "walk_ins",
@@ -259,6 +287,17 @@
               "match": "class",
               "on": "id",
               "field": "gym"
+            }
+          }
+        },
+        {
+          "name": "room",
+          "computed": {
+            "lookup": {
+              "table": "classes",
+              "match": "class",
+              "on": "id",
+              "field": "room"
             }
           }
         },
@@ -701,7 +740,7 @@
           "granted",
           "denied"
         ],
-        "days": 1
+        "after": "1d"
       }
     },
     "pauses": {
@@ -864,6 +903,7 @@
       "rsvp": {
         "events": "classes",
         "dateColumn": "starts_at",
+        "ahead": "3d",
         "titleColumns": [
           "class_type",
           "instructor",
@@ -1432,34 +1472,40 @@
       "markdown": "## {{t:text.membership_mine}}\n\n{{view:my_membership?}}\n\n## {{t:text.membership_buy}}\n\n{{view:membership_buy}}\n\n## {{t:text.pause_heading}}\n\n{{view:pauses_mine?}}\n\n{{view:pause_form}}\n"
     },
     {
-      "name": "membership_board",
-      "kind": "board",
+      "name": "membership_desk",
+      "kind": "page",
+      "icon": "mdi-card-account-details-star",
+      "filters": [
+        "membership_status",
+        "plan"
+      ],
+      "search": [
+        "owner"
+      ],
+      "markdown": "{{view:membership_list}}\n"
+    },
+    {
+      "name": "membership_list",
+      "kind": "data",
       "icon": "mdi-card-account-details-star",
       "sources": [
         "memberships"
       ],
       "mode": "join",
+      "layout": "table",
       "defaultSort": "start_on",
-      "columns": [
-        "owner",
-        "start_on",
-        "pauses_used",
-        "valid_until"
-      ],
-      "board": {
-        "lane": "membership_status",
-        "lanes": [
-          "pending",
-          "active",
-          "paused",
-          "ended"
-        ],
-        "title": "plan",
-        "color": "owner"
-      },
+      "defaultSortDesc": true,
       "filter": {
         "order_state": "submitted"
-      }
+      },
+      "columns": [
+        "owner",
+        "plan",
+        "membership_status",
+        "start_on",
+        "valid_until",
+        "pauses_used"
+      ]
     },
     {
       "name": "pt_mine",
@@ -1619,7 +1665,14 @@
       ],
       "mode": "union",
       "filter": {
-        "attendance": "attended"
+        "$and": [
+          {
+            "owner": "@me"
+          },
+          {
+            "attendance": "attended"
+          }
+        ]
       },
       "readonly": true,
       "includeArchive": true,
@@ -1681,19 +1734,26 @@
       ],
       "mode": "union",
       "filter": {
-        "$or": [
+        "$and": [
           {
-            "attendance": "attended"
+            "owner": "@me"
           },
           {
-            "$and": [
+            "$or": [
               {
-                "sent": "yes"
+                "attendance": "attended"
               },
               {
-                "claim_status": {
-                  "ne": "denied"
-                }
+                "$and": [
+                  {
+                    "sent": "yes"
+                  },
+                  {
+                    "claim_status": {
+                      "ne": "denied"
+                    }
+                  }
+                ]
               }
             ]
           }
@@ -2008,7 +2068,14 @@
       "readonly": true,
       "defaultSort": "starts_on",
       "filter": {
-        "sent": "yes"
+        "$and": [
+          {
+            "owner": "@me"
+          },
+          {
+            "sent": "yes"
+          }
+        ]
       },
       "columns": [
         "membership",
@@ -2043,23 +2110,64 @@
       }
     },
     {
+      "name": "class_schedule",
+      "kind": "page",
+      "icon": "mdi-calendar-edit",
+      "filters": [
+        "gym",
+        "room",
+        "class_type",
+        "instructor"
+      ],
+      "markdown": "{{view:class_list@both}}\n"
+    },
+    {
+      "name": "class_list",
+      "kind": "data",
+      "icon": "mdi-calendar-edit",
+      "sources": [
+        "classes"
+      ],
+      "mode": "union",
+      "layout": "table",
+      "defaultSort": "starts_at",
+      "columns": [
+        "starts_at",
+        "class_type",
+        "gym",
+        "room",
+        "instructor",
+        "capacity",
+        "booked",
+        "walk_ins"
+      ],
+      "copy": {
+        "dateColumn": "starts_at",
+        "reset": [
+          "booked",
+          "walk_ins"
+        ]
+      }
+    },
+    {
       "name": "doc_stats",
       "kind": "page",
       "icon": "mdi-chart-box",
       "filters": [
         "gym",
+        "room",
         "class_type",
         "instructor"
       ],
-      "markdown": "## {{t:text.stats_overview}}\n\n{{view:stats_totals}}\n\n## {{t:text.stats_classes}}\n\n{{view:stats_by_class}}\n\n## {{t:text.stats_trainers}}\n\n{{view:stats_by_trainer}}\n\n## {{t:text.stats_gyms}}\n\n{{view:stats_by_gym}}\n"
+      "markdown": "{{view:stats_totals}}\n"
     },
     {
       "name": "stats_totals",
       "kind": "stats",
       "icon": "mdi-chart-bar",
       "sources": [
-        "visits",
-        "bookings"
+        "bookings",
+        "classes"
       ],
       "mode": "union",
       "readonly": true,
@@ -2068,26 +2176,29 @@
         "display": "number",
         "tiles": [
           {
-            "label": "text.total_visits",
+            "label": "text.stat_total_attendance",
             "agg": "count",
             "when": {
-              "verified": "yes"
-            }
+              "attendance": "attended"
+            },
+            "plus": [
+              {
+                "agg": "sum",
+                "column": "walk_ins"
+              }
+            ]
           },
           {
-            "label": "text.stat_visitors",
-            "agg": "distinct",
-            "column": "owner",
-            "when": {
-              "verified": "yes"
-            }
-          },
-          {
-            "label": "text.classes_attended",
+            "label": "text.stat_checkins",
             "agg": "count",
             "when": {
               "attendance": "attended"
             }
+          },
+          {
+            "label": "text.stat_walk_ins",
+            "agg": "sum",
+            "column": "walk_ins"
           },
           {
             "label": "text.stat_attendees",
@@ -2096,122 +2207,15 @@
             "when": {
               "attendance": "attended"
             }
+          },
+          {
+            "label": "text.stat_no_shows",
+            "agg": "count",
+            "when": {
+              "attendance": "no_show"
+            }
           }
         ]
-      }
-    },
-    {
-      "name": "stats_by_class",
-      "kind": "stats",
-      "icon": "mdi-chart-bar",
-      "sources": [
-        "bookings"
-      ],
-      "mode": "union",
-      "readonly": true,
-      "includeArchive": true,
-      "filter": {
-        "attendance": "attended"
-      },
-      "groupBy": {
-        "column": "class_type",
-        "from": [
-          "class_type"
-        ]
-      },
-      "aggregate": {
-        "count": true,
-        "into": "attended"
-      },
-      "columns": [
-        "class_type",
-        "attended"
-      ],
-      "defaultSort": "attended",
-      "defaultSortDesc": true,
-      "stats": {
-        "rowTiles": {
-          "label": "class_type",
-          "value": "attended"
-        },
-        "goal": "max",
-        "display": "bar"
-      }
-    },
-    {
-      "name": "stats_by_trainer",
-      "kind": "stats",
-      "icon": "mdi-chart-bar",
-      "sources": [
-        "bookings"
-      ],
-      "mode": "union",
-      "readonly": true,
-      "includeArchive": true,
-      "filter": {
-        "attendance": "attended"
-      },
-      "groupBy": {
-        "column": "instructor",
-        "from": [
-          "instructor"
-        ]
-      },
-      "aggregate": {
-        "count": true,
-        "into": "attended"
-      },
-      "columns": [
-        "instructor",
-        "attended"
-      ],
-      "defaultSort": "attended",
-      "defaultSortDesc": true,
-      "stats": {
-        "rowTiles": {
-          "label": "instructor",
-          "value": "attended"
-        },
-        "goal": "max",
-        "display": "bar"
-      }
-    },
-    {
-      "name": "stats_by_gym",
-      "kind": "stats",
-      "icon": "mdi-chart-bar",
-      "sources": [
-        "visits"
-      ],
-      "mode": "union",
-      "readonly": true,
-      "includeArchive": true,
-      "filter": {
-        "verified": "yes"
-      },
-      "groupBy": {
-        "column": "gym",
-        "from": [
-          "gym"
-        ]
-      },
-      "aggregate": {
-        "count": true,
-        "into": "visits"
-      },
-      "columns": [
-        "gym",
-        "visits"
-      ],
-      "defaultSort": "visits",
-      "defaultSortDesc": true,
-      "stats": {
-        "rowTiles": {
-          "label": "gym",
-          "value": "visits"
-        },
-        "goal": "max",
-        "display": "bar"
       }
     }
   ],
@@ -2225,19 +2229,28 @@
         "view": "class_calendar"
       },
       {
-        "view": "doc_mycal"
+        "view": "doc_mycal",
+        "roles": [
+          "viewer"
+        ]
       },
       {
         "view": "doc_membership",
-        "hideFromAdmin": true
+        "roles": [
+          "viewer"
+        ]
       },
       {
         "view": "pt_mine",
-        "hideFromAdmin": true
+        "roles": [
+          "viewer"
+        ]
       },
       {
         "view": "doc_loyalty",
-        "hideFromAdmin": true
+        "roles": [
+          "viewer"
+        ]
       },
       {
         "view": "coach"
@@ -2248,7 +2261,6 @@
       {
         "group": "Front desk",
         "icon": "mdi-desk",
-        "adminOnly": true,
         "items": [
           {
             "view": "class_booking"
@@ -2257,7 +2269,7 @@
             "view": "visit_scan"
           },
           {
-            "view": "membership_board"
+            "view": "membership_desk"
           },
           {
             "view": "pt_board"
@@ -2269,7 +2281,7 @@
             "view": "doc_stats"
           },
           {
-            "table": "classes"
+            "view": "class_schedule"
           },
           {
             "table": "news"
@@ -2277,7 +2289,12 @@
           {
             "table": "coach_library"
           }
-        ]
+        ],
+        "roles": [
+          "admin",
+          "editor"
+        ],
+        "requiresGrant": true
       }
     ],
     "bottomNav": [

@@ -183,3 +183,20 @@ describe('rsvp.js — walk-ins take places, and who has arrived', () => {
     assert.deepEqual(out.participants.map((p) => [p.id, p.arrived]), [['b1', true], ['b2', false]]);
   });
 });
+
+describe('rsvp.js -- `before`: the booking list cut at a day, the rest counted', () => {
+  const R = require('../../rotation');
+  const evs = ['2026-10-19', '2026-10-20', '2026-10-21', '2026-10-22', '2026-10-25'].map((d, i) => ({ id: 'e' + i, date: d }));
+  const base = { me: 'a@x', dateColumn: 'date', today: '2026-10-19', statusColumn: 'status', linkColumn: 'event', eventKey: 'id' };
+  it('keeps the days before `before`, counts the later ones, and without it keeps everything', () => {
+    const r = Rsvp.build(evs, [], Object.assign({ before: R.dayAfter('2026-10-19', '3d') }, base));
+    assert.deepEqual([r.events.map((e) => e.date), r.later], [['2026-10-19', '2026-10-20', '2026-10-21'], 2]);
+    const all = Rsvp.build(evs, [], base);
+    assert.deepEqual([all.events.length, all.later], [5, 0]);
+  });
+  it('dayAfter: calendar days, times repeats, a month clamps to its last day', () => {
+    assert.deepEqual([R.dayAfter('2026-10-19', '3d'), R.dayAfter('2026-10-19', '3d', 2), R.dayAfter('2026-10-24', '1w'), R.dayAfter('2026-01-31', '1m')],
+      ['2026-10-22', '2026-10-25', '2026-10-31', '2026-02-28']);
+    assert.equal(R.dayAfter('2026-10-19', 'soon'), null);
+  });
+});

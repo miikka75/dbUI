@@ -12,9 +12,7 @@
 // board demo (tickets/ticket_stages) was added to the JSON and never to the generator, so regenerating
 // silently deleted it. The files are the only copy now, and this only applies them.
 //
-// The cost of that is dates: they are fixed at whatever the files say, so the leaderboard's "this
-// week" and the RSVP demo's "upcoming" drift out of the current period as the files age. Edit the
-// dates in examples/demo-data.json when it matters (and re-run scripts/examples-manifest.js after).
+// Dates: a data file's `asOf` moves its rows to today (Examples.rebaseDates).
 //
 // Users, profiles and user-linked-list links are seeded here too but are DELIBERATELY NOT in the bundle:
 // access grants and identity are per-deployment security data, not portable content you would import.
@@ -24,6 +22,7 @@
 'use strict';
 const fs = require('fs');
 const path = require('path');
+const Examples = require('../examples');
 const PORT = process.env.PORT || 3000;
 const BASE = 'http://127.0.0.1:' + PORT + '/api/';
 // examples/ rather than dev/: dev/ is pruned from both publish paths, so a schema kept there can
@@ -49,6 +48,14 @@ const CHORES_MEMBER = { chore_log: 'rw', reward_claim: 'rw', home_shopping: 'rw'
 // A member's access is the gym schema's own `newUser` grant -- what approving a request gives -- so a
 // seeded member and an approved one read exactly the same tables.
 const GYM_MEMBER = require('../examples/gym-schema.json').newUser.tables;
+// The front desk is an editor: no grant on members' training; approvals stay with the owner admin.
+const GYM_DESK = { classes: 'rw', bookings: 'rw', visits: 'rw', memberships: 'rw', pt_sessions: 'rw', reward_claims: 'rw',
+  news: 'rw', coach_library: 'rw', pauses: 'r', ref_gyms: 'r', ref_rooms: 'r', ref_class_types: 'r', ref_plans: 'r',
+  ref_exercises: 'r', ref_rewards: 'r' };
+// The door tablet: writes the visit log, reads the gyms.
+const GYM_DOOR = { visits: 'rw', ref_gyms: 'r' };
+// The members whose bookings fill the front desk's statistics (examples/gym-data.json).
+const GYM_MORE = ['Liisa', 'Juha', 'Mari', 'Tuomas', 'Emma', 'Ville', 'Sara', 'Oskari', 'Helmi', 'Niko'];
 const SEED = {
   demo: {
     users: [
@@ -94,22 +101,26 @@ const SEED = {
   // reference data. The front desk (local@dev) runs the schedule, memberships and PT requests.
   gym: {
     users: [
-      { email: 'local@dev', role: 'admin',  tables: 'all' },
+      { email: 'local@dev', role: 'admin',  tables: 'all' },        // the owner: approvals, schema, settings
+      { email: 'desk@dev',  role: 'editor', tables: GYM_DESK },
+      { email: 'door@dev',  role: 'editor', tables: GYM_DOOR },
       { email: 'aino@dev',  role: 'viewer', tables: GYM_MEMBER },
       { email: 'eero@dev',  role: 'viewer', tables: GYM_MEMBER },
       // A trainer: a member's reading, plus the PT requests -- which name the trainer they are for.
       { email: 'mikko@dev', role: 'viewer', tables: Object.assign({ pt_sessions: 'r' }, GYM_MEMBER) }
-    ],
+    ].concat(GYM_MORE.map(n => ({ email: n.toLowerCase() + '@dev', role: 'viewer', tables: GYM_MEMBER }))),
     profiles: [
-      { email: 'local@dev', name: 'Front desk', shared: true },
+      { email: 'local@dev', name: 'Owner',      shared: true },
+      { email: 'desk@dev',  name: 'Front desk', shared: true },
+      { email: 'door@dev',  name: 'Door',       shared: true },
       { email: 'aino@dev',  name: 'Aino',       shared: true },
       { email: 'eero@dev',  name: 'Eero',       shared: true },
       { email: 'mikko@dev', name: 'Mikko',      shared: true }
-    ],
+    ].concat(GYM_MORE.map(n => ({ email: n.toLowerCase() + '@dev', name: n, shared: true }))),
     links: [
       { list: 'trainers', value: 'Mikko', email: 'mikko@dev' }
     ],
-    hint: '?user=aino@dev (a member: books, checks in, logs training) | ?user=mikko@dev (a trainer: their classes and PT clients on My calendar) | ?user=local@dev (front desk)'
+    hint: '?user=aino@dev (a member: books, checks in, logs training) | ?user=mikko@dev (a trainer: their classes and PT clients on My calendar) | ?user=desk@dev (front desk) | ?user=door@dev (the door tablet) | ?user=local@dev (owner: approvals, schema)'
   }
 };
 
@@ -137,6 +148,7 @@ const postAs = (email, action, body) => call(email, action, body);
   for (const u of USERS.filter(x => x.role === 'admin')) await post('setUserRole', { uid: u.email, user: u.email, role: u.role, tables: u.tables });
   const bundle = JSON.parse(fs.readFileSync(DATA, 'utf8'));
   const schema = JSON.parse(fs.readFileSync(path.join(EXAMPLES, BUNDLE + '-schema.json'), 'utf8'));
+  bundle.tables = Examples.rebaseDates(bundle.tables, bundle.asOf, schema.tables);
   // The whole schema, not just its tables: views, nav and list config are what make the example an APP.
   await post('saveSchema', { schema });
   // The language packs are separate files now, one per language, so fold them back into the bundle

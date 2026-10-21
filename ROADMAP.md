@@ -1672,6 +1672,49 @@ Phases 2 and 3 can swap. Phase 4 depends on nothing and could be built at any po
 because it is the only expensive one and, until the offline case is actually in front of someone,
 phase 3 does the same job for free.
 
+### Sample rows that stay current — a data file's `asOf` *(landed 2026-10-18)*
+
+- A data file's `"asOf"` day is moved to today on import (`Examples.rebaseDates`): date/datetime columns and
+  row stamps only. Used by `mergeFiles` and `npm run seed:import`; files without `asOf` keep their dates.
+
+### Gym example: rooms belong to a gym, Statistics filters by room *(landed 2026-10-18)*
+
+- `ref_rooms`: a 2-D lookup gym → room; `classes.room` is a ref with `filterBy: { gym: "gym" }`.
+- `bookings.room` lookup; Room is a Statistics filter, offering each name once.
+- Page filters narrow one another (`pageFilterOptions`): values still present in the page's rows.
+
+### Comparing statistics — saved rows of picks *(step 1 landed 2026-10-19)*
+
+- **Add to comparison** saves the page's picks as a row; a table under the stats shows one line per row,
+  one column per tile, sortable. Any page with filters embedding a stats view with `tiles`.
+- **Step 1 (built):** rows in this browser (`page_compare:<page>`); only `addCompareRow`/`removeCompareRow` write.
+- **Step 2 (open):** rows shared with the page (`_pages`, one entry per row), edited by `canEditPages`.
+- **Later:** a period per row.
+
+### `archiveAfter` by the row's own date, as a duration *(landed 2026-10-19)*
+
+- `dateColumn`: age from the row's own date (a class two hours after it starts); `column`/`values` optional.
+- `after`: a duration (`"30min"`, `"2h"`, `"7d"`, `"1m"`; `m` is months, as in intervals). `days` is gone.
+- Same sweep, helper (`autoArchiveIds`) and check as before. Client-side: runs at the next load.
+
+### Copying events — a range of dated rows, forward *(landed 2026-10-19)*
+
+- A data view's `copy: { dateColumn, reset }` adds **Copy events** under it on a page with filters, for
+  viewers with a write grant. Dialog: from, to, copy to, times; preview of the count.
+- Copies the rows the page shows, archived included, by whole local days; `reset` columns start at their
+  default; existing copies are skipped; one undo. Planned by `Calendar.copyPlan`.
+- Chosen over a weekly template because it needs no new table. **Open:** a template with a rolling horizon.
+
+### Staff who are not admins — nav `roles` and `requiresGrant` *(landed 2026-10-20)*
+
+- The gym's desk runs as an **editor** with table grants; one **owner** admin keeps approvals and schema.
+  Members' workouts and steps are then private by the rules.
+- `roles` on a nav entry (`["admin", "editor"]`, `["viewer"]`); `adminOnly`/`hideFromAdmin` are its shorthand.
+- `requiresGrant`: the entry needs a real grant on its tables (own rows and public tables don't count), so a
+  door tablet granted only `visits` sees just Door code.
+- **Open:** self-service by role in the rules (`ownerRoles`). Any account can still own rows in an owner
+  table (the door can file a pending membership for itself).
+
 ### Prose that names its rows — a per-row template for an embed
 
 A `markdown` view is prose **plus** grids: `{{self}}` and `{{view:x}}` render a table, a card stack or

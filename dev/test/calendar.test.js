@@ -212,3 +212,45 @@ describe('calendar.js — the period a calendar shows (what `within: { calendar 
     assert.deepEqual(Calendar.windowFor('2026-07-15', 'year', 1, '2026-07-15'), { from: '2026-01-01', toExclusive: '2027-01-01' });
   });
 });
+
+describe('copyPlan: a range of dated rows copied forward', () => {
+  const C = require('../../calendar');
+  // A Monday class at 07:00 local, written as the instant the app stores.
+  const at = (y, m, d, h) => new Date(y, m - 1, d, h, 0).toISOString();
+  const week = [
+    { id: 'a', starts_at: at(2026, 10, 12, 7), type: 'Spin', booked: 9 },
+    { id: 'b', starts_at: at(2026, 10, 14, 18), type: 'Yoga', booked: 3 },
+    { id: 'c', starts_at: at(2026, 10, 20, 7), type: 'Spin', booked: 1 }    // outside the range
+  ];
+  const opts = { dateColumn: 'starts_at', from: '2026-10-12', to: '2026-10-18', target: '2026-10-26', times: 1, keep: ['type'] };
+
+  it('moves each row in the range by whole days, keeping the local time, and carries only `keep`', () => {
+    const p = C.copyPlan(week, week, opts);
+    assert.equal(p.rows.length, 2);
+    const first = new Date(p.rows[0].starts_at);
+    assert.deepEqual([first.getDate(), first.getMonth() + 1, first.getHours()], [26, 10, 7]);   // across the end of DST, still 07:00
+    assert.deepEqual(Object.keys(p.rows[0]).sort(), ['starts_at', 'type']);                    // no id, no booked
+    assert.deepEqual([p.first, p.last], ['2026-10-26', '2026-11-01']);
+  });
+
+  it('`times` lays the range down again, one span apart', () => {
+    const p = C.copyPlan(week, week, Object.assign({}, opts, { times: 3 }));
+    assert.equal(p.rows.length, 6);
+    assert.deepEqual(p.rows.filter((r) => r.type === 'Spin').map((r) => new Date(r.starts_at).getDate()), [26, 2, 9]);
+    assert.equal(p.last, '2026-11-15');
+  });
+
+  it('a copy that is already there is skipped, so running it twice adds nothing', () => {
+    const once = C.copyPlan(week, week, opts).rows.map((r, i) => Object.assign({ id: 'n' + i }, r));
+    const again = C.copyPlan(week, week.concat(once), opts);
+    assert.deepEqual([again.rows.length, again.skipped], [0, 2]);
+  });
+
+  it('a bare date moves as a date; a bad range or no times plans nothing', () => {
+    const days = [{ id: 'd', day: '2026-10-12', what: 'x' }];
+    assert.deepEqual(C.copyPlan(days, days, { dateColumn: 'day', from: '2026-10-12', to: '2026-10-12', target: '2026-10-15', times: 1, keep: ['what'] }).rows, [{ what: 'x', day: '2026-10-15' }]);
+    assert.equal(C.copyPlan(week, week, Object.assign({}, opts, { to: '2026-10-01' })).rows.length, 0);
+    assert.equal(C.copyPlan(week, week, Object.assign({}, opts, { times: 0 })).rows.length, 0);
+    assert.equal(C.copyPlan(week, week, Object.assign({}, opts, { target: '' })).rows.length, 0);
+  });
+});

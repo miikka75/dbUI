@@ -167,3 +167,39 @@ describe('appearance: images and deployment overrides', () => {
     assert.match(errs[1], /"b": `focus` must be/);
   });
 });
+
+describe('nav roles: staff who are not admins', () => {
+  // The gym's shape: a Front desk group for staff, a member's own page for members.
+  const items = [{ view: 'home' }, { view: 'board', roles: ['viewer'] }, { group: 'Data', roles: ['admin', 'editor'], items: [{ table: 'tasks' }] }];
+  const ids = (role, isAdmin) => Nav.build(items, t, all, opts({ isAdmin: !!isAdmin, role })).filter((x) => x.id).map((x) => x.id);
+  it('shows an entry to the roles it names, a group with its branch', () => {
+    assert.deepEqual(ids('editor'), ['home', 'grp:Data', '__settings']);
+    assert.deepEqual(ids('viewer'), ['home', 'board', '__settings']);
+    assert.deepEqual(ids('admin', true), ['home', 'grp:Data', '__languages', '__settings']);
+  });
+  it('an admin with no role passed still reads as admin', () => {
+    assert.ok(Nav.build(items, t, all, opts({ isAdmin: true })).some((x) => x.id === 'grp:Data'));
+  });
+  it('rejects an unknown role, an empty list, and roles beside a flag', () => {
+    const errs = Nav.errors({ items: [{ view: 'a', roles: ['staff'] }, { view: 'b', roles: [] }, { view: 'c', roles: ['editor'], adminOnly: true }] }).join(' | ');
+    assert.match(errs, /"a": `roles` must list/);
+    assert.match(errs, /"b": `roles` must list/);
+    assert.match(errs, /"c": use `roles` or `adminOnly`/);
+  });
+});
+
+describe('nav requiresGrant: a staff screen needs a grant, not just own rows', () => {
+  const items = [{ view: 'home' }, { group: 'Data', requiresGrant: true, items: [{ table: 'tasks' }, { table: 'notes' }] }];
+  it('passes the flag down a group to each entry, and only there', () => {
+    const asked = [];
+    Nav.build(items, t, (id, need) => { asked.push(id + ':' + !!need); return true; }, opts());
+    assert.deepEqual(asked, ['home:false', 'tasks:true', 'notes:true']);
+  });
+  it('an entry the access test refuses under the flag drops out, an empty group with it', () => {
+    const tabs = Nav.build(items, t, (id, need) => !need, opts()).filter((x) => x.id).map((x) => x.id);
+    assert.deepEqual(tabs, ['home', '__settings']);
+  });
+  it('requiresGrant must be a boolean', () => {
+    assert.match(Nav.errors({ items: [{ group: 'X', requiresGrant: 'yes', items: [] }] }).join(' | '), /`requiresGrant` must be true or false/);
+  });
+});
