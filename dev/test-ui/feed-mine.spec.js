@@ -62,7 +62,7 @@ test('per-person feed of my booked classes: Subscribe on the embedded calendar, 
   });
   expect(ics).toContain('DTSTART:20261020T040000Z');
   expect(ics).toContain('DTEND:20261020T044500Z');
-  expect(ics).not.toContain('20261021');       // Bob's class
+  expect(ics).not.toContain('DTSTART:20261021'); // Bob's class; DTSTAMP may carry today's date
   expect(ics).not.toContain('Visit');          // feed: false
   expect(await page.evaluate(() => validateSchema())).toEqual([]);
 });
