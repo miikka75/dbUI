@@ -184,6 +184,24 @@ describe('rsvp.js — walk-ins take places, and who has arrived', () => {
   });
 });
 
+describe('rsvp.js — `release`: a no-show\'s place comes back before the start', () => {
+  const start = Date.parse('2026-10-22T16:00:00.000Z'), min = 60000;
+  const resp = [
+    { id: 'gone', class: 'c1', booking: 'booked', attendance: 'pending' },
+    { id: 'here', class: 'c1', booking: 'booked', attendance: 'attended' },
+    { id: 'left', class: 'c1', booking: '', attendance: 'pending' },
+    { id: 'other', class: 'c2', booking: 'booked', attendance: 'pending' }
+  ];
+  const at = (now) => Rsvp.releaseTargets(resp, { events: [{ key: 'c1', date: '2026-10-22T16:00:00.000Z' }, { key: 'c2', date: '2026-10-22' }],
+    now, release: '10min', linkColumn: 'class', statusColumn: 'booking', capacity: { holds: ['booked'] }, arrived: { attendance: 'attended' } }).map((r) => r.id);
+
+  it('from `release` before until the start, only holding rows nobody arrived on; a date with no time never', () => {
+    assert.deepEqual(at(start - 11 * min), []);
+    assert.deepEqual(at(start - 10 * min), ['gone']);
+    assert.deepEqual(at(start), []);
+  });
+});
+
 describe('rsvp.js -- `before`: the booking list cut at a day, the rest counted', () => {
   const R = require('../../rotation');
   const evs = ['2026-10-19', '2026-10-20', '2026-10-21', '2026-10-22', '2026-10-25'].map((d, i) => ({ id: 'e' + i, date: d }));
