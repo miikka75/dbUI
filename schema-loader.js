@@ -595,13 +595,19 @@ function validateSchema() {
       // The status control speaks the column `picker` vocabulary. Not `cards`: a status is a word, with no
       // catalogue row behind it to show.
       if (rvp.picker !== undefined && ['dropdown', 'toggle', 'chips'].indexOf(rvp.picker) < 0) errors.push('rsvp "' + v + '": `picker` is "' + rvp.picker + '" — use dropdown, toggle or chips');
-      // `closeBefore`: minutes before the start when booking from anywhere stops. It needs a start TIME to
+      // `closeBefore`: how long (a duration) before the start booking from anywhere stops. It needs a start TIME to
       // count back from, so a plain date column would make it close at midnight, which nobody means.
+      var cbd = SCHEMA[rvp.events] && (SCHEMA[rvp.events].columns || {})[rvp.dateColumn];
+      var cbt = (typeof cbd === 'string') ? cbd : (cbd && cbd.type);
       if (rvp.closeBefore !== undefined) {
-        var cbd = SCHEMA[rvp.events] && (SCHEMA[rvp.events].columns || {})[rvp.dateColumn];
-        var cbt = (typeof cbd === 'string') ? cbd : (cbd && cbd.type);
-        if (!(typeof rvp.closeBefore === 'number' && rvp.closeBefore >= 0)) errors.push('rsvp "' + v + '": `closeBefore` must be a number of minutes');
+        if (!Rotation.parseDuration(rvp.closeBefore)) errors.push('rsvp "' + v + '": `closeBefore` "' + rvp.closeBefore + '" is not a duration -- a whole number and a unit: min, h, d. Minutes are "min"; "m" is months');
         else if (cbt !== 'datetime') errors.push('rsvp "' + v + '": `closeBefore` needs `dateColumn` to be a datetime column — it counts back from the start time');
+      }
+      // `release`: the check-in pass gives back the places of bookings nobody arrived on, so it needs `checkin.set`.
+      if (rvp.release !== undefined) {
+        if (!Rotation.parseDuration(rvp.release)) errors.push('rsvp "' + v + '": `release` "' + rvp.release + '" is not a duration -- a whole number and a unit: min, h, d. Minutes are "min"; "m" is months');
+        else if (cbt !== 'datetime') errors.push('rsvp "' + v + '": `release` needs `dateColumn` to be a datetime column — it counts back from the start time');
+        if (!(rvp.checkin && rvp.checkin.set)) errors.push('rsvp "' + v + '": `release` needs `checkin` with `set` — arriving is what keeps a place');
       }
       // Self check-in: the member's claim must be writable by them, and the verdict must NOT be -- a
       // verdict column in ownerWritable lets every member mark themselves present, and the arrangement

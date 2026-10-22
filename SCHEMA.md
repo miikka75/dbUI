@@ -1444,7 +1444,8 @@ The events live in one table; responses in another that has an **`owner` column*
     "showCounts": true,              // OPTIONAL — show a per-event count of each response
     "rosterVisibility": "all",       // OPTIONAL — who sees the participant roster (see below)
     "ahead": "3d",                    // OPTIONAL — show today and the next days only, with Show more (see below)
-    "closeBefore": 30,                // OPTIONAL — minutes before the start when booking from anywhere stops (see below)
+    "closeBefore": "30min",           // OPTIONAL — how long before the start when booking from anywhere stops (see below)
+    "release": "10min",              // OPTIONAL — a no-show's place comes back before the start (see below)
     "blockedBy": { … }               // OPTIONAL — days of the member's own periods (a pause) when booking is refused
   }
 }
@@ -1494,7 +1495,7 @@ upcoming event.
 
 ### `closeBefore` — booking from home stops before the start
 
-With a **datetime** `dateColumn`, `closeBefore: 30` stops joining an event from anywhere 30 minutes before
+With a **datetime** `dateColumn`, `closeBefore: "30min"` (a duration: `min`, `h`, `d`) stops joining an event from anywhere 30 minutes before
 it starts; the row says *Book at the gym*. From then until the start it is open only to a member **at the
 venue**: one who opened the check-in link (`?view=…&scan=…`) or has already checked in today. Once it
 has started, nobody joins or leaves (with a datetime `dateColumn`, with or without `closeBefore`), and the
@@ -1504,6 +1505,19 @@ checks the member in to it at once.
 It is a screen rule, not a rule the server holds: the server cannot tell "at the venue" from a typed
 code, because the real code is stored nowhere (see `checkin`). What a member gains by going round it is
 a booking that was never checked in, and the organizer's list shows it as such.
+
+### `release` — a no-show's place comes back before the start
+
+`"release": "10min"` (a duration: `min`, `h`, `d`): from 10 minutes before the start until the start, a booking that
+holds a place and has not checked in (does not carry `checkin.set`) loses it; its status is cleared, so
+the place is free for someone at the door. The row stays, and its owner may book again while places
+are left.
+
+- It runs in the organizer's **check-in pass**, right after stamping: the open QR (every 15 s) or the
+  *Check in* press. A member who claimed the code is marked before they could be released. With no
+  check-in screen open, nothing is released.
+- The write is the organizer's, so both servers' capacity counts follow it as they follow any other.
+- Needs a datetime `dateColumn` and `checkin` with `set`.
 
 ### `blockedBy` — refused during the member's own periods
 

@@ -135,7 +135,24 @@
     return Array.prototype.map.call(ints || [], function(n) { return CODE_ALPHABET.charAt(n % CODE_ALPHABET.length); }).join('');
   }
 
-  var M = { build: build, checkinTargets: checkinTargets, checkinCode: checkinCode };
+  // `release` (a duration: "10min") before the start until the start, a response that holds a place and
+  // has not arrived (does not carry every `arrived` value) gives it back. `events`: [{ key, date }].
+  var _Rot = null;
+  function Rot() { return _Rot || (_Rot = (typeof module !== 'undefined' && module.exports) ? require('./rotation') : root.Rotation); }
+  function releaseTargets(responses, opts) {
+    var due = {}, arrived = opts.arrived || {}, ac = Object.keys(arrived);
+    if (!ac.length) return [];
+    (opts.events || []).forEach(function(e) {
+      var st = String(e.date || '').length > 10 ? Date.parse(e.date) : NaN, from = isNaN(st) ? null : Rot().minusDuration(e.date, opts.release);
+      if (from && opts.now >= from.getTime() && opts.now < st) due[e.key] = 1;
+    });
+    return (responses || []).filter(function(r) {
+      return !!r && due[r[opts.linkColumn]] === 1 && holds(opts.capacity, r[opts.statusColumn])
+        && !ac.every(function(c) { return String(r[c] == null ? '' : r[c]) === String(arrived[c]); });
+    });
+  }
+
+  var M = { build: build, checkinTargets: checkinTargets, checkinCode: checkinCode, releaseTargets: releaseTargets };
   if (typeof module !== 'undefined' && module.exports) module.exports = M;
   else root.Rsvp = M;
 })(typeof self !== 'undefined' ? self : this);

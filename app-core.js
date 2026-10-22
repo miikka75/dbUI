@@ -3103,7 +3103,7 @@ function createVueApp() {
         if (p && p.view === name) return true;
         return this.rsvpFor(name).events.some(function(e) { return e.isToday && e.myRowId && !!e.myCode; });
       },
-      // `closeBefore` minutes before the start, joining from anywhere stops; from then until the start it
+      // `closeBefore` (a duration) before the start, joining from anywhere stops; from then until the start it
       // is open only to a member at the venue, and once the event has started, to nobody. Leaving is never
       // closed. A date with no time has no start to count back from (validateSchema says so).
       // An event with a start TIME that has passed: nobody joins or leaves it any more, whether or not
@@ -3113,11 +3113,12 @@ function createVueApp() {
         return !isNaN(st) && (now || this.clockNow) >= st;
       },
       rsvpClosed: function(name, ev, now) {
-        var mins = ((VIEWS[name] && VIEWS[name].rsvp) || {}).closeBefore, st = String(ev.date || '').length > 10 ? Date.parse(ev.date) : NaN;
-        if (mins === undefined || isNaN(st)) return false;
+        var cb = ((VIEWS[name] && VIEWS[name].rsvp) || {}).closeBefore, st = String(ev.date || '').length > 10 ? Date.parse(ev.date) : NaN;
+        var from = cb === undefined || isNaN(st) ? null : Rotation.minusDuration(ev.date, cb);
+        if (!from) return false;
         now = now || this.clockNow;
         if (now >= st) return true;
-        if (now < st - mins * 60000) return false;
+        if (now < from.getTime()) return false;
         return !(this.rsvpOnSite(name) && ev.isToday);
       },
       // Frozen (attendance verified), or full or closed and not mine to keep: a full class cannot be
@@ -3189,23 +3190,40 @@ function createVueApp() {
       stampRsvpCheckin: function(name, codes, quiet) {
         var v = VIEWS[name], cfg = v && v.rsvp, ci = cfg && cfg.checkin;
         if (!ci || !this.rsvpCanStamp(name)) return 0;
-        var table = cfg.responses, now = new Date().toISOString();
+        var table = cfg.responses;
         var rows = Rsvp.checkinTargets(Rows.partitionRows(this.dataCache, table, 'active'), {
           codes: codes, linkColumn: this.rsvpLink(cfg).linkColumn, eventKeys: this.rsvpTodayKeys(name), checkinColumn: ci.codeColumn, set: ci.set });
-        if (quiet && !rows.length) return 0;
-        // One press, one undo entry, however many rows: written the way _writeReorder writes, partial and
-        // recorded per row, since saveField's debounced writes would each land as an entry of their own.
-        Undo.action('checkin', function() {
+        if (!quiet || rows.length) {
+          this.stampRows('checkin', table, rows, ci.set);
+          this.notify(this.t('msg.checked_in') + ' (' + rows.length + ')');
+        }
+        this.releaseRsvpNoShows(name);
+        return rows.length;
+      },
+      // `release`: run right after stamping, so whoever claimed the code is marked before they could be
+      // released. With no check-in screen open, nothing is released: nobody at the door could take it.
+      releaseRsvpNoShows: function(name) {
+        var cfg = VIEWS[name].rsvp;
+        if (!cfg.release) return;
+        var rows = Rsvp.releaseTargets(Rows.partitionRows(this.dataCache, cfg.responses, 'active'), {
+          events: this.rsvpFor(name).events.filter(function(e) { return e.isToday; }), now: Date.now(), release: cfg.release,
+          linkColumn: this.rsvpLink(cfg).linkColumn, statusColumn: cfg.statusColumn, capacity: this.rsvpCapacity(cfg), arrived: cfg.checkin.set });
+        var set = {}; set[cfg.statusColumn] = '';
+        if (rows.length) this.stampRows('release', cfg.responses, rows, set);
+      },
+      // Writes `set` onto `rows` as ONE undo entry: partial puts recorded per row, as _writeReorder writes,
+      // since saveField's debounced writes would each land as an entry of their own.
+      stampRows: function(label, table, rows, set) {
+        var at = new Date().toISOString();
+        Undo.action(label, function() {
           rows.forEach(function(r) {
             var fwd = { id: r.id }, inv = { id: r.id };
-            Object.keys(ci.set).forEach(function(c) { fwd[c] = ci.set[c]; inv[c] = r[c] == null ? '' : r[c]; r[c] = ci.set[c]; });
-            r.updated_at = now;
+            Object.keys(set).forEach(function(c) { fwd[c] = set[c]; inv[c] = r[c] == null ? '' : r[c]; r[c] = set[c]; });
+            r.updated_at = at;
             Undo.record({ table: table, part: 'active', forward: { type: 'put', id: r.id, row: fwd }, inverse: { type: 'put', id: r.id, row: inv } });
-            Writes.putRow(table, Object.assign({ updated_at: now }, fwd), 'active');
+            Writes.putRow(table, Object.assign({ updated_at: at }, fwd), 'active');
           });
         });
-        this.notify(this.t('msg.checked_in') + ' (' + rows.length + ')');
-        return rows.length;
       },
       // The door screen of a `verify` scan view: confirm today's claims on an accepted code, and record
       // WHICH door -- the catalogue row the screen was set to -- since a changing code names no door. One
@@ -3218,16 +3236,7 @@ function createVueApp() {
         var set = Object.assign({}, vf.set); if (at) set[cfg.column] = at;
         var rows = Scan.verifyTargets(Rows.partitionRows(this.dataCache, table, 'active'), { codes: codes, claim: vf.claim, set: set, day: fmtDate(now) });
         if (quiet && !rows.length) return 0;
-        var stamp = now.toISOString();
-        Undo.action('checkin', function() {
-          rows.forEach(function(r) {
-            var fwd = { id: r.id }, inv = { id: r.id };
-            Object.keys(set).forEach(function(c) { fwd[c] = set[c]; inv[c] = r[c] == null ? '' : r[c]; r[c] = set[c]; });
-            r.updated_at = stamp;
-            Undo.record({ table: table, part: 'active', forward: { type: 'put', id: r.id, row: fwd }, inverse: { type: 'put', id: r.id, row: inv } });
-            Writes.putRow(table, Object.assign({ updated_at: stamp }, fwd), 'active');
-          });
-        });
+        this.stampRows('checkin', table, rows, set);
         if (rows.length) this.notify(this.t('msg.checked_in') + ' (' + rows.length + ')');
         return rows.length;
       },

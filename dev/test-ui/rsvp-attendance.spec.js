@@ -449,7 +449,7 @@ test('closeBefore: booking from anywhere stops before the start, and reopens for
   schema.tables.practices.columns[0] = { name: 'date', type: 'datetime' };
   schema.tables.rsvps.columns.push({ name: 'checkin_code', type: 'text' });
   schema.tables.rsvps.ownerWritable.push('checkin_code');
-  Object.assign(schema.views[0].rsvp, { closeBefore: 30, checkin: { codeColumn: 'checkin_code', set: { attendance: 'attended' }, link: 'submit' } });
+  Object.assign(schema.views[0].rsvp, { closeBefore: '30min', checkin: { codeColumn: 'checkin_code', set: { attendance: 'attended' }, link: 'submit' } });
   await page.request.post('/api/resetData');
   await page.request.post('/api/setUserRole', { data: { uid: 'org@x', role: 'admin', user: 'org@x', tables: 'all' } });
   await page.request.post('/api/setUserRole', { data: { uid: 'ann@x', role: 'viewer', user: 'ann@x', tables: { practices: 'r' } }, headers: ADMIN });
@@ -486,8 +486,38 @@ test('closeBefore: booking from anywhere stops before the start, and reopens for
 test('validateSchema: closeBefore needs a datetime dateColumn', async ({ page }) => {
   await setup(page);
   await bootAs(page, 'org@x');
-  const err = await page.evaluate(() => { VIEWS.my_rsvp.rsvp.closeBefore = 30; const e = validateSchema().join(' | '); delete VIEWS.my_rsvp.rsvp.closeBefore; return e; });
+  const err = await page.evaluate(() => { VIEWS.my_rsvp.rsvp.closeBefore = '30min'; const e = validateSchema().join(' | '); delete VIEWS.my_rsvp.rsvp.closeBefore; return e; });
   expect(err).toContain('`closeBefore` needs `dateColumn` to be a datetime column');
+  const rel = await page.evaluate(() => { VIEWS.my_rsvp.rsvp.release = '10min'; const e = validateSchema().join(' | '); delete VIEWS.my_rsvp.rsvp.release; return e; });
+  expect(rel).toContain('`release` needs `dateColumn` to be a datetime column');
+  expect(rel).toContain('`release` needs `checkin` with `set`');
+});
+
+test('release: the check-in pass gives back the place of a booking nobody arrived on', async ({ page }) => {
+  const schema = JSON.parse(JSON.stringify(SCHEMA));
+  schema.tables.practices.columns[0] = { name: 'date', type: 'datetime' };
+  schema.tables.practices.columns.push({ name: 'capacity', type: 'number' }, { name: 'booked', type: 'number' });
+  schema.tables.rsvps.columns.push({ name: 'checkin_code', type: 'text' });
+  schema.tables.rsvps.ownerWritable.push('checkin_code');
+  schema.tables.rsvps.capacity = { link: 'practice', status: 'response', column: 'capacity', count: 'booked', holds: ['coming'] };
+  Object.assign(schema.views[0].rsvp, { checkin: { codeColumn: 'checkin_code', set: { attendance: 'attended' } }, release: '10min' });
+  await setup(page);
+  await page.request.post('/api/saveSchema', { data: { schema }, headers: ADMIN });
+  const noon = new Date(); noon.setHours(12, 0, 0, 0);
+  await page.request.post('/api/putRow', { data: { tableId: 'practices', tab: 'active', data: { id: 'p1', date: new Date(noon.getTime() + 5 * 60000).toISOString(), title: 'Spin', capacity: 2 } }, headers: ADMIN });
+  for (const [id, owner, code] of [['r1', 'ann@x', 'lion'], ['r2', 'bob@x', '']]) {
+    await page.request.post('/api/putRow', { data: { tableId: 'rsvps', tab: 'active', data: { id, owner, practice: 'p1', response: 'coming', attendance: 'pending', checkin_code: code, rosterPublic: false } }, headers: ADMIN });
+  }
+  const stored = async (t) => ((await (await page.request.post('/api/getTableData', { data: { tableId: t, tab: 'active' }, headers: ADMIN })).json()).rows || []);
+  await expect.poll(async () => (await stored('practices'))[0].booked).toBe(2);
+
+  await page.clock.setFixedTime(noon);   // five minutes before: inside the release
+  await bootAs(page, 'org@x');
+  await page.locator('[data-testid="rsvp-checkin-real"] input').fill('lion');
+  await page.locator('[data-testid="rsvp-checkin-stamp"]').click();
+  await expect.poll(async () => (await stored('rsvps')).map((r) => [r.owner, r.response, r.attendance]).sort())
+    .toEqual([['ann@x', 'coming', 'attended'], ['bob@x', '', 'pending']]);
+  await expect.poll(async () => (await stored('practices'))[0].booked).toBe(1);
 });
 
 test('booking from a calendar (respond), and the booking on my own calendar through its event\'s date', async ({ page }) => {
@@ -623,7 +653,7 @@ test('a row that lasts (endColumn) is on every day it spans, with its range; a p
 test('one app clock: a class closes on the calendar left open, without a reload', async ({ page }) => {
   const schema = JSON.parse(JSON.stringify(SCHEMA));
   schema.tables.practices.columns[0] = { name: 'date', type: 'datetime' };
-  schema.views[0].rsvp.closeBefore = 30;
+  schema.views[0].rsvp.closeBefore = '30min';
   schema.views.push({ name: 'timetable', kind: 'calendar', calendar: { sources: [{ table: 'practices', dateColumn: 'date', titleColumns: ['title'], respond: 'my_rsvp' }], defaultView: 'list' } });
   schema.nav.items.push({ view: 'timetable' });
   await setup(page);

@@ -1062,7 +1062,17 @@ the server, on the class row, and that same counter is what refuses the 26th boo
 
 **Medium–large; rules in both backends.** This is the item the bundle most visibly lacks.
 
-#### 6. Releasing a no-show's place 10 minutes before the start
+#### 6. Releasing a no-show's place 10 minutes before the start *(landed — by the check-in pass, not a second counter)*
+
+*What landed:* `rsvp.release: "10min"` (a duration, as `archiveAfter.after`). The organizer's check-in pass (the open QR, or the
+press), right after stamping, clears the status of today's holding bookings with no `checkin.set`, from
+`start − release` to the start. The existing capacity paths move the count; no rules changed.
+- Why not the counter below: a booking made after the release must hold a place before it is checked
+  in, and telling it from an old one needs a creation time the server trusts. Neither backend has one.
+- Cost: with no check-in screen open, nothing is released. Nobody can check in then either.
+- The row stays (status blank, attendance untouched), so its owner can rebook while places are left.
+
+*The proposal as written:*
 
 No scheduled job is needed — the Spark plan has none anyway. A booking simply stops *holding* a place
 once `now > start − release` and it has not been checked in. The counter then has two parts:
@@ -3767,7 +3777,7 @@ the order is by what each step unlocks for the least risk:
    counter design is written against real instants from the start.
 5. **Capacity** — the expensive one and the one the example most visibly lacks. Build Supabase first
    (the live deploy; a trigger is the natural home), Firestore second (the new one-field write path).
-6. **No-show release** — only once 4 and 5 exist; small on top of them.
+6. **No-show release** — landed, by the check-in pass (see its entry). Items 1–5 have landed too.
 7. **Waitlist** — after release, not before: both change what "holds a place" means, and settling
    release first keeps the waitlist's `until` a cut-over to an existing rule rather than a second
    design. Supabase's trigger promotion and Firestore's organizer press first; Firestore self-service

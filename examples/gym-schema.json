@@ -1,6 +1,6 @@
 {
   "$schema": "../schema.schema.json",
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "icons": {
     "favicon": "./examples/gym-favicon.svg"
   },
@@ -922,7 +922,8 @@
           "rotateMinutes": 5,
           "link": "submit"
         },
-        "closeBefore": 30,
+        "closeBefore": "30min",
+        "release": "10min",
         "blockedBy": {
           "table": "pauses",
           "from": "starts_on",
