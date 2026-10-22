@@ -340,12 +340,7 @@
         },
         "archiveAfter": {
           "type": "object",
-          "description": "File finished rows away on their own. Needs `archivable: true` (somewhere to move rows to) and a declared `updated_at` column (a clock to measure) — both are checked at load, because without either the sweep silently finds no eligible rows forever.",
-          "required": [
-            "column",
-            "values",
-            "days"
-          ],
+          "description": "File finished rows away on their own. Needs `archivable: true` (somewhere to move rows to). Two clocks: a finished `column`/`values` measured from a declared `updated_at` (time since the last edit), or the row's own `dateColumn` (time since that date). How long is `after` (\"30min\", \"2h\", \"1d\", \"2w\", \"1m\"). Checked at load, because a wrong shape silently finds no eligible rows forever.",
           "additionalProperties": false,
           "properties": {
             "column": {
@@ -357,12 +352,36 @@
               "minItems": 1,
               "description": "The values that count as finished."
             },
-            "days": {
-              "type": "number",
-              "minimum": 0,
-              "description": "How long after `updated_at` a finished row is filed away."
+            "after": {
+              "type": "string",
+              "pattern": "^\\s*\\d+\\s*(min|h|d|w|m|y)\\s*$",
+              "description": "How long after the clock a row is filed away: a whole number and a unit — min, h, d, w, m (months, as in every interval), y. \"2h\", \"30min\", \"1d\"."
+            },
+            "dateColumn": {
+              "type": "string",
+              "description": "A date or datetime column: age the row from its own date instead of its last edit (a class is over two hours after `starts_at`). `column`/`values` become optional."
             }
-          }
+          },
+          "anyOf": [
+            {
+              "required": [
+                "column",
+                "values"
+              ]
+            },
+            {
+              "required": [
+                "dateColumn"
+              ]
+            }
+          ],
+          "allOf": [
+            {
+              "required": [
+                "after"
+              ]
+            }
+          ]
         },
         "isLookup": {
           "type": "boolean",
@@ -990,6 +1009,24 @@
         "hideFromAdmin": {
           "type": "boolean",
           "description": "The mirror, for views about being a PARTICIPANT: an admin is exempt from mineOnly, so a personal page embedding a mineOnly rotation would show them everyone else's column under a heading reading \"My tasks\". Setting both flags hides the entry from every user and is rejected at load."
+        },
+        "roles": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "editor",
+              "viewer"
+            ]
+          },
+          "description": "Who sees the entry, when staff are not all admins: [\"admin\", \"editor\"] for staff screens (a front desk running as an editor), [\"viewer\"] for a member's own pages. adminOnly is [\"admin\"] and hideFromAdmin everyone but admins; use one form, not both. Tidiness, not access control."
+        },
+        "requiresGrant": {
+          "type": "boolean",
+          "description": "Show the entry only to an account with a grant on the tables it works (every source of a view; every view a page embeds); on a group, its whole branch. Owning rows of your own and public tables do not count. Admins always pass. Tidiness, not access control."
         }
       },
       "oneOf": [

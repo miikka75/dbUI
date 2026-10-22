@@ -5,13 +5,13 @@
       "code": "en",
       "name": "English",
       "file": "app-lang-en.json",
-      "hash": "5d852c8fbd645419"
+      "hash": "fc8ec4ba852bb4f4"
     },
     {
       "code": "fi",
       "name": "Suomi",
       "file": "app-lang-fi.json",
-      "hash": "7faecca3b1e87649"
+      "hash": "4cc074b8a93a9dee"
     }
   ],
   "bundles": [
@@ -20,12 +20,12 @@
       "title": "Bishopric Tool",
       "description": "A ward bishopric’s working tool — meeting programs, assignments, interviews and a members roster.",
       "icon": "./examples/bishopric-favicon.svg",
-      "revision": 43,
+      "revision": 45,
       "tables": 14,
       "views": 19,
       "schema": {
         "file": "bishopric-schema.json",
-        "hash": "0d227dea1eeca68c"
+        "hash": "f8a341326503d7fc"
       },
       "languages": [
         {
@@ -43,7 +43,7 @@
       ],
       "about": {
         "file": "bishopric-about.json",
-        "hash": "8d292eeb16ca6255"
+        "hash": "6a6827be2aaf8d6c"
       },
       "notes": {
         "29": "Welcome the newly baptized and those who moved in; releases now come before sustainings.",
@@ -59,7 +59,9 @@
         "40": "The meeting agenda is a list of Sundays beside the open meeting: pick a date to edit that Sunday’s programme without scrolling across a wide table. On a phone a date opens its meeting as its own screen, and Back returns to the list.",
         "41": "Programs and Music are now a list of Sundays beside the open one, like the meeting agenda: pick a date to see that Sunday’s whole program, or to edit its hymns. On a phone a date opens its Sunday as its own screen, and Back returns to the list. Printing the music still gives the whole schedule as a table; a program still prints on its own.",
         "42": "Shorter pickers: Presiding offers only the bishopric, and Responsible (on the meeting, reminders, interviews, responsibilities and callings) only the bishopric and ward roles such as the executive secretary. Values already saved stay as they are, even ones the picker no longer offers. Visiting authorities are still picked from Visitors. Those bishopric and ward rows can no longer be renamed or deleted in the Lookup tab, since the pickers depend on them.",
-        "43": "Ward business welcomes the newly baptized and those who moved in under separate words, each in a block of its own."
+        "43": "Ward business welcomes the newly baptized and those who moved in under separate words, each in a block of its own.",
+        "44": "Past meetings file themselves away the day after; speakers keep their earlier talks.",
+        "45": "No visible change: the schema moves to version 5, where a booking cut-off is written as a duration (\"30min\")."
       }
     },
     {
@@ -67,12 +69,12 @@
       "title": "Our Home",
       "description": "A household chore tracker — points, approvals, rewards, a weekly rota and a shopping list.",
       "icon": "./examples/chores-favicon.svg",
-      "revision": 18,
+      "revision": 20,
       "tables": 7,
       "views": 20,
       "schema": {
         "file": "chores-schema.json",
-        "hash": "476a0f2baeb3284d"
+        "hash": "937c603ed7a451c0"
       },
       "languages": [
         {
@@ -94,10 +96,12 @@
       },
       "about": {
         "file": "chores-about.json",
-        "hash": "94312ccf5fa286d9"
+        "hash": "74d9b8ee0047647c"
       },
       "notes": {
-        "18": "Adds My calendar: your own chores and weekly tasks, and a Subscribe button that puts them in your phone or computer calendar. Each person gets their own private link, in the language they pick; unsubscribing empties it. Links are only issued where the deployment has file storage."
+        "18": "Adds My calendar: your own chores and weekly tasks, and a Subscribe button that puts them in your phone or computer calendar. Each person gets their own private link, in the language they pick; unsubscribing empties it. Links are only issued where the deployment has file storage.",
+        "19": "No visible change: archive timing is written as a duration (\"7d\").",
+        "20": "No visible change: the schema moves to version 5, where a booking cut-off is written as a duration (\"30min\")."
       }
     },
     {
@@ -105,12 +109,12 @@
       "title": "Team Demo",
       "description": "The widest tour of what the app does: rotations, RSVPs, a board, embeds, doc-views, archived rows and mirrored tables.",
       "icon": null,
-      "revision": 13,
+      "revision": 14,
       "tables": 11,
       "views": 29,
       "schema": {
         "file": "demo-schema.json",
-        "hash": "2344e19d7c54b74b"
+        "hash": "dec0154268359710"
       },
       "languages": [
         {
@@ -138,7 +142,7 @@
       },
       "about": {
         "file": "demo-about.json",
-        "hash": "aa9e97e847d8fb86"
+        "hash": "79a2ae3de8666e37"
       },
       "notes": {
         "5": "Adds `teams`, a catalogue whose parent column holds another ROW's id (`hierarchy.by: \"id\"`) instead of a group's value — so the Lookup tab shows it three levels deep (Acme > Engineering > Backend) rather than the two every other lookup has. Nothing existing changes: `cities` still groups by value, side by side with it, which is the point of shipping both.",
@@ -149,7 +153,8 @@
         "10": "Drops one of two identical app labels (\"No data\" in tables and in tiles now share one), so there is one less row to translate. Nothing on screen changes.",
         "11": "Adds Notes Gallery under Data: the notes as a grid of picture tiles (`layout: \"gallery\"`), the first image column as the picture and the title, author and date as the caption. Four more notes, each with a picture, so the grid has something to show. A note without a picture still gets a tile.",
         "12": "Adds Take Attendance under Crew: each practice as a card listing who answered, where an organizer marks each person Attended or Absent. A member cannot mark themselves, and once they are marked their RSVP for that practice can no longer be changed. RSVPs now also keep to their own fields (practice, response, note), so a member can no longer write anything else on their response.",
-        "13": "Check-in with a code: on a day with practices, My RSVP shows one Check-in code box for the whole day. Members type the code shown at practice, or scan it: an organizer can show it as a QR code that opens the app with the code filled in. The code counts for every practice the member answered for that day. The organizer types the same code on their own screen and presses Check in, which marks everyone who entered it as Attended in all of the day's practices. The code is never saved, so it cannot be looked up from home."
+        "13": "Check-in with a code: on a day with practices, My RSVP shows one Check-in code box for the whole day. Members type the code shown at practice, or scan it: an organizer can show it as a QR code that opens the app with the code filled in. The code counts for every practice the member answered for that day. The organizer types the same code on their own screen and presses Check in, which marks everyone who entered it as Attended in all of the day's practices. The code is never saved, so it cannot be looked up from home.",
+        "14": "No visible change: the schema moves to version 5, where a booking cut-off is written as a duration (\"30min\")."
       }
     },
     {
@@ -157,37 +162,39 @@
       "title": "Fitness Club",
       "description": "A gym's member app — class booking with door check-in, a training log and stats, memberships, personal training and a workout video library.",
       "icon": "./examples/gym-favicon.svg",
-      "revision": 1,
-      "tables": 17,
+      "revision": 3,
+      "tables": 18,
       "views": 37,
       "schema": {
         "file": "gym-schema.json",
-        "hash": "ed4331a821b7c822"
+        "hash": "2eaab79255d4d734"
       },
       "languages": [
         {
           "code": "en",
           "name": "English",
           "file": "gym-lang-en.json",
-          "hash": "d38fca5607237e4c"
+          "hash": "7ee4e59eaa43f18c"
         },
         {
           "code": "fi",
           "name": "Suomi",
           "file": "gym-lang-fi.json",
-          "hash": "27b20e4d9c46c6eb"
+          "hash": "fd5d9de9216767c3"
         }
       ],
       "data": {
         "file": "gym-data.json",
-        "hash": "d820c82b9f53c989"
+        "hash": "77917a2470405cde"
       },
       "about": {
         "file": "gym-about.json",
-        "hash": "accb579b3e68ef7d"
+        "hash": "631432e293692658"
       },
       "notes": {
-        "1": "First release: anyone can open the app and see the timetable, gyms, prices and news without an account; signing in makes you a member-to-be at once, and the member pages open when a membership is active (your history stays through a lapse); book group classes (with a valid membership; the door code needs one too), with places left, a full class refused, and booking from home closing 30 minutes before the start (after that, at the gym); check in to classes by scanning the room code, and log gym visits by scanning the door code; My calendar with your classes, workouts, visits, pauses and PT sessions, where the workout log and gym visits (the latest 5, with Show all), the totals (hours, exercises, visits, km), steps and your top 3 exercises follow the week, month or year the calendar shows; subscribe to your booked classes and workouts in your phone's calendar; coins earned by attending classes (1 per class, plus 1 per streak level reached), spent in a reward shop; buying a membership or a single visit, and pausing it (the pause shows on My calendar across its days, and while it lasts classes cannot be booked or checked in to and the door code is refused); requesting a personal trainer; trainers linked to accounts see their classes and PT clients on their own My calendar; news and a library of workouts and multi-week programmes. Approving a sign-up request makes the person a member in one press. The front desk gets the door code screen, class check-in (the changing code, walk-ins, and ticking people off by hand), membership, PT and reward boards, and statistics (visits, members, attendance by class and by trainer, visits by gym) filtered by gym, class and trainer."
+        "1": "First release: anyone can open the app and see the timetable, gyms, prices and news without an account; signing in makes you a member-to-be at once, and the member pages open when a membership is active (your history stays through a lapse); book group classes (with a valid membership; the door code needs one too), with places left, a full class refused, and booking from home closing 30 minutes before the start (after that, at the gym); check in to classes by scanning the room code, and log gym visits by scanning the door code; My calendar with your classes, workouts, visits, pauses and PT sessions, where the workout log and gym visits (the latest 5, with Show all), the totals (hours, exercises, visits, km), steps and your top 3 exercises follow the week, month or year the calendar shows; subscribe to your booked classes and workouts in your phone's calendar; coins earned by attending classes (1 per class, plus 1 per streak level reached), spent in a reward shop; buying a membership or a single visit, and pausing it (the pause shows on My calendar across its days, and while it lasts classes cannot be booked or checked in to and the door code is refused); requesting a personal trainer; trainers linked to accounts see their classes and PT clients on their own My calendar; news and a library of workouts and multi-week programmes. Approving a sign-up request makes the person a member in one press. The front desk gets the door code screen, class check-in (the changing code, walk-ins, and ticking people off by hand), membership, PT and reward boards, and statistics (visits, members, attendance by class and by trainer, visits by gym) filtered by gym, class and trainer.",
+        "2": "Statistics: one view of class attendance with gym, room, class and trainer filters, and comparison rows. Front desk: Class schedule with Copy events, Memberships as a searchable list, booking lists showing three days with Show more. Rooms belong to a gym. Classes are archived two hours after they start. The front desk can run as an editor account and a door tablet as its own account. Sample dates follow today.",
+        "3": "A booked place nobody has checked in to is released 10 minutes before the class starts, while the room QR is open, so someone at the gym can take it."
       }
     }
   ]

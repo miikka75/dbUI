@@ -20,7 +20,7 @@
 
   // Bump when a migration is added. A schema with no version is v1: everything written before this
   // existed.
-  var CURRENT_VERSION = 4;
+  var CURRENT_VERSION = 5;
 
   // Walk the nested view tree (nav groups nest views inside `views`), applying fn to each leaf.
   function eachView(list, fn) {
@@ -120,10 +120,19 @@
     return schema;
   }
 
+  // ---- v4 -> v5: an rsvp's `closeBefore` is a duration ("30min"), like `release` --------------------
+  function v4_to_v5(schema, renames) {           // eslint-disable-line no-unused-vars
+    eachView(schema.views, function (v) {
+      if (v.rsvp && typeof v.rsvp.closeBefore === 'number') v.rsvp.closeBefore = v.rsvp.closeBefore + 'min';
+    });
+    return schema;
+  }
+
   var CHAIN = [
     { to: 2, apply: v1_to_v2, describes: 'name each view kind instead of inferring it from key presence' },
     { to: 3, apply: v2_to_v3, describes: 'make multi-value a `multiple` flag rather than its own column type' },
-    { to: 4, apply: v3_to_v4, describes: 'label a nav group as its own kind, so `kind` can be dispatched on' }
+    { to: 4, apply: v3_to_v4, describes: 'label a nav group as its own kind, so `kind` can be dispatched on' },
+    { to: 5, apply: v4_to_v5, describes: 'write an rsvp closeBefore as a duration, "30min"' }
   ];
 
   // ---- Translation keys move with the schema ------------------------------------------------------

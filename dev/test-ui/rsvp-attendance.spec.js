@@ -449,7 +449,7 @@ test('closeBefore: booking from anywhere stops before the start, and reopens for
   schema.tables.practices.columns[0] = { name: 'date', type: 'datetime' };
   schema.tables.rsvps.columns.push({ name: 'checkin_code', type: 'text' });
   schema.tables.rsvps.ownerWritable.push('checkin_code');
-  Object.assign(schema.views[0].rsvp, { closeBefore: 30, checkin: { codeColumn: 'checkin_code', set: { attendance: 'attended' }, link: 'submit' } });
+  Object.assign(schema.views[0].rsvp, { closeBefore: '30min', checkin: { codeColumn: 'checkin_code', set: { attendance: 'attended' }, link: 'submit' } });
   await page.request.post('/api/resetData');
   await page.request.post('/api/setUserRole', { data: { uid: 'org@x', role: 'admin', user: 'org@x', tables: 'all' } });
   await page.request.post('/api/setUserRole', { data: { uid: 'ann@x', role: 'viewer', user: 'ann@x', tables: { practices: 'r' } }, headers: ADMIN });
@@ -486,8 +486,38 @@ test('closeBefore: booking from anywhere stops before the start, and reopens for
 test('validateSchema: closeBefore needs a datetime dateColumn', async ({ page }) => {
   await setup(page);
   await bootAs(page, 'org@x');
-  const err = await page.evaluate(() => { VIEWS.my_rsvp.rsvp.closeBefore = 30; const e = validateSchema().join(' | '); delete VIEWS.my_rsvp.rsvp.closeBefore; return e; });
+  const err = await page.evaluate(() => { VIEWS.my_rsvp.rsvp.closeBefore = '30min'; const e = validateSchema().join(' | '); delete VIEWS.my_rsvp.rsvp.closeBefore; return e; });
   expect(err).toContain('`closeBefore` needs `dateColumn` to be a datetime column');
+  const rel = await page.evaluate(() => { VIEWS.my_rsvp.rsvp.release = '10min'; const e = validateSchema().join(' | '); delete VIEWS.my_rsvp.rsvp.release; return e; });
+  expect(rel).toContain('`release` needs `dateColumn` to be a datetime column');
+  expect(rel).toContain('`release` needs `checkin` with `set`');
+});
+
+test('release: the check-in pass gives back the place of a booking nobody arrived on', async ({ page }) => {
+  const schema = JSON.parse(JSON.stringify(SCHEMA));
+  schema.tables.practices.columns[0] = { name: 'date', type: 'datetime' };
+  schema.tables.practices.columns.push({ name: 'capacity', type: 'number' }, { name: 'booked', type: 'number' });
+  schema.tables.rsvps.columns.push({ name: 'checkin_code', type: 'text' });
+  schema.tables.rsvps.ownerWritable.push('checkin_code');
+  schema.tables.rsvps.capacity = { link: 'practice', status: 'response', column: 'capacity', count: 'booked', holds: ['coming'] };
+  Object.assign(schema.views[0].rsvp, { checkin: { codeColumn: 'checkin_code', set: { attendance: 'attended' } }, release: '10min' });
+  await setup(page);
+  await page.request.post('/api/saveSchema', { data: { schema }, headers: ADMIN });
+  const noon = new Date(); noon.setHours(12, 0, 0, 0);
+  await page.request.post('/api/putRow', { data: { tableId: 'practices', tab: 'active', data: { id: 'p1', date: new Date(noon.getTime() + 5 * 60000).toISOString(), title: 'Spin', capacity: 2 } }, headers: ADMIN });
+  for (const [id, owner, code] of [['r1', 'ann@x', 'lion'], ['r2', 'bob@x', '']]) {
+    await page.request.post('/api/putRow', { data: { tableId: 'rsvps', tab: 'active', data: { id, owner, practice: 'p1', response: 'coming', attendance: 'pending', checkin_code: code, rosterPublic: false } }, headers: ADMIN });
+  }
+  const stored = async (t) => ((await (await page.request.post('/api/getTableData', { data: { tableId: t, tab: 'active' }, headers: ADMIN })).json()).rows || []);
+  await expect.poll(async () => (await stored('practices'))[0].booked).toBe(2);
+
+  await page.clock.setFixedTime(noon);   // five minutes before: inside the release
+  await bootAs(page, 'org@x');
+  await page.locator('[data-testid="rsvp-checkin-real"] input').fill('lion');
+  await page.locator('[data-testid="rsvp-checkin-stamp"]').click();
+  await expect.poll(async () => (await stored('rsvps')).map((r) => [r.owner, r.response, r.attendance]).sort())
+    .toEqual([['ann@x', 'coming', 'attended'], ['bob@x', '', 'pending']]);
+  await expect.poll(async () => (await stored('practices'))[0].booked).toBe(1);
 });
 
 test('booking from a calendar (respond), and the booking on my own calendar through its event\'s date', async ({ page }) => {
@@ -581,6 +611,23 @@ test('a viewer adds their own row from a calendar day (self-service is decided b
   await expect.poll(async () => ((await (await page.request.post('/api/getTableData', { data: { tableId: 'logs', tab: 'active' }, headers: ADMIN })).json()).rows || []).map((r) => r.owner)).toEqual(['ann@x']);
 });
 
+test('a day-add on a page that embeds the log stays on that page', async ({ page }) => {
+  const schema = JSON.parse(JSON.stringify(SCHEMA));
+  schema.tables.logs = { ownerWritable: ['done_on', 'what'], columns: [{ name: 'owner', type: 'owner' }, { name: 'done_on', type: 'date' }, { name: 'what', type: 'text' }] };
+  schema.views.push({ name: 'mycal', kind: 'calendar', calendar: { sources: [{ table: 'logs', dateColumn: 'done_on', titleColumns: ['what'] }], defaultView: 'month', addTo: 'logs' } });
+  schema.views.push({ name: 'mylog', sources: ['logs'], mode: 'union', filter: { owner: '@me' }, columns: ['done_on', 'what'] });
+  schema.views.push({ name: 'mypage', kind: 'page', markdown: '{{view:mycal}}\n\n{{view:mylog}}\n' });
+  schema.nav.items.push({ view: 'mypage' });
+  await setup(page);
+  await page.request.post('/api/saveSchema', { data: { schema }, headers: ADMIN });
+  await page.request.post('/api/setUserRole', { data: { uid: 'ann@x', role: 'viewer', user: 'ann@x', tables: { practices: 'r' } }, headers: ADMIN });
+  await bootAs(page, 'ann@x');
+  await page.evaluate(() => appInstance.selectTab('mypage'));
+  await page.locator('[data-testid="cal-add-on-day"]').click();
+  await expect.poll(() => page.evaluate(() => appInstance.embedRows('view', 'mylog').length)).toBe(1);
+  expect(await page.evaluate(() => appInstance.currentTable)).toBe('mypage');
+});
+
 test('a row that lasts (endColumn) is on every day it spans, with its range; a pause blocks booking those days', async ({ page }) => {
   const schema = JSON.parse(JSON.stringify(SCHEMA));
   schema.tables.leaves = { ownerWritable: ['starts_on', 'ends_on'], columns: [{ name: 'owner', type: 'owner' }, { name: 'starts_on', type: 'date' }, { name: 'ends_on', type: 'date' }] };
@@ -606,7 +653,7 @@ test('a row that lasts (endColumn) is on every day it spans, with its range; a p
 test('one app clock: a class closes on the calendar left open, without a reload', async ({ page }) => {
   const schema = JSON.parse(JSON.stringify(SCHEMA));
   schema.tables.practices.columns[0] = { name: 'date', type: 'datetime' };
-  schema.views[0].rsvp.closeBefore = 30;
+  schema.views[0].rsvp.closeBefore = '30min';
   schema.views.push({ name: 'timetable', kind: 'calendar', calendar: { sources: [{ table: 'practices', dateColumn: 'date', titleColumns: ['title'], respond: 'my_rsvp' }], defaultView: 'list' } });
   schema.nav.items.push({ view: 'timetable' });
   await setup(page);
@@ -691,4 +738,71 @@ test('requires: booking needs a day inside one of my own active periods; staff a
   await bea.c.close();
   await bootAs(page, 'org@x');
   await expect(page.locator('tr', { hasText: 'Tuesday' }).locator('[data-testid="rsvp-places"]')).toHaveCount(0);
+});
+
+// `ahead`: the list reaches that far from today, and Show more adds the same span again.
+test('ahead: the next days only, with Show more counting the rest', async ({ page }) => {
+  const schema = JSON.parse(JSON.stringify(SCHEMA));
+  schema.views[0].rsvp.ahead = '2d';
+  await setup(page);
+  await page.request.post('/api/saveSchema', { data: { schema }, headers: ADMIN });
+  const day = (n) => { const d = new Date(); d.setDate(d.getDate() + n); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+  for (const [id, n] of [['t0', 0], ['t1', 1], ['t3', 3], ['t5', 5]]) {
+    await page.request.post('/api/putRow', { data: { tableId: 'practices', tab: 'active', data: { id, date: day(n), title: 'Day ' + n } }, headers: ADMIN });
+  }
+  await bootAs(page, 'ann@x');
+  const titles = async () => (await page.locator('[data-testid="rsvp-toggle"]').count());
+  await expect.poll(titles).toBe(2);                                         // today and tomorrow
+  await expect(page.locator('[data-testid="rsvp-more"]')).toContainText('(3)');   // day 3, day 5, and p1 a week out
+  await page.locator('[data-testid="rsvp-more"]').click();
+  await expect.poll(titles).toBe(3);                                         // + day 3
+  await page.locator('[data-testid="rsvp-more"]').click();                 // + day 5
+  await expect.poll(titles).toBe(4);
+  await page.locator('[data-testid="rsvp-more"]').click();                 // + p1, a week out
+  await expect.poll(titles).toBe(5);
+  await expect(page.locator('[data-testid="rsvp-more"]')).toHaveCount(0);   // nothing left beyond
+});
+
+test('the organizer who stamps check-ins does not scan to check in', async ({ page, browser }) => {
+  await setupCheckin(page);
+  const schema = JSON.parse(JSON.stringify(SCHEMA));
+  schema.tables.practices.columns[0] = { name: 'date', type: 'date' };
+  schema.tables.rsvps.columns.push({ name: 'checkin_code', type: 'text' });
+  schema.tables.rsvps.ownerWritable.push('checkin_code');
+  Object.assign(schema.views[0], { fab: 'scan' });
+  schema.views[0].rsvp.checkin = { codeColumn: 'checkin_code', set: { attendance: 'attended' } };
+  schema.nav.scan = ['my_rsvp'];
+  await page.request.post('/api/saveSchema', { data: { schema }, headers: ADMIN });
+  const targets = async (p) => p.evaluate(() => appInstance.scanTargets.map((t) => t.view));
+  await bootAs(page, 'org@x');
+  expect(await targets(page)).toEqual([]);
+  expect(await page.evaluate(() => appInstance.fab)).toBe(null);
+  const member = await browser.newPage();
+  await bootAs(member, 'ann@x');
+  expect(await targets(member)).toEqual(['my_rsvp']);
+  expect(await member.evaluate(() => appInstance.fab && appInstance.fab.kind)).toBe('scan');
+  await member.close();
+});
+
+test('a calendar of walk-in events gives the organizer no booking control', async ({ page, browser }) => {
+  const schema = JSON.parse(JSON.stringify(SCHEMA));
+  schema.tables.practices.columns.push({ name: 'capacity', type: 'number' }, { name: 'booked', type: 'number' }, { name: 'walk_ins', type: 'number' });
+  schema.tables.rsvps.capacity = { link: 'practice', status: 'response', column: 'capacity', count: 'booked', reserved: 'walk_ins', holds: ['coming'] };
+  schema.views.push({ name: 'timetable', kind: 'calendar', calendar: { sources: [{ table: 'practices', dateColumn: 'date', titleColumns: ['title'], respond: 'my_rsvp' }], defaultView: 'list' } });
+  schema.nav.items.push({ view: 'timetable' });
+  await setup(page);
+  await page.request.post('/api/saveSchema', { data: { schema }, headers: ADMIN });
+  await page.request.post('/api/putRow', { data: { tableId: 'practices', tab: 'active', data: { id: 'p1', date: future, title: 'Tuesday', capacity: 5, booked: 0, walk_ins: 0 } }, headers: ADMIN });
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); localStorage.setItem('test_user', 'org@x'); });
+  await page.goto('/');
+  await page.waitForFunction(() => window.appInstance && !appInstance.loading, { timeout: 30000 });
+  await page.evaluate(() => appInstance.selectTab('timetable'));
+  await expect(page.locator('[data-testid="cal-book"]').first()).toContainText('5');      // places left still shown
+  await expect(page.locator('[data-testid="cal-book"] button')).toHaveCount(0);
+  const member = await browser.newPage();
+  await bootAs(member, 'ann@x');
+  await member.evaluate(() => appInstance.selectTab('timetable'));
+  await expect(member.locator('[data-testid="cal-book"]').first().locator('button', { hasText: 'coming' })).toBeVisible();
+  await member.close();
 });

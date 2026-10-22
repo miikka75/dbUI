@@ -147,7 +147,7 @@
           "approved",
           "rejected"
         ],
-        "days": 7
+        "after": "7d"
       },
       "ownerWritable": [
         "person",
@@ -284,7 +284,7 @@
         "values": [
           "bought"
         ],
-        "days": 3
+        "after": "3d"
       }
     }
   },
@@ -959,5 +959,5 @@
       "shop_open"
     ]
   },
-  "schemaVersion": 4
+  "schemaVersion": 5
 }

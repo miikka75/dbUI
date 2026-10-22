@@ -45,6 +45,12 @@ describe('migrations — the chain', () => {
     assert.equal(s.views[0].views[0].kind, 'pivot');
   });
 
+  it('v4 -> v5: an rsvp closeBefore in minutes becomes a duration', () => {
+    const s = { schemaVersion: 4, views: [{ name: 'a', kind: 'rsvp', rsvp: { closeBefore: 30 } }, { name: 'b', kind: 'rsvp', rsvp: { closeBefore: '1h' } }] };
+    Migrations.migrate(s);
+    assert.deepEqual(s.views.map((v) => v.rsvp.closeBefore), ['30min', '1h']);
+  });
+
   it('leaves a nameless nav group alone', () => {
     const s = { views: [{ views: [{ name: 'inner', rsvp: {} }] }] };
     Migrations.migrate(s);

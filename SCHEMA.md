@@ -208,15 +208,27 @@ name, the schema and the translations. Not the config (which can hold a shared f
 page bodies, or any other table. `validateSchema` refuses a public table with an owner column (people's
 own rows) or with a `ref` to a table that is not public (a visitor would see its keys).
 
+### A page's `search`
+`search` on a page (`["owner"]`, or `true`) puts a search box above its filters that narrows its embedded
+lists, by stored value and shown label. Stats and lookups are not narrowed.
+
+### `copy` — copy a range of dated rows forward
+```json
+"copy": { "dateColumn": "starts_at", "reset": ["booked", "walk_ins"] }
+```
+On a data view embedded in a page with `filters`: a **Copy events** button for viewers with a write grant.
+It copies the rows the page shows (archived included) dated from–to, `times` spans on from the target
+date, by whole local days. `reset` columns start at their default; existing copies are skipped.
+
 ### `archiveAfter` — file finished rows away on their own
 ```json
 "chore_log": {
   "archivable": true,
   "columns": [ …, { "name": "updated_at", "type": "text", "hidden": true } ],
-  "archiveAfter": { "column": "status", "values": ["approved", "rejected"], "days": 7 }
+  "archiveAfter": { "column": "status", "values": ["approved", "rejected"], "after": "7d" }
 }
 ```
-A row whose `column` holds one of `values` moves to the **archive** partition once it has gone `days`
+A row whose `column` holds one of `values` moves to the **archive** partition once it has gone `after`
 without an edit — so a log keeps showing the recent past and settles itself, with nobody filing rows by
 hand. Reversible from the archive tab like any other archived row.
 
@@ -227,12 +239,14 @@ hand. Reversible from the archive tab like any other archived row.
 - **The table must DECLARE `updated_at`** (`type: "text"`, `hidden: true`). Columnar backends (dev
   SQLite, Sheets) store only declared columns, so without it the timestamp is dropped and nothing ever
   ages out. `validateSchema` rejects the combination rather than letting it fail silently — as it does
-  a missing `archivable`, an unknown `column`, empty `values`, or a negative `days`.
+  a missing `archivable`, an unknown `column`, empty `values`, or an `after` that is not a duration.
 - **Client-side and best-effort**: the sweep runs at load, only for someone who could archive by hand
   anyway (write access to the whole mirror cluster), and does nothing on a read-only grant. There is no
   server-side scheduler, so rows age out the next time somebody with rights opens the app — a
   concurrent second run is harmless.
-- `days: 0` archives as soon as the row reaches a listed value.
+- **`after`**: `"30min"`, `"2h"`, `"1d"`, `"2w"`, `"1m"` (months), `"1y"`; `"0d"` archives at once.
+- **`dateColumn`**: age from the row's own date instead of `updated_at` (`column`/`values` optional).
+- Calendars and lookups still read archived rows.
 - **Mind what totals the table feeds.** Archiving removes a row from every ordinary view, so a
   leaderboard or balance over the same table needs `includeArchive: true` or it will quietly shed
   points as rows age out — the chores example turns it on for exactly that reason.
@@ -266,7 +280,7 @@ This list is **closed** — a property not on it is never read, and `validateSch
 | `allowNew` | Allow adding new list values (combobox) |
 | `sorted` | Sort dropdown items alphabetically |
 | `multiple` | Hold **several** values instead of one; stored as an **array** of strings, edited as a chip input. Cardinality is all that ever separated `multiselect` from `select`, so it is a flag rather than a type — which means it also composes with **`ref`**: `{"type": "ref", "table": "ref_chores", "valueCol": "chore", "multiple": true}` is a reference holding several values, which no type name could express. Before this, a schema wanting that had to point a `multiselect` at the lookup table through `list`; the values were right but nothing knew a reference was involved — `filterBy` could not apply, the ref editor did not see it, and the lookup table was invisible to the dependency loader. Ignored with `picker` (a multi-value cell is already chips) |
-| `picker` | **How the value is chosen** — one vocabulary for every choice in the app (an rsvp view's `picker` uses it too): `"dropdown"` (the default; same as omitting it), `"chips"` (selectable chips), `"toggle"` (segmented buttons), `"cards"` (each option's catalogue row as a card showing its other columns — a price, a duration — the chosen one outlined). Every widget but the dropdown lays out the dropdown's own options, so it works on a `list` or a `ref` column alike (and `filterBy` narrows them identically); `cards` needs a catalogue row behind each option, so a `ref` or a `list` naming a lookup table. Pressing the chosen option again clears it. A picker that cannot apply — no options (a text column), `multiple` (already chips), `allowNew` (needs typing), cards over a plain list — is named by `validateSchema` rather than quietly falling back to a dropdown |
+| `picker` | **How the value is chosen** — one vocabulary for every choice in the app (an rsvp view's `picker` uses it too): `"dropdown"` (the default; same as omitting it), `"chips"` (selectable chips), `"toggle"` (segmented buttons), `"cards"` (each option's catalogue row as a card showing its other columns — a price, a duration — the chosen one outlined). Every widget but the dropdown lays out the dropdown's own options, so it works on a `list` or a `ref` column alike (and `filterBy` narrows them identically); `cards` needs a catalogue row behind each option, so a `ref` or a `list` naming a lookup table. In a table row `cards` is a dropdown. Pressing the chosen option again clears it. A picker that cannot apply — no options (a text column), `multiple` (already chips), `allowNew` (needs typing), cards over a plain list — is named by `validateSchema` rather than quietly falling back to a dropdown |
 | `syncFrom` | Mirror this column's value from another table |
 | `listSwitch` | An **alternate** list the cell can be toggled to: `{ "label": "External", "list": "external_workers" }`. The label is the toggle's text; the list is auto-seeded like any other |
 | `stamped` | The app fills this column in and **nobody rewrites it** — it binds a grant-holder, not just an owner. Needs `defaultFrom: "@me"` and a `list`; at most one per table, because the rules layers resolve ONE column and cannot loop a map. See **`stamped`** below |
@@ -1310,7 +1324,8 @@ workouts. The picks are kept in the reader's browser, per calendar — a conveni
 A source may name an rsvp view over its own table — `{ "table": "classes", "dateColumn": "starts_at", "respond":
 "class_booking" }` — and each event then carries that view's booking control and places left, under the same
 rules as the booking list (full, `closeBefore`, frozen once attendance is marked). A past event, which the
-rsvp view no longer lists, gets none. The rules are the root's (`rsvpLocked` & co.), shared by both screens.
+rsvp view no longer lists, gets none. The rules are the root's (`rsvpLocked` & co.), shared by both screens;
+an organizer of walk-in events gets no booking control.
 
 The other half — a member's bookings on their own calendar — needs no calendar feature: a booking has no
 date of its own, so give the responses table a computed column that reads its event's, and use it as the
@@ -1428,7 +1443,9 @@ The events live in one table; responses in another that has an **`owner` column*
     "picker": "toggle",              // OPTIONAL — status control: "dropdown" (default) | "toggle" | "chips"
     "showCounts": true,              // OPTIONAL — show a per-event count of each response
     "rosterVisibility": "all",       // OPTIONAL — who sees the participant roster (see below)
-    "closeBefore": 30,                // OPTIONAL — minutes before the start when booking from anywhere stops (see below)
+    "ahead": "3d",                    // OPTIONAL — show today and the next days only, with Show more (see below)
+    "closeBefore": "30min",           // OPTIONAL — how long before the start when booking from anywhere stops (see below)
+    "release": "10min",              // OPTIONAL — a no-show's place comes back before the start (see below)
     "blockedBy": { … }               // OPTIONAL — days of the member's own periods (a pause) when booking is refused
   }
 }
@@ -1472,9 +1489,13 @@ The events live in one table; responses in another that has an **`owner` column*
   a link cannot show a screen the reader is not granted. A view kept out of `nav` therefore cannot be
   opened this way.
 
+### `ahead` — the next few days, and Show more
+`"ahead": "3d"` lists today and the next two days; **Show more (N)** adds another span. Without it, every
+upcoming event.
+
 ### `closeBefore` — booking from home stops before the start
 
-With a **datetime** `dateColumn`, `closeBefore: 30` stops joining an event from anywhere 30 minutes before
+With a **datetime** `dateColumn`, `closeBefore: "30min"` (a duration: `min`, `h`, `d`) stops joining an event from anywhere 30 minutes before
 it starts; the row says *Book at the gym*. From then until the start it is open only to a member **at the
 venue**: one who opened the check-in link (`?view=…&scan=…`) or has already checked in today. Once it
 has started, nobody joins or leaves (with a datetime `dateColumn`, with or without `closeBefore`), and the
@@ -1484,6 +1505,19 @@ checks the member in to it at once.
 It is a screen rule, not a rule the server holds: the server cannot tell "at the venue" from a typed
 code, because the real code is stored nowhere (see `checkin`). What a member gains by going round it is
 a booking that was never checked in, and the organizer's list shows it as such.
+
+### `release` — a no-show's place comes back before the start
+
+`"release": "10min"` (a duration: `min`, `h`, `d`): from 10 minutes before the start until the start, a booking that
+holds a place and has not checked in (does not carry `checkin.set`) loses it; its status is cleared, so
+the place is free for someone at the door. The row stays, and its owner may book again while places
+are left.
+
+- It runs in the organizer's **check-in pass**, right after stamping: the open QR (every 15 s) or the
+  *Check in* press. A member who claimed the code is marked before they could be released. With no
+  check-in screen open, nothing is released.
+- The write is the organizer's, so both servers' capacity counts follow it as they follow any other.
+- Needs a datetime `dateColumn` and `checkin` with `set`.
 
 ### `blockedBy` — refused during the member's own periods
 
@@ -1835,7 +1869,7 @@ The two are mutually exclusive; declaring both is a load-time error.
 
 | Key | Meaning |
 |-----|---------|
-| `tiles` | Explicit tiles. Each: `{ label, agg, column, when, goal, display, decimals, divide }`; `agg: "distinct"` counts different values (people, not visits). `divide` shows the number in a bigger unit — `"divide": 60` turns minutes into hours — rounded to `decimals` (default 1) |
+| `tiles` | Explicit tiles. Each: `{ label, agg, column, when, goal, display, decimals, divide, plus }`; `agg: "distinct"` counts different values (people, not visits). `plus: [{ agg, column, when }]` adds more counts or sums, each over its own rows. `divide` shows the number in a bigger unit — `"divide": 60` turns minutes into hours — rounded to `decimals` (default 1) |
 | `rowTiles` | `{ label, value, goal?, order?, skipUntargeted? }` — one tile per row instead |
 | `goal` | Default bar target for every tile: a positive number, `"max"` (scale to the largest tile), a **ladder** of levels (below), or `{ "column": "<col>" }` to read the target off each row (`rowTiles` only). No goal = no bar, just a number |
 | `display` | `"bar"` (default) or `"number"`. Per-tile, or view-wide as a default |
@@ -3054,6 +3088,9 @@ the role is `viewer` or `editor`, never `admin`. `validateSchema` names an unkno
   reading "My tasks". Hiding the page is what keeps that exemption correct in the one place it belongs
   (the standalone matrix).
 - Setting **both** on one entry hides it from every user, which is never the intent — rejected at load.
+- **`roles`** (some of `"admin"`, `"editor"`, `"viewer"`) — who sees the entry; not beside `adminOnly`/`hideFromAdmin`.
+- **`requiresGrant`** (boolean, inherited by a group's branch) — needs a real grant on the entry's tables;
+  own rows and public tables don't count.
 - Both are **tidiness, not access control**: what a member may read or write is decided by their table
   grants, and an entry hidden here is still reachable if something else links to it. Pair `adminOnly`
   with a read-only (`'r'`) grant when the point is that members must not change the data.
@@ -3063,7 +3100,8 @@ the role is `viewer` or `editor`, never `admin`. `validateSchema` names an unkno
   app's default; else `"add"`, the add-a-row button grids have always had on a phone. `"scan"` needs
   `nav.scan`. The gym sets `"scan"`, so its corner button opens the camera everywhere.
 - **`scan`** (string[], optional) — **where the scan button sends codes**: scan views, and rsvp views with
-  `checkin`. The button is the corner button with `fab: "scan"`. It opens the camera where the browser can decode codes in the page
+  `checkin`. The button is the corner button with `fab: "scan"`. Left out for whoever confirms the codes
+  (stamps check-ins, verifies a door). It opens the camera where the browser can decode codes in the page
   (`BarcodeDetector`: Android Chrome), and a typing field where it cannot (iPhone Safari, desktop Chrome
   on Windows) or when the picture held no code. A QR the app drew carries `?view=…&scan=…` and goes to
   its own view. A **typed** code finds its own way too, with no question asked: a printed code is
