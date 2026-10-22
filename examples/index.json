@@ -20,12 +20,12 @@
       "title": "Bishopric Tool",
       "description": "A ward bishopric’s working tool — meeting programs, assignments, interviews and a members roster.",
       "icon": "./examples/bishopric-favicon.svg",
-      "revision": 43,
+      "revision": 44,
       "tables": 14,
       "views": 19,
       "schema": {
         "file": "bishopric-schema.json",
-        "hash": "0d227dea1eeca68c"
+        "hash": "538e53d95b1ac603"
       },
       "languages": [
         {
@@ -43,7 +43,7 @@
       ],
       "about": {
         "file": "bishopric-about.json",
-        "hash": "8d292eeb16ca6255"
+        "hash": "463ea98d67625fe7"
       },
       "notes": {
         "29": "Welcome the newly baptized and those who moved in; releases now come before sustainings.",
@@ -59,7 +59,8 @@
         "40": "The meeting agenda is a list of Sundays beside the open meeting: pick a date to edit that Sunday’s programme without scrolling across a wide table. On a phone a date opens its meeting as its own screen, and Back returns to the list.",
         "41": "Programs and Music are now a list of Sundays beside the open one, like the meeting agenda: pick a date to see that Sunday’s whole program, or to edit its hymns. On a phone a date opens its Sunday as its own screen, and Back returns to the list. Printing the music still gives the whole schedule as a table; a program still prints on its own.",
         "42": "Shorter pickers: Presiding offers only the bishopric, and Responsible (on the meeting, reminders, interviews, responsibilities and callings) only the bishopric and ward roles such as the executive secretary. Values already saved stay as they are, even ones the picker no longer offers. Visiting authorities are still picked from Visitors. Those bishopric and ward rows can no longer be renamed or deleted in the Lookup tab, since the pickers depend on them.",
-        "43": "Ward business welcomes the newly baptized and those who moved in under separate words, each in a block of its own."
+        "43": "Ward business welcomes the newly baptized and those who moved in under separate words, each in a block of its own.",
+        "44": "Past meetings file themselves away the day after; speakers keep their earlier talks."
       }
     },
     {
