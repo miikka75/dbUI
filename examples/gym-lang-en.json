@@ -88,6 +88,7 @@
       "list.attendance_status.no_show": "No-show",
       "list.attendance_status.pending": "Not yet",
       "list.booking_status.booked": "Booked",
+      "list.booking_status.waitlisted": "Waitlist",
       "list.claim_status.denied": "Declined",
       "list.claim_status.granted": "Handed over",
       "list.claim_status.requested": "Requested",

@@ -3044,7 +3044,8 @@ function createVueApp() {
       // The response table's `capacity`, as the engine reads it -- null when the table has none.
       rsvpCapacity: function(cfg) {
         var c = SCHEMA[cfg.responses] && SCHEMA[cfg.responses].capacity;
-        return c ? { column: c.column, count: c.count, reserved: c.reserved || '', holds: Array.isArray(c.holds) ? c.holds : [] } : null;
+        return c ? { column: c.column, count: c.count, reserved: c.reserved || '', holds: Array.isArray(c.holds) ? c.holds : [],
+                     waitlist: c.waitlist && this.mode !== 'firebase' ? c.waitlist : null } : null;
       },
       // Self check-in with a shared code (`rsvp.checkin`). The code is the DAY's: one claim covers every
       // event the member reserved today, one press stamps all of today's events. Two sides, and the
@@ -3091,9 +3092,16 @@ function createVueApp() {
         return this.tOr('list.' + list + '.' + v, v);
       },
       // The status choices, as { value, title }: the view's inline `statuses`, else the column's list.
-      rsvpOptions: function(name) {
+      // With `ev`, a full event I hold no place in offers the waitlist status instead of the ones that hold.
+      rsvpOptions: function(name, ev) {
         var self = this, cfg = (VIEWS[name] && VIEWS[name].rsvp) || {};
         var vals = cfg.statuses || (this.getListOptions(cfg.statusColumn) || []).map(function(o) { return o.value; });
+        var c = SCHEMA[cfg.responses] && SCHEMA[cfg.responses].capacity, ws = c && c.waitlist && c.waitlist.status;
+        if (ws) {
+          var waiting = !!ev && (ev.myWaiting || (ev.full && !ev.myHolds && this.rsvpWaitlistOpen(name, ev)));
+          vals = vals.filter(function(v) { return v !== ws && !(waiting && c.holds.indexOf(v) >= 0); });
+          if (waiting) vals.push(ws);
+        }
         return vals.map(function(v) { return { value: v, title: self.rsvpStatusLabel(name, v) }; });
       },
       // At the venue: arrived by the venue's check-in link, or already checked in today. Being here is
@@ -3161,7 +3169,14 @@ function createVueApp() {
       },
       rsvpBlocked: function(name, ev) { return !!this.rsvpBarred(name, ev); },
       rsvpBarred: function(name, ev) { return this.barredOn((VIEWS[name] || {}).rsvp, Calendar.toDateStr(ev.date), this.rsvpOrganizer(name)); },
-      rsvpLocked: function(name, ev, now) { return this.rsvpFrozen(name, ev.key) || this.rsvpStarted(ev, now) || (!ev.myHolds && (ev.full || this.rsvpClosed(name, ev, now) || this.rsvpBlocked(name, ev))); },
+      rsvpLocked: function(name, ev, now) { return this.rsvpFrozen(name, ev.key) || this.rsvpStarted(ev, now) || (!ev.myHolds && !ev.myWaiting && ((ev.full && !this.rsvpWaitlistOpen(name, ev, now)) || this.rsvpClosed(name, ev, now) || this.rsvpBlocked(name, ev))); },
+      // `capacity.waitlist`: joinable until `until` before the start. Firestore has no trigger to promote, so never there.
+      rsvpWaitlistOpen: function(name, ev, now) {
+        var w = (this.rsvpCapacity(VIEWS[name].rsvp) || {}).waitlist;
+        if (!w) return false;
+        var cut = ev.start ? Rotation.minusDuration(ev.start, w.until || '0min') : null;
+        return !cut || (now || this.clockNow) < cut.getTime();
+      },
       rsvpPlacesShown: function(name, ev, now) { return ev.capacity !== null || this.rsvpStarted(ev, now) || (!ev.myHolds && (this.rsvpClosed(name, ev, now) || this.rsvpBlocked(name, ev))); },
       rsvpPlacesText: function(name, ev, now) {
         if (this.rsvpStarted(ev, now)) return this.t('rsvp.started');
@@ -9180,7 +9195,7 @@ function createVueApp() {
     template: ''
       + '<span v-if="ev" class="d-inline-flex align-center" style="gap:8px" data-testid="cal-book">'
       +   '<span v-if="a.rsvpPlacesShown(view, ev)" style="font-size:0.75rem;opacity:0.7">{{ a.rsvpPlacesText(view, ev) }}</span>'
-      +   '<rsvp-picker v-if="!a.rsvpCountsWalkIns(view)" :options="a.rsvpOptions(view)" :picker="picker" :value="ev.myStatus" :disabled="a.rsvpLocked(view, ev)" @set="a.setRsvp(view, ev.key, $event || \'\')"></rsvp-picker>'
+      +   '<rsvp-picker v-if="!a.rsvpCountsWalkIns(view)" :options="a.rsvpOptions(view, ev)" :picker="picker" :value="ev.myStatus" :disabled="a.rsvpLocked(view, ev)" @set="a.setRsvp(view, ev.key, $event || \'\')"></rsvp-picker>'
       + '</span>'
   });
 
@@ -10956,7 +10971,7 @@ function createVueApp() {
       + '<tr v-for="ev in events" :key="ev.id">'
       + '<td style="white-space:nowrap">{{ a.dateTimeLabel(ev.date) }}</td>'
       + '<td>{{ ev.title }}<div v-if="placesShown(ev)" style="font-size:0.8rem;opacity:0.7" data-testid="rsvp-places">{{ placesText(ev) }}</div></td>'
-      + '<td><count-stepper v-if="walkIns" :value="ev.reserved" @change="a.setRsvpReserved(viewName, ev, $event)"></count-stepper><rsvp-picker v-else :options="options" :picker="picker" :value="ev.myStatus" :disabled="locked(ev)" @set="set(ev.key, $event)"></rsvp-picker>'
+      + '<td><count-stepper v-if="walkIns" :value="ev.reserved" @change="a.setRsvpReserved(viewName, ev, $event)"></count-stepper><rsvp-picker v-else :options="a.rsvpOptions(viewName, ev)" :picker="picker" :value="ev.myStatus" :disabled="locked(ev)" @set="set(ev.key, $event)"></rsvp-picker>'
       + '</td>'
       + '<td v-if="cfg.showCounts" style="font-size:0.82rem;opacity:0.75;white-space:nowrap">{{ tallyText(ev) }}</td>'
       + '<td v-if="showRoster" style="font-size:0.82rem" data-testid="rsvp-roster"><div v-for="g in rosterGroups(ev)" :key="g.status" class="rsvp-roster-group"><span style="opacity:0.6">{{ g.label }}:</span> <template v-for="p in g.people" :key="p.email"><v-chip v-if="canStamp && cfg.checkin && cfg.checkin.set" size="small" variant="tonal" class="rsvp-person mr-1 mb-1" :color="p.arrived ? \'success\' : undefined" :prepend-icon="p.arrived ? \'mdi-check-circle\' : \'mdi-circle-outline\'" :aria-pressed="String(p.arrived)" data-testid="rsvp-arrive" @click="a.setRsvpArrived(viewName, p.id, !p.arrived)">{{ p.name }}</v-chip><user-ref v-else :email="p.email" :name="p.name" :size="20" class="rsvp-person"></user-ref></template></div></td>'
@@ -10969,7 +10984,7 @@ function createVueApp() {
       + '<div>{{ a.dateTimeLabel(ev.date) }}</div>'
       + '<div v-if="ev.title" class="mb-2" style="font-size:0.9rem;opacity:0.7">{{ ev.title }}<div v-if="placesShown(ev)" style="font-size:0.8rem" data-testid="rsvp-places">{{ placesText(ev) }}</div></div>'
       + '<div v-if="walkIns" class="d-flex align-center" style="gap:6px"><span style="font-size:0.85rem">{{ a.tOr(\'field.\' + reservedCol, reservedCol) }}</span><count-stepper :value="ev.reserved" @change="a.setRsvpReserved(viewName, ev, $event)"></count-stepper></div>'
-      + '<rsvp-picker v-else :options="options" :picker="picker" :value="ev.myStatus" :disabled="locked(ev)" @set="set(ev.key, $event)"></rsvp-picker>'
+      + '<rsvp-picker v-else :options="a.rsvpOptions(viewName, ev)" :picker="picker" :value="ev.myStatus" :disabled="locked(ev)" @set="set(ev.key, $event)"></rsvp-picker>'
       + '<div v-if="cfg.showCounts && ev.total" class="mt-2" style="font-size:0.8rem;opacity:0.7">{{ tallyText(ev) }}</div>'
       + '<div v-if="showRoster && ev.participants.length" class="mt-1" style="font-size:0.82rem" data-testid="rsvp-roster"><div v-for="g in rosterGroups(ev)" :key="g.status" class="rsvp-roster-group"><span style="opacity:0.6">{{ g.label }}:</span> <template v-for="p in g.people" :key="p.email"><v-chip v-if="canStamp && cfg.checkin && cfg.checkin.set" size="small" variant="tonal" class="rsvp-person mr-1 mb-1" :color="p.arrived ? \'success\' : undefined" :prepend-icon="p.arrived ? \'mdi-check-circle\' : \'mdi-circle-outline\'" :aria-pressed="String(p.arrived)" data-testid="rsvp-arrive" @click="a.setRsvpArrived(viewName, p.id, !p.arrived)">{{ p.name }}</v-chip><user-ref v-else :email="p.email" :name="p.name" :size="20" class="rsvp-person"></user-ref></template></div></div>'
       + '</v-card>'

@@ -346,7 +346,12 @@
         "holds": [
           "booked"
         ],
-        "reserved": "walk_ins"
+        "reserved": "walk_ins",
+        "waitlist": {
+          "status": "waitlisted",
+          "start": "starts_at",
+          "until": "10min"
+        }
       }
     },
     "visits": {

@@ -668,7 +668,7 @@ declare
   st text := coalesce(new.store, old.store);
   cfg jsonb;
   link text; ev_store text; ev text; n bigint; cap numeric; res numeric; ev_row jsonb;
-  takes boolean;
+  takes boolean; wl jsonb;
 begin
   if st not like '%\_\_active' then return null; end if;
   select value -> 'capacity' -> 'responses' -> split_part(st, '__', 1) into cfg
@@ -701,10 +701,34 @@ begin
       update public.kv set value = jsonb_set(value, array[cfg ->> 'count'], to_jsonb(n)), updated_at = now()
         where store = ev_store and key = ev;
     end if;
+    -- `waitlist`: a free place goes to the longest-waiting response (updated_at, the server's), until
+    -- `until` seconds before the start. Booking it fires this trigger again, which promotes the next.
+    wl := cfg -> 'waitlist';
+    if jsonb_typeof(wl) = 'object' and cap is not null and n + res < cap
+       and (coalesce(ev_row ->> (wl ->> 'start'), '') = ''
+            or now() < (ev_row ->> (wl ->> 'start'))::timestamptz - make_interval(secs => (wl ->> 'until')::double precision)) then
+      update public.kv set value = jsonb_set(value, array[cfg ->> 'status'], cfg -> 'holds' -> 0)
+        where store = st and key = (select key from public.kv
+          where store = st and value ->> link = ev and value ->> (cfg ->> 'status') = wl ->> 'status'
+          order by updated_at, key limit 1);
+    end if;
   end loop;
   return null;
 end
 $$;
+
+-- updated_at is the server's: the waitlist queues by it, so a client must not be able to backdate it.
+create or replace function public.app_stamp_updated_at()
+returns trigger language plpgsql as $$
+begin
+  new.updated_at := now();
+  return new;
+end
+$$;
+
+drop trigger if exists kv_updated_at on public.kv;
+create trigger kv_updated_at before insert or update on public.kv
+  for each row execute function public.app_stamp_updated_at();
 
 drop trigger if exists kv_capacity on public.kv;
 create trigger kv_capacity after insert or update or delete on public.kv

@@ -1083,7 +1083,18 @@ in the same write. The no-show's own row is left as it is, so the organizer's at
 says who booked and did not come — which is what `attendance: no_show` is for. Schema:
 `rsvp.release: { "minutesBefore": 10 }`. **Medium; it rides on 4 and 5.**
 
-#### 7. A waitlist — a full class still takes a booking, in a queue
+#### 7. A waitlist — a full class still takes a booking, in a queue *(landed: Supabase only)*
+
+*Settled 2026-10-23:*
+- `capacity.waitlist: { "status": "waitlisted", "start": "starts_at", "until": "10min" }`. A full class
+  offers *Waitlisted*; it holds no place. `until` (a duration, default the start) may equal `release`.
+- **Supabase/Postgres only.** The capacity trigger, after recounting, promotes the longest-waiting
+  response to `holds[0]` while a place is free and `now < start − until`; the promoted row's own trigger
+  run promotes the next. Firestore has no server code, so the app does not offer the waitlist there.
+- Queue order is `kv.updated_at`, made the server's by a BEFORE trigger, so it cannot be backdated.
+- No position (*3rd*) yet.
+
+*The proposal as written:*
 
 The app being mimicked has none: a full class is full until a place is released at the door. A queue is
 better for the member who planned ahead, and it is asked for, so it is recorded here, with the one
