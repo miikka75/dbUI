@@ -209,6 +209,18 @@ function validateSchema() {
     });
     if (cap.reserved !== undefined) { var rd = ecols[cap.reserved], rty = (typeof rd === 'string') ? rd : (rd && rd.type); if (rty !== 'number') errors.push(cat + '`reserved` "' + cap.reserved + '" must be a number column of "' + lk.table + '"'); }
     if (cap.holds !== undefined && (!Array.isArray(cap.holds) || !cap.holds.length)) errors.push(cat + '`holds` must be a non-empty list of statuses (omit it to let any status take a place)');
+    // `waitlist`: promotion writes holds[0], and a waiting status must not itself take a place.
+    var wl = cap.waitlist;
+    if (wl !== undefined) {
+      var wsd = wl && ecols[wl.start], wst = (typeof wsd === 'string') ? wsd : (wsd && wsd.type), wup = wl && Rotation.parseDuration(wl.until || '0min');
+      if (!wl || typeof wl !== 'object' || !wl.status) errors.push(cat + '`waitlist` must be like { "status": "waitlisted", "start": "starts_at", "until": "10min" }');
+      else {
+        if (!Array.isArray(cap.holds) || !cap.holds.length) errors.push(cat + '`waitlist` needs `holds` — promotion books the first of them');
+        else if (cap.holds.indexOf(wl.status) >= 0) errors.push(cat + '`waitlist.status` "' + wl.status + '" is in `holds`, so a waiting response would take a place');
+        if (wst !== 'datetime') errors.push(cat + '`waitlist.start` "' + wl.start + '" must be a datetime column of "' + lk.table + '"');
+        if (!wup || wup.unit === 'm' || wup.unit === 'y') errors.push(cat + '`waitlist.until` "' + wl.until + '" is not a duration -- a whole number and a unit: min, h, d, w');
+      }
+    }
     if (capEvents[lk.table]) errors.push(cat + '"' + lk.table + '" is already capped by "' + capEvents[lk.table] + '" — one count per event row');
     capEvents[lk.table] = ct;
   }

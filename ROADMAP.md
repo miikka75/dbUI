@@ -752,7 +752,7 @@ offered a change the server refused; `rsvpFrozen` disables it. A third trap went
 the two above: adding the gate to a table that already has rows freezes those rows until their gate
 column is filled.
 
-### QR check-in — scan a code to mark attendance *(the shared-code arrangement is the chosen one: claim + organizer stamp landed, the organizer's QR is next; the verifier arrangement was dropped)*
+### QR check-in — scan a code to mark attendance *(the shared-code arrangement is the chosen one: claim + organizer stamp landed, the organizer's QR (rotating, #265) too; the verifier arrangement was dropped)*
 
 **Decided 2026-10-10: members check themselves in; nobody scans the attendee.** The verifier
 arrangement below was built (#264) and closed unmerged. Standing at the door scanning phones one by
@@ -933,7 +933,7 @@ exists, since without that there is nothing for a scan to do. Of the two, the sh
 better first build — it needs no camera at all in its typed form, so it can ship and be used at a real
 event before any of the decoding work above is done.
 
-### Registering at the venue — a QR that opens the page on the member's phone *(A: building; B: optional, unbuilt)*
+### Registering at the venue — a QR that opens the page on the member's phone *(A: landed, #265; B: optional, unbuilt)*
 
 Asked for 2026-10-10: a gym has a tablet with a QR, and a member scans it to register for classes there,
 as they would in the app.
@@ -1083,7 +1083,27 @@ in the same write. The no-show's own row is left as it is, so the organizer's at
 says who booked and did not come — which is what `attendance: no_show` is for. Schema:
 `rsvp.release: { "minutesBefore": 10 }`. **Medium; it rides on 4 and 5.**
 
-#### 7. A waitlist — a full class still takes a booking, in a queue
+#### 7. A waitlist — a full class still takes a booking, in a queue *(landed: Supabase only)*
+
+*Settled 2026-10-23:*
+- `capacity.waitlist: { "status": "waitlisted", "start": "starts_at", "until": "10min" }`. A full class
+  offers *Waitlisted*; it holds no place. `until` (a duration, default the start) may equal `release`.
+- **Supabase/Postgres only.** The capacity trigger, after recounting, promotes the longest-waiting
+  response to `holds[0]` while a place is free and `now < start − until`; the promoted row's own trigger
+  run promotes the next. Firestore has no server code, so the app does not offer the waitlist there.
+- Queue order is `kv.updated_at`, made the server's by a BEFORE trigger, so it cannot be backdated.
+- No position (*3rd*) yet.
+
+*Firestore, if a deployment asks (not built):*
+1. **Cloud Function** on the booking write, the Postgres trigger's twin. Needs the Blaze plan.
+2. **Queue on the class row** (opaque booking ids). Joining/leaving edits only your own id; a
+   cancellation's transaction also books the head and drops it, which the rules check. Automatic on
+   Spark; the cut-off is the client's. Medium–large: rules, dev server, differential test.
+3. **Staff screen promotes**, as release does. Client-only; only while one is open.
+
+Recommendation: 1 if billing is acceptable, else 2; 3 as the cheap fallback.
+
+*The proposal as written:*
 
 The app being mimicked has none: a full class is full until a place is released at the door. A queue is
 better for the member who planned ahead, and it is asked for, so it is recorded here, with the one
@@ -1132,7 +1152,13 @@ private) and so cannot write the next person's row.
 
 **Medium; it rides on 5, and is only fully useful with 8.**
 
-#### 8. My upcoming bookings, and "Add to calendar"
+#### 8. My upcoming bookings, and "Add to calendar" *(landed — as a computed lookup, not a path)*
+
+*What landed:* `bookings.class_start` is a table `computed.lookup` of the class's `starts_at` (15), so
+My calendar and the per-person feed (20) take their date from it with no stored copy.
+
+*The proposal as written:*
+
 
 A booking row has no date — it refers to a class. So the home page cannot list *my upcoming classes*,
 and the per-person feed cannot carry them. Proposal: a calendar source (and a data view's

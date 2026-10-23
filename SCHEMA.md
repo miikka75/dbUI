@@ -1614,6 +1614,7 @@ whichever screen writes the row:
 | `count` | The events table's `number` column the **server** keeps the count in. Leave it to the server |
 | `holds` | The statuses that take a place (optional; default: any non-empty one). `maybe` usually should not |
 | `reserved` | The events table's `number` column of places taken that are **not** responses — walk-ins signed in at the desk (optional). Both servers add it to the count before refusing a booking, and *Places left* subtracts it. Staff (whoever may write the responses table) see it in the booking list as a **− n +** stepper where their own response would be |
+| `waitlist` | `{ "status": "waitlisted", "start": "starts_at", "until": "10min" }` (optional; **Supabase and the dev server only**). A full event offers `status` instead of the statuses that hold; it takes no place. When a place is freed, the server books the longest-waiting response (`holds[0]`), until `until` (a duration, default the start) before `start`, a datetime column of the events table. `until` may equal `release`, so from then on a freed place goes to whoever is at the door. Firestore has no server code to promote, so the app does not offer it there |
 
 With `checkin.set`, staff see each booked person in the roster as a chip: a tap stamps `set` on that response
 (arrived, for someone with no phone), a second tap returns those columns to their defaults.
@@ -1640,8 +1641,11 @@ by the server, the row is taken back, and the member is told it was full.
   `_meta/ownerTables`, which the owner-write path already reads: Firestore allows ten document reads per
   write, and a mirror document of its own was the one too many.
 - `validateSchema` names a `link` that is not a ref to the events table by id, a `status`, `column` or
-  `count` that does not exist or is not a number, an empty `holds`, and two response tables capping one
-  events table.
+  `count` that does not exist or is not a number, an empty `holds`, two response tables capping one events
+  table, and a `waitlist` whose status holds a place, whose `start` is not a datetime, or whose `until` is
+  not a duration.
+- **Queue order is the server's** `updated_at` (a trigger stamps it on every write), so it cannot be
+  backdated. Editing a waiting response moves it to the back.
 
 ## search — a box the reader types in
 
