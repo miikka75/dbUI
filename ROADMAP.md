@@ -752,7 +752,7 @@ offered a change the server refused; `rsvpFrozen` disables it. A third trap went
 the two above: adding the gate to a table that already has rows freezes those rows until their gate
 column is filled.
 
-### QR check-in — scan a code to mark attendance *(the shared-code arrangement is the chosen one: claim + organizer stamp landed, the organizer's QR is next; the verifier arrangement was dropped)*
+### QR check-in — scan a code to mark attendance *(the shared-code arrangement is the chosen one: claim + organizer stamp landed, the organizer's QR (rotating, #265) too; the verifier arrangement was dropped)*
 
 **Decided 2026-10-10: members check themselves in; nobody scans the attendee.** The verifier
 arrangement below was built (#264) and closed unmerged. Standing at the door scanning phones one by
@@ -933,7 +933,7 @@ exists, since without that there is nothing for a scan to do. Of the two, the sh
 better first build — it needs no camera at all in its typed form, so it can ship and be used at a real
 event before any of the decoding work above is done.
 
-### Registering at the venue — a QR that opens the page on the member's phone *(A: building; B: optional, unbuilt)*
+### Registering at the venue — a QR that opens the page on the member's phone *(A: landed, #265; B: optional, unbuilt)*
 
 Asked for 2026-10-10: a gym has a tablet with a QR, and a member scans it to register for classes there,
 as they would in the app.
