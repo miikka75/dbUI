@@ -1152,7 +1152,13 @@ private) and so cannot write the next person's row.
 
 **Medium; it rides on 5, and is only fully useful with 8.**
 
-#### 8. My upcoming bookings, and "Add to calendar"
+#### 8. My upcoming bookings, and "Add to calendar" *(landed — as a computed lookup, not a path)*
+
+*What landed:* `bookings.class_start` is a table `computed.lookup` of the class's `starts_at` (15), so
+My calendar and the per-person feed (20) take their date from it with no stored copy.
+
+*The proposal as written:*
+
 
 A booking row has no date — it refers to a class. So the home page cannot list *my upcoming classes*,
 and the per-person feed cannot carry them. Proposal: a calendar source (and a data view's
