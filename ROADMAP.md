@@ -1094,6 +1094,15 @@ says who booked and did not come — which is what `attendance: no_show` is for.
 - Queue order is `kv.updated_at`, made the server's by a BEFORE trigger, so it cannot be backdated.
 - No position (*3rd*) yet.
 
+*Firestore, if a deployment asks (not built):*
+1. **Cloud Function** on the booking write, the Postgres trigger's twin. Needs the Blaze plan.
+2. **Queue on the class row** (opaque booking ids). Joining/leaving edits only your own id; a
+   cancellation's transaction also books the head and drops it, which the rules check. Automatic on
+   Spark; the cut-off is the client's. Medium–large: rules, dev server, differential test.
+3. **Staff screen promotes**, as release does. Client-only; only while one is open.
+
+Recommendation: 1 if billing is acceptable, else 2; 3 as the cheap fallback.
+
 *The proposal as written:*
 
 The app being mimicked has none: a full class is full until a place is released at the door. A queue is
