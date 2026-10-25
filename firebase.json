@@ -30,6 +30,7 @@
       ".git/**",
       "**/node_modules/**",
       "dev/**",
+      "docs/**",
       "functions/**",
       ".github/**",
       "*.md",
