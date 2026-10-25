@@ -49,7 +49,7 @@ describe('capacity (Postgres trigger)', () => {
   it('saveSchema mirrors the config both rules layers read', async () => {
     as('admin@x.com');
     assert.deepEqual((await S.getMeta('ownerTables')).capacity, {
-      responses: { bookings: { events: 'classes', link: 'class', status: 'booking', capacity: 'capacity', count: 'booked', reserved: 'walk_ins', holds: ['booked'] } },
+      responses: { bookings: { events: 'classes', link: 'class', status: 'booking', capacity: 'capacity', count: 'booked', reserved: 'walk_ins', holds: ['booked'], waitlist: '' } },
       events: { classes: 'bookings' }
     });
   });

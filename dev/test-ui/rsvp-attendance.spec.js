@@ -414,6 +414,38 @@ test('capacity: places left are shown, a full event cannot be joined, and losing
   await ctx.close();
 });
 
+test('waitlist: a full class offers the queue, and a cancellation books the first in it', async ({ page, browser }) => {
+  const schema = JSON.parse(JSON.stringify(SCHEMA));
+  schema.tables.practices.columns[0] = { name: 'date', type: 'datetime' };
+  schema.tables.practices.columns.push({ name: 'capacity', type: 'number' }, { name: 'booked', type: 'number' });
+  schema.tables.rsvps.capacity = { link: 'practice', status: 'response', column: 'capacity', count: 'booked', holds: ['coming'],
+    waitlist: { status: 'waitlisted', start: 'date', until: '10min' } };
+  await page.request.post('/api/resetData');
+  await page.request.post('/api/setUserRole', { data: { uid: 'org@x', role: 'admin', user: 'org@x', tables: 'all' } });
+  for (const u of ['ann@x', 'bob@x']) await page.request.post('/api/setUserRole', { data: { uid: u, role: 'editor', user: u, tables: { practices: 'r' } }, headers: ADMIN });
+  await page.request.post('/api/saveSchema', { data: { schema }, headers: ADMIN });
+  await page.request.post('/api/saveLists', { data: { lists: { rsvp_status: ['coming', 'out', 'waitlisted'], attendance_status: ['pending', 'attended', 'absent'] } }, headers: ADMIN });
+  await page.request.post('/api/putRow', { data: { tableId: 'practices', tab: 'active', data: { id: 'p1', date: new Date(Date.now() + 2 * 3600000).toISOString(), title: 'Spin', capacity: 1 } }, headers: ADMIN });
+
+  await bootAs(page, 'ann@x');
+  const toggle = (p) => p.locator('[data-testid="rsvp-toggle"]').first();
+  await expect(toggle(page).locator('button', { hasText: 'waitlisted' })).toHaveCount(0);
+  await toggle(page).locator('button', { hasText: 'coming' }).click();
+
+  const ctx = await browser.newContext();
+  const bob = await ctx.newPage();
+  await bootAs(bob, 'bob@x');
+  await expect(toggle(bob).locator('button', { hasText: 'coming' })).toHaveCount(0);
+  await toggle(bob).locator('button', { hasText: 'waitlisted' }).click();
+  const stored = async () => Object.fromEntries(((await (await page.request.post('/api/getTableData', { data: { tableId: 'rsvps', tab: 'active' }, headers: ADMIN })).json()).rows || []).map((r) => [r.owner, r.response]));
+  await expect.poll(stored).toEqual({ 'ann@x': 'coming', 'bob@x': 'waitlisted' });
+
+  await toggle(page).locator('button', { hasText: 'coming' }).click();   // Ann gives up her place
+  await expect.poll(stored).toEqual({ 'bob@x': 'coming' });
+  await expect(toggle(bob).locator('button', { hasText: 'coming' })).toHaveClass(/v-btn--active/);
+  await ctx.close();
+});
+
 test('validateSchema: a capacity config that does not resolve is named', async ({ page }) => {
   await setup(page);
   await bootAs(page, 'org@x');
@@ -434,6 +466,15 @@ test('validateSchema: a capacity config that does not resolve is named', async (
   expect(errs[1]).toContain('"nope" is not a column');
   expect(errs[2]).toContain('`holds` must be a non-empty list');
   expect(errs[3]).toBe('');
+  const wl = await page.evaluate(() => {
+    SCHEMA.rsvps.capacity = { link: 'practice', status: 'response', column: 'title', count: 'title', holds: ['coming'], waitlist: { status: 'coming', start: 'title', until: '1m' } };
+    const e = validateSchema().filter((x) => /waitlist/.test(x)).join(' | ');
+    delete SCHEMA.rsvps.capacity;
+    return e;
+  });
+  expect(wl).toContain('is in `holds`');
+  expect(wl).toContain('must be a datetime column');
+  expect(wl).toContain('`waitlist.until` "1m" is not a duration');
 });
 
 test('Lookup is offered to whoever can change something in it, not to a member who can only read', async ({ page }) => {

@@ -412,9 +412,16 @@ describe('capacityOf / ownerTablesMirror (the _meta/ownerTables document both ru
   } };
   it('maps each capped response table to its events table, and back', () => {
     assert.deepEqual(H.capacityOf(schema), {
-      responses: { bookings: { events: 'classes', link: 'class', status: 'booking', capacity: 'capacity', count: 'booked', reserved: '', holds: ['booked'] } },
+      responses: { bookings: { events: 'classes', link: 'class', status: 'booking', capacity: 'capacity', count: 'booked', reserved: '', holds: ['booked'], waitlist: '' } },
       events: { classes: 'bookings' }
     });
+  });
+  it('waitlist: the until as seconds for the trigger, and blank when it cannot resolve', () => {
+    const edefs = { starts_at: { type: 'datetime' } };
+    assert.deepEqual(H.waitlistOf({ holds: ['booked'], waitlist: { status: 'waitlisted', start: 'starts_at', until: '10min' } }, edefs), { status: 'waitlisted', start: 'starts_at', until: 600 });
+    assert.equal(H.waitlistOf({ holds: ['booked'], waitlist: { status: 'waitlisted', start: 'starts_at' } }, edefs).until, 0);
+    assert.equal(H.waitlistOf({ holds: [], waitlist: { status: 'waitlisted', start: 'starts_at' } }, edefs), '');
+    assert.equal(H.waitlistOf({ holds: ['booked'], waitlist: { status: 'waitlisted', start: 'starts_at', until: '1m' } }, edefs), '');
   });
   it('leaves out a config that does not resolve, rather than half-enforcing it', () => {
     assert.equal(H.capacityOf(schema).responses.broken, undefined);
