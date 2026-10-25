@@ -18,7 +18,7 @@ const README = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8');
 
 // The documents a person is expected to find. Named rather than globbed, so adding a doc is a
 // deliberate act of deciding whether readers are meant to reach it.
-const USER_DOCS = ['FIREBASE.md', 'SUPABASE.md', 'SCHEMA.md', 'BACKEND_API.md', 'ROADMAP.md', 'examples/README.md'];
+const USER_DOCS = ['FIREBASE.md', 'SUPABASE.md', 'SCHEMA.md', 'BACKEND_API.md', 'ROADMAP.md', 'examples/README.md', 'docs/README.md'];
 
 describe('docs are reachable from the README', () => {
   for (const doc of USER_DOCS) {
@@ -50,7 +50,8 @@ describe('docs are reachable from the README', () => {
 // and the check above could not see them: it strips the #fragment before testing the path, so a link
 // to a real file with a dead heading passes. GitHub renders those as a silent no-op — the reader
 // clicks and stays where they are.
-const DOCS = ['README.md', 'FIREBASE.md', 'SUPABASE.md', 'SCHEMA.md', 'ROADMAP.md'];
+const FEATURE_DOCS = fs.readdirSync(path.join(ROOT, 'docs', 'features')).map((f) => 'docs/features/' + f);
+const DOCS = ['README.md', 'FIREBASE.md', 'SUPABASE.md', 'SCHEMA.md', 'ROADMAP.md', 'docs/README.md', ...FEATURE_DOCS];
 
 // GitHub's heading slug: lowercase, drop punctuation, spaces to dashes. Close enough for our headings,
 // and wrong in the safe direction — an over-strict slug would report a link that actually works, which
@@ -58,6 +59,17 @@ const DOCS = ['README.md', 'FIREBASE.md', 'SUPABASE.md', 'SCHEMA.md', 'ROADMAP.m
 const slugsOf = (md) => (md.match(/^#{1,6}\s+.*$/gm) || [])
   .map((h) => h.replace(/^#{1,6}\s+/, ''))
   .map((h) => h.toLowerCase().replace(/[^\w\s-]/g, '').trim().split(/\s+/).join('-'));
+
+describe('docs/ links and screenshots resolve', () => {
+  for (const doc of ['docs/README.md', ...FEATURE_DOCS]) {
+    it(doc, () => {
+      const src = fs.readFileSync(path.join(ROOT, doc), 'utf8');
+      const missing = [...src.matchAll(/\]\(([^)\s#]+)[^)]*\)/g)].map((m) => m[1])
+        .filter((l) => !/^([a-z]+:)?\/\//i.test(l) && !fs.existsSync(path.join(ROOT, path.dirname(doc), l)));
+      assert.deepEqual(missing, [], doc + ' links to files that are not there');
+    });
+  }
+});
 
 describe('anchor links between the docs resolve', () => {
   for (const doc of DOCS) {
@@ -67,7 +79,7 @@ describe('anchor links between the docs resolve', () => {
       for (const m of src.matchAll(/\]\(([^)\s#]*)#([^)\s]+)\)/g)) {
         const target = m[1] || doc;
         if (/^([a-z]+:)?\/\//i.test(target)) continue;          // external link, not ours to check
-        const file = path.join(ROOT, target);
+        const file = m[1] ? path.join(ROOT, path.dirname(doc), m[1]) : path.join(ROOT, doc);
         if (!fs.existsSync(file)) { broken.push(target + '#' + m[2] + ' (no such file)'); continue; }
         if (!slugsOf(fs.readFileSync(file, 'utf8')).includes(m[2])) broken.push(target + '#' + m[2]);
       }
