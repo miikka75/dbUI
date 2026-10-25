@@ -4,6 +4,8 @@ A schema-driven web app with multiple backend options. No build step — Vue 3 +
 
 ## Features
 
+Every feature with screenshots, its schema and which backends support it: **[docs/README.md](docs/README.md)**.
+
 - **Schema-driven**: JSON config defines tables, columns, views, and behavior
 - **Four backends**: In-browser Postgres (PGlite in IndexedDB — no account, no server, nothing to install), Supabase (Postgres + RLS), Firebase (Firestore), Dev Server (PGlite — runs the *real* `supabase-schema.sql` policies locally)
 - **i18n**: multi-language with auto-generated translation keys from schema

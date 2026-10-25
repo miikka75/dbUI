@@ -4966,6 +4966,19 @@ test.describe('v3 @both partition toggle in an embed', () => {
     await expect(tl.locator('[data-testid="timeline-bar"]')).toHaveCount(2);
   });
 
+  test('a timeline opened at boot loads its source table', async ({ page }) => {
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: {
+      tables: { plan: { columns: [{ name: 'title', type: 'text' }, { name: 'start', type: 'date' }] } },
+      views: [{ name: 'tl', kind: 'timeline', sources: ['plan'], mode: 'union', columns: ['title', 'start'],
+        timeline: { start: 'start', from: '2026-03-01', periods: 4 } }],
+      nav: { items: [{ view: 'tl' }] } } } });
+    await page.request.post('/api/putRow', { data: { tableId: 'plan', tab: 'active', data: { id: 'a', title: 'A', start: '2026-03-02' } } });
+    await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.goto('/');
+    await expect(page.locator('[data-testid="timeline-bar"]')).toHaveCount(1);
+  });
+
   test('validateSchema names a filter column that is not there', async ({ page }) => {
     await ensureAppReady(page);
     const r = await page.evaluate(() => {

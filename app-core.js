@@ -529,6 +529,7 @@ function createVueApp() {
       isFormView: function() { return this.currentKind === 'form'; },
       isStatsView: function() { return this.currentKind === 'stats'; },
       isScanView: function() { return this.currentKind === 'scan'; },
+      isTimelineView: function() { return this.currentKind === 'timeline'; },
       // Curated palette tokens exposed in the admin theme editor (Vuetify color names + friendly labels).
       themeTokens: function() {
         return [
@@ -1869,7 +1870,7 @@ function createVueApp() {
         var cfg = VIEWS[id] || SCHEMA[id] || {};
         this.sortCol = cfg.defaultSort || null;
         this.sortAsc = !cfg.defaultSortDesc;
-        if (this.isCalendarView || this.isPivotView || this.isRsvpView || this.isFormView) { this.loadTableData(); }
+        if (this.isCalendarView || this.isPivotView || this.isRsvpView || this.isFormView || this.isTimelineView) { this.loadTableData(); }
         else if (this.isDataView || this.isRotationView || this.isBoardView || this.isStatsView || this.isScanView) { this.periodOffset = 0; this.loadTableData(); }
         else if (VIEWS[id] && typeof VIEWS[id].markdown === 'string') this.loadPage(id);
       },
