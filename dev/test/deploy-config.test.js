@@ -146,7 +146,9 @@ describe('deploy config — hosting ignore list', () => {
     '.claude/settings.local.json',
     '.vscode/settings.json',
     'drive-sync-export-2026-07-31.json',
-    'some-backup-export.json'
+    'some-backup-export.json',
+    'docs/features/rsvp.md',
+    'docs/screenshots/rsvp.png'
   ];
   // What the site needs. An exclusion list that breaks boot is the other way to get this wrong.
   // supabase-schema.sql is here because the browser-local Postgres backend FETCHES it at boot and

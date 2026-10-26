@@ -275,6 +275,7 @@
     },
     "tickets": {
       "archivable": true,
+      "reorderable": true,
       "columns": [
         {
           "name": "title",
@@ -296,6 +297,11 @@
           "type": "ref",
           "table": "ticket_stages",
           "valueCol": "stage"
+        },
+        {
+          "name": "position",
+          "type": "number",
+          "hidden": true
         },
         {
           "name": "created_at",

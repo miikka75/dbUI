@@ -64,6 +64,54 @@ test.describe('Board (kanban) view', () => {
   });
 });
 
+test.describe('Board on a reorderable table', () => {
+  const laneIds = (page, lane) => page.locator('[data-testid="board-lane-' + lane + '"] [data-testid^="board-card-"]')
+    .evaluateAll(els => els.map(e => e.dataset.testid.replace('board-card-', '')));
+  const positions = async (page) => {
+    const s = await (await page.request.post('/api/getTableData', { data: { tableId: 'tickets', tab: 'active' } })).json();
+    const rows = s.rows || s.data || s || [];
+    return Object.fromEntries(rows.map(r => [r.id, r.status + ':' + r.position]));
+  };
+
+  test('a lane follows position; up, a drop before a card, and undo', async ({ page }) => {
+    const schema = JSON.parse(JSON.stringify(SCHEMA));
+    const t = schema.tables ? schema.tables.tickets : schema.tickets;
+    t.reorderable = true;
+    t.columns.push({ name: 'position', type: 'number' });
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema } });
+    for (const r of [
+      { id: 'tk1', title: 'Alpha', status: 'open', position: '2' },
+      { id: 'tk2', title: 'Beta', status: 'in_progress', position: '3' },
+      { id: 'tk3', title: 'Gamma', status: 'open', position: '1' }
+    ]) await page.request.post('/api/putRow', { data: { tableId: 'tickets', data: r, tab: 'active' } });
+    await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.goto('/');
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'tickets_board' }).first().click();
+    await page.waitForSelector('[data-testid="board-view"]', { timeout: 6000 });
+
+    // Position, not the view's defaultSort (title).
+    expect(await laneIds(page, 'open')).toEqual(['tk3', 'tk1']);
+
+    await page.locator('[data-testid="board-move-tk1"]').click();
+    await page.locator('[data-testid="board-up-tk1"]').click();
+    await expect.poll(() => laneIds(page, 'open')).toEqual(['tk1', 'tk3']);
+    await expect.poll(() => positions(page)).toEqual({ tk1: 'open:1', tk3: 'open:2', tk2: 'in_progress:3' });
+
+    // Beta onto Gamma's upper half: into the open lane, before Gamma.
+    await page.locator('[data-testid="board-card-tk2"]').dragTo(page.locator('[data-testid="board-card-tk3"]'), { targetPosition: { x: 20, y: 4 } });
+    await expect.poll(() => laneIds(page, 'open')).toEqual(['tk1', 'tk2', 'tk3']);
+    await expect.poll(() => positions(page)).toEqual({ tk1: 'open:1', tk2: 'open:2', tk3: 'open:3' });
+
+    // One undo takes back the lane and the order together.
+    await page.locator('[data-testid="undo"]').click();
+    await expect.poll(() => positions(page)).toEqual({ tk1: 'open:1', tk3: 'open:2', tk2: 'in_progress:3' });
+    await expect.poll(() => laneIds(page, 'open')).toEqual(['tk1', 'tk3']);
+  });
+});
+
 test.describe('Board embedded in a page', () => {
   test('renders as a board, keeps the move between lanes, and leaves add/archive/delete to its own screen', async ({ page }) => {
     const schema = JSON.parse(JSON.stringify(SCHEMA));

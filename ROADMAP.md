@@ -1751,6 +1751,16 @@ phase 3 does the same job for free.
 - **Open:** self-service by role in the rules (`ownerRoles`). Any account can still own rows in an owner
   table (the door can file a pending membership for itself).
 
+### Ordering cards within a board lane *(landed 2026-10-26)*
+
+- A board on a `reorderable` table orders each lane by `position` (`Rotation.sortRosterRows`, as a lookup does);
+  other boards keep `defaultSort`.
+- A drop on a card goes before it, on its lower half after it; on the lane's empty space, to the end. Placed in
+  the table's whole sequence (`Reorder.place` + `renumber`), so a filtered board keeps hidden rows' slots.
+- Lane + position is one undo entry (`boardPlace`). The move menu gains up/down for touch and keyboard.
+- Not on a self-service table: renumbering writes other people's rows. Not in the archive or during a search.
+- Fixed on the way: an embedded board's drop looked the card up in the host page's rows and did nothing.
+
 ### Prose that names its rows — a per-row template for an embed
 
 A `markdown` view is prose **plus** grids: `{{self}}` and `{{view:x}}` render a table, a card stack or

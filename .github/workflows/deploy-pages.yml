@@ -76,7 +76,7 @@ jobs:
       # Publish the whole repo root. Excludes below keep secrets / dev-only files out of the public site.
       - name: Prune non-public files
         run: |
-          rm -rf .github dev node_modules tests test .git scripts || true
+          rm -rf .github dev docs node_modules tests test .git scripts || true
           # NOT pruned any more: supabase-schema.sql. It was listed here as a "server-side" file — but
           # the browser-local Postgres backend FETCHES it at boot and applies it (storage-pglite.js), so
           # deleting it published an app whose "In this browser" mode 404s on its own access policy. It
