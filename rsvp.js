@@ -18,9 +18,9 @@
 //   limit        max events after sorting (optional)
 //   before       'YYYY-MM-DD': later events are left out and counted as `later` (optional)
 //   checkinColumn response column a member types the event's shared check-in code into (optional)
-//   capacity     { column, count, holds } from the response table's `capacity` (optional): each event
-//                then carries its limit, how many hold a place (the server's count), whether it is full,
-//                and whether MY response holds one -- a full event is still mine to leave.
+//   capacity     { column, count, holds, waitlist } from the response table's `capacity` (optional): each
+//                event then carries its limit, how many hold a place (the server's count), whether it is
+//                full, and whether MY response holds one -- a full event is still mine to leave -- or waits.
 (function(root) {
   // The local day a date or datetime value falls on. A UTC instant's first ten characters are the UTC
   // day, which is the wrong day for an evening class east of Greenwich.
@@ -92,6 +92,8 @@
         booked: cap ? (Number(e[cap.count]) || 0) + (cap.reserved ? (Number(e[cap.reserved]) || 0) : 0) : 0,
         full: !!cap && limitOf(e[cap.column]) !== null && (Number(e[cap.count]) || 0) + (cap.reserved ? (Number(e[cap.reserved]) || 0) : 0) >= limitOf(e[cap.column]),
         myHolds: !!mine && holds(cap, mine[statusCol]),
+        myWaiting: !!mine && !!cap && !!cap.waitlist && mine[statusCol] === cap.waitlist.status,
+        start: cap && cap.waitlist ? e[cap.waitlist.start] : null,
         tally: tally,
         total: responded.length,
         participants: participants

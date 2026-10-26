@@ -476,6 +476,12 @@ const server = http.createServer(async (req, res) => {
       const cfg = (BackendHelpers.capacityOf(await backend.getSchema() || {}).responses || {})[BackendHelpers.tableOf(tableId)];
       const ev = cfg && row[cfg.link];
       if (ev) await broadcast(_store(cfg.events, 'active'), ev, await _rowById(cfg.events, 'active', ev) || null);
+      // The waitlist trigger may have booked someone else's response for this event: announce them all.
+      if (ev && cfg.waitlist) {
+        for (const r of ((await backend.getTableData(tableId, 'active') || {}).rows || [])) {
+          if (r[cfg.link] === ev && r.id !== row.id) await broadcast(_store(tableId, 'active'), r.id, r);
+        }
+      }
     }
     async function putOk(b) {
       const id = b.data && b.data.id;

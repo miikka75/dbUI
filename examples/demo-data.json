@@ -328,6 +328,7 @@
     "tickets": [
       {
         "id": "tkt1",
+        "position": "1",
         "title": "Fix projector in chapel",
         "status": "open",
         "assignee": "Alex",
@@ -335,6 +336,7 @@
       },
       {
         "id": "tkt2",
+        "position": "2",
         "title": "Order sacrament bread",
         "status": "in_progress",
         "assignee": "Sam",
@@ -342,6 +344,7 @@
       },
       {
         "id": "tkt3",
+        "position": "3",
         "title": "Update ward directory",
         "status": "open",
         "assignee": "Sam",
@@ -349,6 +352,7 @@
       },
       {
         "id": "tkt4",
+        "position": "4",
         "title": "Print programs",
         "status": "done",
         "assignee": "Alex",

@@ -36,6 +36,19 @@
     return arr;
   }
 
+  // A board's drop: move the item `id` to just before `targetId` (just after with `after`), returning a NEW
+  // array, or null when either is missing or nothing moves.
+  function place(list, id, targetId, after) {
+    var arr = (list || []).slice();
+    var i = arr.findIndex(function(r) { return r && r.id === id; });
+    if (i < 0 || id === targetId) return null;
+    var item = arr.splice(i, 1)[0];
+    var j = arr.findIndex(function(r) { return r && r.id === targetId; });
+    if (j < 0) return null;
+    arr.splice(after ? j + 1 : j, 0, item);
+    return arr.some(function(r, k) { return r !== list[k]; }) ? arr : null;
+  }
+
   // Given rows in their final DISPLAY order, return the changes needed to store that order:
   // [{ row, id, from, to }], skipping every row already holding the right position.
   //
@@ -54,7 +67,7 @@
     return out;
   }
 
-  var M = { move: move, renumber: renumber };
+  var M = { move: move, place: place, renumber: renumber };
   if (typeof module !== 'undefined' && module.exports) module.exports = M;
   else root.Reorder = M;
 })(typeof self !== 'undefined' ? self : this);

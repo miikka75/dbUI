@@ -1,0 +1,35 @@
+{
+  "//": "View kinds no shipped example uses, for docs/screenshots only (docs-screenshots.js).",
+  "schema": {
+    "defaultLanguage": "en",
+    "tables": {
+      "projects": { "columns": [
+        { "name": "title", "type": "text" },
+        { "name": "starts_on", "type": "date" },
+        { "name": "due_on", "type": "date" }
+      ] }
+    },
+    "views": [
+      { "name": "timeline", "sources": ["projects"], "mode": "union", "columns": ["title", "starts_on", "due_on"],
+        "timeline": { "start": "starts_on", "end": "due_on", "label": ["title"], "from": "2026-11-02", "periods": 12, "interval": "weekly" } }
+    ],
+    "nav": { "items": [{ "view": "timeline" }] }
+  },
+  "rows": {
+    "projects": [
+      { "id": "p1", "title": "Site survey", "starts_on": "2026-11-02", "due_on": "2026-11-20" },
+      { "id": "p2", "title": "Design", "starts_on": "2026-11-16", "due_on": "2026-12-18" },
+      { "id": "p3", "title": "Permits", "starts_on": "2026-11-23", "due_on": "2027-01-08" },
+      { "id": "p4", "title": "Build", "starts_on": "2026-12-28", "due_on": "2027-02-26" },
+      { "id": "p5", "title": "Handover", "starts_on": "2027-01-18" }
+    ]
+  },
+  "translations": {
+    "app.title": "Projects",
+    "view.timeline": "Project plan",
+    "tab.projects": "Projects",
+    "field.title": "Title",
+    "field.starts_on": "Starts",
+    "field.due_on": "Due"
+  }
+}

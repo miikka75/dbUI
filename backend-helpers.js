@@ -405,10 +405,19 @@
         // event row. Blank when none, so both rules layers can test for it without a missing-key branch.
         out.responses[t] = { events: ev, link: cap.link, status: cap.status, capacity: cap.column, count: cap.count,
                              reserved: (cap.reserved && edefs[cap.reserved]) ? cap.reserved : '',
-                             holds: Array.isArray(cap.holds) ? cap.holds.map(String) : [] };
+                             holds: Array.isArray(cap.holds) ? cap.holds.map(String) : [],
+                             waitlist: H.waitlistOf(cap, edefs) };
         out.events[ev] = t;
       }
       return out;
+    },
+    // `capacity.waitlist` for the Postgres trigger: { status, start, until: seconds before the start }, or ''
+    // when absent or unresolved (validateSchema names why).
+    waitlistOf: function(cap, edefs) {
+      var w = cap.waitlist, p = w && Rot().parseDuration(w.until || '0min');
+      var secs = p && { min: 60, h: 3600, d: 86400, w: 604800 }[p.unit];
+      if (!w || !w.status || !edefs[w.start] || !secs || !Array.isArray(cap.holds) || !cap.holds.length) return '';
+      return { status: String(w.status), start: w.start, until: p.count * secs };
     },
     // Whether a response's status takes a place, under one capacityOf entry.
     capacityHolds: function(cfg, status) {
