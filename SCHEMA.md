@@ -1706,7 +1706,7 @@ reuses the data-view load path (filters, `compute`, `defaultSort` all apply) and
 { "name": "tickets_board",
   "sources": ["tickets"],            // REQUIRED — exactly ONE table (the drag-write target must be unambiguous)
   "mode": "join",
-  "defaultSort": "title",            // card order within each lane
+  "defaultSort": "title",            // card order within each lane (a `reorderable` table orders by `position`)
   "board": {
     "lane": "status",                // REQUIRED — a `select` column on the source table; its value places the card
     "lanes": ["open", "in_progress", "done"], // OPTIONAL — explicit lane order; keys here render even when empty.
@@ -1731,6 +1731,9 @@ of a per-member balance view) covers the reward's price. A drop that fails is re
 the move menu greys the lane. It is the board's rule, not the server's: an admin editing the row elsewhere
 is not stopped by it.
 
+- **Ordering cards by hand.** On a `reorderable` table each lane follows `position`: a card dropped on another
+  goes before it (after it on its lower half), on the lane's empty space to the end, and the move menu has
+  up/down. A move is one undo entry. Not on a self-service table, in the archive, or while a search is active.
 - **One source, one lane column.** The source must be **exactly one** table and `lane` must be a `select`
   **or a `ref`** column on it (load-time validation enforces both) — a drag writes one column on one table,
   so a union/join or an unsupported lane type would be ambiguous. This mirrors why a mirror-**detail** table

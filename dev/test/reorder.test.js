@@ -198,3 +198,67 @@ describe('the three reorder paths, through the shipped code', () => {
     }
   });
 });
+
+describe('Reorder.place — a board drop', () => {
+  const ids = (l) => l.map((r) => r.id).join('');
+  const list = () => ['a', 'b', 'c', 'd'].map((id, k) => row(id, String(k + 1)));
+  it('moves before the target, or after it', () => {
+    assert.equal(ids(Reorder.place(list(), 'd', 'b')), 'adbc');
+    assert.equal(ids(Reorder.place(list(), 'a', 'c', true)), 'bcad');
+  });
+  it('returns null when nothing moves or an id is missing', () => {
+    assert.equal(Reorder.place(list(), 'a', 'b'), null);
+    assert.equal(Reorder.place(list(), 'b', 'a', true), null);
+    assert.equal(Reorder.place(list(), 'a', 'a'), null);
+    assert.equal(Reorder.place(list(), 'x', 'a'), null);
+    assert.equal(Reorder.place(list(), 'a', 'x'), null);
+  });
+});
+
+describe('boardPlace, through the shipped code', () => {
+  const Rotation = require('../../rotation');
+  const SCHEMA = { tickets: { reorderable: true } };
+  const VIEWS = { tb: { sources: ['tickets'], board: { lane: 'status' } } };
+  const setup = () => {
+    // A filtered board: `h` is hidden from the view but holds a slot in the table's sequence.
+    const cache = [
+      { id: 'a', status: 'open', position: '1' }, { id: 'h', status: 'open', position: '2' },
+      { id: 'b', status: 'open', position: '3' }, { id: 'c', status: 'done', position: '4' },
+    ];
+    const view = cache.filter((r) => r.id !== 'h').map((r) => Object.assign({}, r));
+    return { cache, view };
+  };
+  const run = (s, args, ctx) => {
+    const c = capture();
+    try {
+      const fn = appCoreFn('boardPlace', { Writes: c.Writes, Undo, Reorder, Rotation, SCHEMA, VIEWS });
+      const self = Object.assign(withWriter({ dataCache: { tickets: s.cache }, currentData: s.view, propagateMirror() {} }, c.Writes), ctx);
+      self.stampRows = appCoreFn('stampRows', { Writes: c.Writes, Undo });
+      fn.apply(self, args);
+    } finally { c.restore(); }
+    return c;
+  };
+
+  it('moves a card into another lane before a card, renumbering the whole table', () => {
+    const s = setup();
+    const c = run(s, ['tb', s.view[0], 'done', 'c', false]);
+    const pos = Object.fromEntries(s.cache.map((r) => [r.id, r.position]));
+    assert.deepEqual(pos, { h: '1', b: '2', a: '3', c: '4' });
+    assert.equal(s.cache[0].status, 'done');
+    // The board's own copies follow.
+    assert.deepEqual(s.view.map((r) => [r.id, r.status, r.position]), [['a', 'done', '3'], ['b', 'open', '2'], ['c', 'done', '4']]);
+    assert.ok(c.writes.some((w) => w.row.id === 'a' && w.row.status === 'done'));
+  });
+
+  it('writes nothing for a drop back onto its own place, or on a table that is not reorderable', () => {
+    let s = setup();
+    assert.deepEqual(run(s, ['tb', s.view[1], 'open', 'c', false]).writes, []);
+    s = setup();
+    assert.deepEqual(run(s, ['tb', s.view[0], 'open', 'h', false]).writes, []);
+    s = setup();
+    const views = { tb: { sources: ['other'], board: { lane: 'status' } } };
+    const c = capture();
+    try { appCoreFn('boardPlace', { Writes: c.Writes, Undo, Reorder, Rotation, SCHEMA, VIEWS: views }).call({ dataCache: {} }, 'tb', s.view[0], 'done', 'c'); } finally { c.restore(); }
+    assert.deepEqual(c.writes, []);
+  });
+});
