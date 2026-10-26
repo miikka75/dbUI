@@ -10,6 +10,7 @@
     "11": "Adds Notes Gallery under Data: the notes as a grid of picture tiles (`layout: \"gallery\"`), the first image column as the picture and the title, author and date as the caption. Four more notes, each with a picture, so the grid has something to show. A note without a picture still gets a tile.",
     "12": "Adds Take Attendance under Crew: each practice as a card listing who answered, where an organizer marks each person Attended or Absent. A member cannot mark themselves, and once they are marked their RSVP for that practice can no longer be changed. RSVPs now also keep to their own fields (practice, response, note), so a member can no longer write anything else on their response.",
     "13": "Check-in with a code: on a day with practices, My RSVP shows one Check-in code box for the whole day. Members type the code shown at practice, or scan it: an organizer can show it as a QR code that opens the app with the code filled in. The code counts for every practice the member answered for that day. The organizer types the same code on their own screen and presses Check in, which marks everyone who entered it as Attended in all of the day's practices. The code is never saved, so it cannot be looked up from home.",
-    "14": "No visible change: the schema moves to version 5, where a booking cut-off is written as a duration (\"30min\")."
+    "14": "No visible change: the schema moves to version 5, where a booking cut-off is written as a duration (\"30min\").",
+    "15": "Tickets can be put in order by hand: on the Tickets board, drop a card on another to place it before it, or use Move up / Move down in the card's menu. The order is kept for everyone."
   }
 }

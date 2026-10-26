@@ -1189,7 +1189,7 @@ function createVueApp() {
       },
       staticTranslationKeys: function() {
         return ['app.title', 'btn.add', 'btn.show_more', 'btn.compare_add', 'copy.events', 'copy.from', 'copy.to', 'copy.target', 'copy.times', 'copy.count', 'copy.skipped', 'btn.show_active', 'btn.show_archived', 'btn.show_all', 'btn.show_fewer', 'btn.decrease', 'btn.increase', 'settings.linked_list', 'auth.sign_in', 'auth.with_google', 'auth.or', 'auth.email', 'auth.send_email', 'auth.check_email', 'auth.check_email_code', 'auth.code', 'kiosk.fullscreen', 'kiosk.exit', 'kiosk.lock', 'kiosk.unlock', 'kiosk.pin', 'kiosk.pin_short', 'kiosk.wrong_pin', 'btn.more',
-         'btn.edit', 'btn.copy', 'btn.show', 'btn.hide', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'cal.feed_url', 'feed.subscribe', 'feed.link_pending', 'feed.unsubscribe', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.no_blob_store', 'msg.feed_cap_reached', 'settings.feeds', 'settings.feed_regenerate', 'settings.feed_unpublish', 'settings.feed_not_republishing', 'settings.feed_all_personal', 'settings.feed_subscribers', 'settings.feed_revoking', 'settings.feed_over_cap', 'settings.feed_unpublished', 'settings.feed_revoked', 'settings.feed_sweep', 'settings.csp_reports', 'settings.csp_token', 'settings.csp_bad_token', 'settings.csp_read_failed', 'settings.csp_none', 'settings.csp_extensions', 'settings.csp_directive', 'settings.csp_blocked', 'settings.csp_count', 'settings.csp_last_seen', 'btn.refresh', 'settings.csp_rotate', 'msg.feed_swept', 'cal.err_no_source', 'cal.err_table', 'cal.err_date_col', 'cal.err_not_date', 'cal.err_title_col', 'settings.add_calendar', 'settings.cal_title', 'settings.cal_table', 'settings.cal_date_col', 'settings.cal_title_cols', 'settings.cal_add_source', 'btn.delete', 'btn.confirm_delete', 'cal.err_not_rotation', 'settings.cal_rotations', 'msg.name_taken', 'cal.err_name', 'lang.add_language', 'btn.cancel', 'timeline.empty', 'col.switch_list',
+         'btn.edit', 'btn.move_up', 'btn.move_down', 'btn.copy', 'btn.show', 'btn.hide', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'cal.feed_url', 'feed.subscribe', 'feed.link_pending', 'feed.unsubscribe', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.no_blob_store', 'msg.feed_cap_reached', 'settings.feeds', 'settings.feed_regenerate', 'settings.feed_unpublish', 'settings.feed_not_republishing', 'settings.feed_all_personal', 'settings.feed_subscribers', 'settings.feed_revoking', 'settings.feed_over_cap', 'settings.feed_unpublished', 'settings.feed_revoked', 'settings.feed_sweep', 'settings.csp_reports', 'settings.csp_token', 'settings.csp_bad_token', 'settings.csp_read_failed', 'settings.csp_none', 'settings.csp_extensions', 'settings.csp_directive', 'settings.csp_blocked', 'settings.csp_count', 'settings.csp_last_seen', 'btn.refresh', 'settings.csp_rotate', 'msg.feed_swept', 'cal.err_no_source', 'cal.err_table', 'cal.err_date_col', 'cal.err_not_date', 'cal.err_title_col', 'settings.add_calendar', 'settings.cal_title', 'settings.cal_table', 'settings.cal_date_col', 'settings.cal_title_cols', 'settings.cal_add_source', 'btn.delete', 'btn.confirm_delete', 'cal.err_not_rotation', 'settings.cal_rotations', 'msg.name_taken', 'cal.err_name', 'lang.add_language', 'btn.cancel', 'timeline.empty', 'col.switch_list',
          'img.replace', 'img.upload', 'img.remove', 'img.url', 'img.view', 'img.open_original',
          'btn.close', 'btn.previous', 'btn.next',
          // View background images (Settings -> Backgrounds); bg.fit_* label the `fit` modes in bgFitItems.
@@ -1954,6 +1954,30 @@ function createVueApp() {
       // currentData belongs to the page hosting it. (board-view asked for this long before anything
       // dispatched a board as an embed, so it never existed and the lanes would have stayed empty.)
       boardRowsFor: function(name) { return this.embedRows('view', name); },
+      // A drop on a reorderable board: the card into `laneKey`, before (or after) card `targetId`, as one
+      // undo entry. Placed in the table's whole `position` sequence, so a filtered board keeps hidden rows' slots.
+      boardPlace: function(name, item, laneKey, targetId, after) {
+        var v = VIEWS[name], table = v && (v.sources || [])[0], lane = v && v.board && v.board.lane;
+        if (!lane || !(SCHEMA[table] && SCHEMA[table].reorderable)) return;
+        var all = Rotation.sortRosterRows(Rows.partitionRows(this.dataCache, table, 'active'));
+        var row = all.find(function(r) { return r.id === item.id; });
+        if (!row) return;
+        var ordered = targetId ? Reorder.place(all, row.id, targetId, after) : null;
+        var changes = ordered ? Reorder.renumber(ordered) : [];
+        var moved = String(row[lane] || '') !== laneKey;
+        if (!moved && !changes.length) return;
+        var self = this, set = {}; set[lane] = laneKey;
+        Undo.action('move', function() {
+          if (moved) { self.stampRows('move', table, [row], set); self.propagateMirror(row.id, table, row); }
+          self._writeReorder(table, changes);
+        });
+        // A top-level board renders copies of these rows (an embed re-derives from dataCache).
+        var to = {}; changes.forEach(function(c) { to[c.id] = c.to; });
+        [item].concat(this.currentData || []).forEach(function(r) {
+          if (r.id in to) r.position = to[r.id];
+          if (r.id === row.id) r[lane] = laneKey;
+        });
+      },
       boardAddInLane: function(name, laneKey) {
         var v = VIEWS[name]; if (!v || !v.board || !this.canMutateRows) return;
         var primary = v.sources[0], prefill = {}; prefill[v.board.lane] = laneKey;
@@ -11002,7 +11026,7 @@ function createVueApp() {
   // name/embed parameterized like the other kind components; the embed path preloads its own rows.
   app.component('board-view', {
     props: { name: { type: String, default: null }, embed: { type: Boolean, default: false } },
-    data: function() { return { dragId: null, overLane: null, collapsed: {}, menuOf: {}, editing: {} }; },
+    data: function() { return { dragId: null, overLane: null, overCard: null, collapsed: {}, menuOf: {}, editing: {} }; },
     computed: {
       a: function() { return appInstance; },
       viewName: function() { return this.name || appInstance.currentTable; },
@@ -11072,7 +11096,15 @@ function createVueApp() {
         return (appInstance.getListOptions(this.laneCol) || []).map(function(o) { return o.value; });
       },
       board: function() {
-        return Board.build(this.rows, { lane: this.laneCol, laneOrder: this.laneOrder, hidden: this.cfg.hiddenLanes || [] });
+        var rows = this.reorderable ? Rotation.sortRosterRows(this.rows) : this.rows;
+        return Board.build(rows, { lane: this.laneCol, laneOrder: this.laneOrder, hidden: this.cfg.hiddenLanes || [] });
+      },
+      // On a `reorderable` table a lane follows `position`, and a drop places the card.
+      reorderable: function() { var t = (this.view.sources || [])[0]; return !!(SCHEMA[t] && SCHEMA[t].reorderable); },
+      // Not on a self-service table (renumbering writes other people's rows), the archive, or while a search hides rows.
+      canReorder: function() {
+        var a = appInstance;
+        return this.reorderable && this.canEdit && !this.selfServe && (this.embed || !(a.viewingArchive || (a.searchable && a.searchTerm)));
       },
       // Phase grouping. [{ label, key, lanes:[laneObj,...] }]. Source of the grouping:
       //   ref lane   -> the lookup's parent dimension (group order = first appearance across lookup rows);
@@ -11171,13 +11203,47 @@ function createVueApp() {
       toggleGroup: function(key) { this.collapsed[key] = !this.collapsed[key]; },
       // --- drag/drop (desktop) ---
       onDragStart: function(item) { if (this.canEditCard(item) && this.canMoveCards) this.dragId = item.id; },
-      onDragEnd: function() { this.dragId = null; this.overLane = null; },
-      onDrop: function(laneKey) {
+      onDragEnd: function() { this.dragId = null; this.overLane = null; this.overCard = null; },
+      // Over a card of a reorderable board: its lower half drops after it.
+      onLaneOver: function(laneKey) { if (this.canEdit) { this.overLane = laneKey; this.overCard = null; } },
+      onCardOver: function(e, laneKey, target) {
+        if (this.canEdit) this.overLane = laneKey;
+        if (!this.canReorder || this.dragId == null) return;
+        var r = e.currentTarget.getBoundingClientRect();
+        this.overCard = { id: target.id, after: e.clientY > r.top + r.height / 2 };
+      },
+      // From this board's own rows: embedded, the root's currentData is the host page's.
+      onDrop: function(laneKey, target) {
         if (!this.canEdit || this.dragId == null) return;
-        var id = this.dragId, self = this;
-        var item = (appInstance.currentData || []).find(function(r) { return r.id === id; });
-        if (item && String(item[self.laneCol] || '') !== laneKey) self.moveTo(item, laneKey, true);
+        var id = this.dragId, over = this.overCard;
+        var item = this.rows.find(function(r) { return r.id === id; });
         this.onDragEnd();
+        if (!item) return;
+        if (!this.canReorder) this.moveTo(item, laneKey, true);
+        else this.placeCard(item, laneKey, target || null, !!(target && over && over.id === target.id && over.after));
+      },
+      // Before `target`; with none, after the lane's last card.
+      placeCard: function(item, laneKey, target, after) {
+        if (String(item[this.laneCol] || '') !== laneKey && !this.laneAllowed(item, laneKey)) { appInstance.notify(appInstance.t('board.lane_blocked')); return; }
+        if (!target) {
+          var lane = this.board.lanes.find(function(l) { return l.key === laneKey; });
+          var others = lane ? lane.items.filter(function(r) { return r.id !== item.id; }) : [];
+          target = others[others.length - 1] || null; after = true;
+        }
+        appInstance.boardPlace(this.viewName, item, laneKey, target && target.id, after);
+      },
+      // The move menu's up/down: past the neighbour in the card's own lane.
+      laneNeighbour: function(item, dir) {
+        var lane = this.board.lanes.find(function(l) { return l.items.indexOf(item) >= 0; });
+        return lane ? lane.items[lane.items.indexOf(item) + dir] || null : null;
+      },
+      dropMark: function(item) {
+        var o = this.overCard;
+        return o && o.id === item.id ? ';box-shadow:0 ' + (o.after ? '3px' : '-3px') + ' 0 rgb(var(--v-theme-primary))' : '';
+      },
+      moveStep: function(item, dir) {
+        var n = this.laneNeighbour(item, dir);
+        if (n) this.placeCard(item, String(item[this.laneCol] || ''), n, dir > 0);
       },
       // `board.laneWhen: { <lane>: <condition> }` -- a card may enter that lane only while its row (computed
       // columns included) matches: "handed over" only while the member can afford it. Refused with a
@@ -11232,7 +11298,7 @@ function createVueApp() {
       + '  <div v-show="!collapsed[g.key]" class="board-lane-row">'
       + '    <div v-for="lane in g.lanes" :key="lane.key" class="board-lane"'
       + '         :style="overLane===lane.key ? \'outline:2px dashed rgb(var(--v-theme-primary))\' : \'\'"'
-      + '         @dragover.prevent="canEdit && (overLane=lane.key)" @dragleave="overLane=null" @drop="onDrop(lane.key)" :data-testid="\'board-lane-\'+lane.key">'
+      + '         @dragover.prevent="onLaneOver(lane.key)" @dragleave="overLane=null" @drop="onDrop(lane.key)" :data-testid="\'board-lane-\'+lane.key">'
       + '      <div style="display:flex;align-items:center;gap:6px;font-weight:600;font-size:0.85rem;padding:2px 4px 6px">'
       + '        <span>{{ laneLabel(lane.key) }}</span><span style="opacity:0.5;font-weight:400">{{ lane.count }}</span>'
       + '        <template v-if="canAddInLane(lane.key)"><v-spacer></v-spacer>'
@@ -11240,7 +11306,8 @@ function createVueApp() {
       + '      </div>'
       + '      <div v-for="item in lane.items" :key="item.id"'
       + '           :draggable="canEditCard(item) && canMoveCards && !editing[item.id] ? \'true\' : \'false\'" @dragstart="onDragStart(item)" @dragend="onDragEnd"'
-      + '           :style="\'background:rgb(var(--v-theme-surface));border:1px solid rgb(var(--v-theme-outline),0.15);border-radius:6px;padding:6px 8px;margin-bottom:6px;cursor:\'+(canEditCard(item) && canMoveCards && !editing[item.id] ?\'grab\':\'default\')+(cardColor(item)?\';border-left:3px solid \'+cardColor(item):\'\')"'
+      + '           @dragover.prevent.stop="onCardOver($event, lane.key, item)" @drop.stop="onDrop(lane.key, item)"'
+      + '           :style="\'background:rgb(var(--v-theme-surface));border:1px solid rgb(var(--v-theme-outline),0.15);border-radius:6px;padding:6px 8px;margin-bottom:6px;cursor:\'+(canEditCard(item) && canMoveCards && !editing[item.id] ?\'grab\':\'default\')+(cardColor(item)?\';border-left:3px solid \'+cardColor(item):\'\')+dropMark(item)"'
       + '           :data-testid="\'board-card-\'+item.id">'
       + '        <div style="display:flex;align-items:flex-start;gap:4px">'
       + '          <div style="font-weight:600;font-size:0.85rem;flex:1">{{ cardTitle(item) }}</div>'
@@ -11253,6 +11320,10 @@ function createVueApp() {
       // tooltip, and every item in it is a lane, so the header only restated the question. `board.move_to`
       // stays in use as that tooltip.
       + '            <v-list density="compact">'
+      + '            <template v-if="canReorder">'
+      + '            <v-list-item prepend-icon="mdi-arrow-up" :disabled="!laneNeighbour(item, -1)" @click="moveStep(item, -1)" :data-testid="\'board-up-\'+item.id"><v-list-item-title>{{ t(\'btn.move_up\') }}</v-list-item-title></v-list-item>'
+      + '            <v-list-item prepend-icon="mdi-arrow-down" :disabled="!laneNeighbour(item, 1)" @click="moveStep(item, 1)" :data-testid="\'board-down-\'+item.id"><v-list-item-title>{{ t(\'btn.move_down\') }}</v-list-item-title></v-list-item>'
+      + '            <v-divider></v-divider></template>'
       + '            <v-list-item v-for="opt in laneMenuItems()" :key="opt.value" @click="moveTo(item, opt.value)" :active="String(item[laneCol]||\'\')===opt.value" :disabled="!laneAllowed(item, opt.value)">'
       + '              <v-list-item-title>{{ opt.title }}</v-list-item-title></v-list-item></v-list></v-menu>'
       + '        </div>'

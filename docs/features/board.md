@@ -29,6 +29,7 @@ Ticket board:
 ```
 
 - `lanes` fixes the lane order; values not listed are not shown.
+- On a `reorderable` table, cards are ordered by hand: drop a card on another, or use up/down in its move menu.
 
 ## Backends
 
