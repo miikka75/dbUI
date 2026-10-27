@@ -1732,8 +1732,8 @@ the move menu greys the lane. It is the board's rule, not the server's: an admin
 is not stopped by it.
 
 - **Ordering cards by hand.** On a `reorderable` table each lane follows `position`: a card dropped on another
-  goes before it (after it on its lower half), on the lane's empty space to the end, and the move menu has
-  up/down. A move is one undo entry. Not on a self-service table, in the archive, or while a search is active.
+  goes before it (after it on its lower half), on the lane's empty space to the end, and each card has
+  up/down arrows. A move is one undo entry. Not on a self-service table, in the archive, or while a search is active.
 - **One source, one lane column.** The source must be **exactly one** table and `lane` must be a `select`
   **or a `ref`** column on it (load-time validation enforces both) — a drag writes one column on one table,
   so a union/join or an unsupported lane type would be ambiguous. This mirrors why a mirror-**detail** table

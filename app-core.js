@@ -11320,6 +11320,9 @@ function createVueApp() {
       + '           :data-testid="\'board-card-\'+item.id">'
       + '        <div style="display:flex;align-items:flex-start;gap:4px">'
       + '          <div style="font-weight:600;font-size:0.85rem;flex:1">{{ cardTitle(item) }}</div>'
+      + '          <template v-if="canReorder">'
+      + '          <v-btn icon="mdi-arrow-up" size="x-small" variant="text" density="comfortable" :disabled="!laneNeighbour(item, -1)" :title="t(\'btn.move_up\')" :aria-label="t(\'btn.move_up\')" @click="moveStep(item, -1)" :data-testid="\'board-up-\'+item.id"></v-btn>'
+      + '          <v-btn icon="mdi-arrow-down" size="x-small" variant="text" density="comfortable" :disabled="!laneNeighbour(item, 1)" :title="t(\'btn.move_down\')" :aria-label="t(\'btn.move_down\')" @click="moveStep(item, 1)" :data-testid="\'board-down-\'+item.id"></v-btn></template>'
       + '          <v-btn v-if="canEditCard(item)" :icon="editing[item.id] ? \'mdi-check\' : \'mdi-pencil-outline\'" size="x-small" variant="text" density="comfortable" :color="editing[item.id] ? \'primary\' : undefined" :title="t(\'btn.edit\')" @click="toggleEdit(item)" :data-testid="\'board-edit-\'+item.id"></v-btn>'
       + '          <confirm-x v-if="!embed && canEditCard(item) && hasArchive" :armed="isArchArmed(item)" action="archive" dense density="comfortable" :data-testid="\'board-arch-\'+item.id" @click="archItem(item)"></confirm-x>'
       + '          <confirm-x v-if="!embed && canEditCard(item)" :armed="isDelArmed(item)" dense density="comfortable" :data-testid="\'board-del-\'+item.id" @click="delItem(item)"></confirm-x>'
@@ -11329,10 +11332,6 @@ function createVueApp() {
       // tooltip, and every item in it is a lane, so the header only restated the question. `board.move_to`
       // stays in use as that tooltip.
       + '            <v-list density="compact">'
-      + '            <template v-if="canReorder">'
-      + '            <v-list-item prepend-icon="mdi-arrow-up" :disabled="!laneNeighbour(item, -1)" @click="moveStep(item, -1)" :data-testid="\'board-up-\'+item.id"><v-list-item-title>{{ t(\'btn.move_up\') }}</v-list-item-title></v-list-item>'
-      + '            <v-list-item prepend-icon="mdi-arrow-down" :disabled="!laneNeighbour(item, 1)" @click="moveStep(item, 1)" :data-testid="\'board-down-\'+item.id"><v-list-item-title>{{ t(\'btn.move_down\') }}</v-list-item-title></v-list-item>'
-      + '            <v-divider></v-divider></template>'
       + '            <v-list-item v-for="opt in laneMenuItems()" :key="opt.value" @click="moveTo(item, opt.value)" :active="String(item[laneCol]||\'\')===opt.value" :disabled="!laneAllowed(item, opt.value)">'
       + '              <v-list-item-title>{{ opt.title }}</v-list-item-title></v-list-item></v-list></v-menu>'
       + '        </div>'

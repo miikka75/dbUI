@@ -95,7 +95,7 @@ test.describe('Board on a reorderable table', () => {
     // Position, not the view's defaultSort (title).
     expect(await laneIds(page, 'open')).toEqual(['tk3', 'tk1']);
 
-    await page.locator('[data-testid="board-move-tk1"]').click();
+    await expect(page.locator('[data-testid="board-up-tk3"]')).toBeDisabled();
     await page.locator('[data-testid="board-up-tk1"]').click();
     await expect.poll(() => laneIds(page, 'open')).toEqual(['tk1', 'tk3']);
     await expect.poll(() => positions(page)).toEqual({ tk1: 'open:1', tk3: 'open:2', tk2: 'in_progress:3' });
