@@ -1757,9 +1757,23 @@ phase 3 does the same job for free.
   other boards keep `defaultSort`.
 - A drop on a card goes before it, on its lower half after it; on the lane's empty space, to the end. Placed in
   the table's whole sequence (`Reorder.place` + `renumber`), so a filtered board keeps hidden rows' slots.
-- Lane + position is one undo entry (`boardPlace`). The move menu gains up/down for touch and keyboard.
+- Lane + position is one undo entry (`boardPlace`). Each card gains up/down arrows for touch and keyboard.
 - Not on a self-service table: renumbering writes other people's rows. Not in the archive or during a search.
 - Fixed on the way: an embedded board's drop looked the card up in the host page's rows and did nothing.
+
+### Dragging board cards on a phone *(proposed 2026-10-27, low priority)*
+
+- Native drag-and-drop barely works on touch; on a phone a card moves only by its arrows and the ⋮ menu.
+- **Long-press (~400 ms) lifts a card:** a vibration where supported, then a floating copy follows the finger.
+  Moving a few pixels first is an ordinary scroll, so scrolling is unaffected.
+- **Drop target** from `elementFromPoint` under the finger: the same upper/lower half and drop line as on
+  desktop, through `placeCard` → `boardPlace` (lane rules, one undo entry, permissions unchanged).
+- **Edge scroll:** within ~60 px of the top or bottom the page scrolls, faster nearer the edge; left/right
+  likewise for the lane row if it scrolls sideways.
+- Release drops; outside a lane or `touchcancel` cancels. Cards get `-webkit-touch-callout: none` and no text
+  selection; buttons and a card in edit mode don't start a drag. Desktop keeps native drag; arrows stay.
+- Own touch handling, not SortableJS: it moves DOM nodes itself, fighting Vue's render, and is a new vendor file.
+- Tests: Playwright touch emulation for long-press, edge scroll and drop.
 
 ### Prose that names its rows — a per-row template for an embed
 
