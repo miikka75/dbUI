@@ -109,6 +109,14 @@ test.describe('Board on a reorderable table', () => {
     await page.locator('[data-testid="undo"]').click();
     await expect.poll(() => positions(page)).toEqual({ tk1: 'open:1', tk3: 'open:2', tk2: 'in_progress:3' });
     await expect.poll(() => laneIds(page, 'open')).toEqual(['tk1', 'tk3']);
+
+    // Within one lane: Gamma onto Alpha's upper half.
+    await page.locator('[data-testid="board-card-tk3"]').dragTo(page.locator('[data-testid="board-card-tk1"]'), { targetPosition: { x: 20, y: 4 } });
+    await expect.poll(() => laneIds(page, 'open')).toEqual(['tk3', 'tk1']);
+    // And back down: Gamma onto Alpha's lower half.
+    const box = await page.locator('[data-testid="board-card-tk1"]').boundingBox();
+    await page.locator('[data-testid="board-card-tk3"]').dragTo(page.locator('[data-testid="board-card-tk1"]'), { targetPosition: { x: 20, y: box.height - 4 } });
+    await expect.poll(() => laneIds(page, 'open')).toEqual(['tk1', 'tk3']);
   });
 });
 

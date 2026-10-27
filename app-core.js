@@ -11204,13 +11204,22 @@ function createVueApp() {
       // --- drag/drop (desktop) ---
       onDragStart: function(item) { if (this.canEditCard(item) && this.canMoveCards) this.dragId = item.id; },
       onDragEnd: function() { this.dragId = null; this.overLane = null; this.overCard = null; },
+      // dragover fires continuously, so state is written only when it changes: each write re-renders the board.
+      onLaneOver: function(laneKey) {
+        if (!this.canEdit) return;
+        if (this.overLane !== laneKey) this.overLane = laneKey;
+        if (this.overCard) this.overCard = null;
+      },
+      // dragleave also fires on entering a child card; only leaving the lane itself clears it.
+      onLaneLeave: function(e) { if (!e.currentTarget.contains(e.relatedTarget)) { this.overLane = null; this.overCard = null; } },
       // Over a card of a reorderable board: its lower half drops after it.
-      onLaneOver: function(laneKey) { if (this.canEdit) { this.overLane = laneKey; this.overCard = null; } },
       onCardOver: function(e, laneKey, target) {
-        if (this.canEdit) this.overLane = laneKey;
+        if (this.canEdit && this.overLane !== laneKey) this.overLane = laneKey;
         if (!this.canReorder || this.dragId == null) return;
-        var r = e.currentTarget.getBoundingClientRect();
-        this.overCard = { id: target.id, after: e.clientY > r.top + r.height / 2 };
+        var r = e.currentTarget.getBoundingClientRect(), after = e.clientY > r.top + r.height / 2;
+        var o = this.overCard, id = target.id === this.dragId ? null : target.id;
+        if (!id) { if (o) this.overCard = null; return; }
+        if (!o || o.id !== id || o.after !== after) this.overCard = { id: id, after: after };
       },
       // From this board's own rows: embedded, the root's currentData is the host page's.
       onDrop: function(laneKey, target) {
@@ -11298,7 +11307,7 @@ function createVueApp() {
       + '  <div v-show="!collapsed[g.key]" class="board-lane-row">'
       + '    <div v-for="lane in g.lanes" :key="lane.key" class="board-lane"'
       + '         :style="overLane===lane.key ? \'outline:2px dashed rgb(var(--v-theme-primary))\' : \'\'"'
-      + '         @dragover.prevent="onLaneOver(lane.key)" @dragleave="overLane=null" @drop="onDrop(lane.key)" :data-testid="\'board-lane-\'+lane.key">'
+      + '         @dragover.prevent="onLaneOver(lane.key)" @dragleave="onLaneLeave" @drop="onDrop(lane.key)" :data-testid="\'board-lane-\'+lane.key">'
       + '      <div style="display:flex;align-items:center;gap:6px;font-weight:600;font-size:0.85rem;padding:2px 4px 6px">'
       + '        <span>{{ laneLabel(lane.key) }}</span><span style="opacity:0.5;font-weight:400">{{ lane.count }}</span>'
       + '        <template v-if="canAddInLane(lane.key)"><v-spacer></v-spacer>'
