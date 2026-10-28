@@ -720,6 +720,7 @@
             "sources": [
               "admin_callings"
             ],
+            "defaultSort": "position",
             "columns": [],
             "bare": true,
             "mode": "union",
@@ -813,6 +814,7 @@
             "sources": [
               "admin_callings"
             ],
+            "defaultSort": "position",
             "filter": {
               "status": "child_blessing"
             },
@@ -830,6 +832,7 @@
             "sources": [
               "admin_callings"
             ],
+            "defaultSort": "position",
             "filter": {
               "status": "recently_baptized"
             },
@@ -847,6 +850,7 @@
             "sources": [
               "admin_callings"
             ],
+            "defaultSort": "position",
             "filter": {
               "$or": [
                 {
@@ -871,6 +875,7 @@
             "sources": [
               "admin_callings"
             ],
+            "defaultSort": "position",
             "filter": {
               "status": "moved_in"
             },
@@ -888,6 +893,7 @@
             "sources": [
               "admin_callings"
             ],
+            "defaultSort": "position",
             "filter": {
               "$and": [
                 {
@@ -939,6 +945,7 @@
             },
             "hideEmpty": true,
             "markdown": "{{t:text.sustaining_header}}\n\n{{self}}\n\n{{t:text.sustaining_footer}}",
+            "defaultSort": "position",
             "readonly": true,
             "mode": "union",
             "bare": true,
@@ -965,6 +972,7 @@
             "sources": [
               "admin_callings"
             ],
+            "defaultSort": "position",
             "filter": {
               "$and": [
                 {
@@ -991,6 +999,7 @@
             "sources": [
               "admin_callings"
             ],
+            "defaultSort": "position",
             "filter": {
               "$and": [
                 {
