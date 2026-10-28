@@ -17,7 +17,7 @@ Every feature of the app, with a page each: what it does, the schema that turns 
 | Views | [Pivot (cross-tab)](features/pivot.md) | Count or sum rows by two columns at once, with totals — who did which chore how often. | ✅ | ✅ | ✅ | ✅ |
 | Views | [RSVP & bookings](features/rsvp.md) | Self-service sign-up sheet: members book events, with capacity, booking windows, no-show release and check-in. | ✅ | ✅ | ✅ | ✅ |
 | Views | [RSVP waitlist](features/rsvp.md#rsvp-waitlist) | A full event takes a queue; a cancellation books the longest-waiting member automatically. | ✅ | ✅ | ❌ rules cannot promote; not offered | ✅ |
-| Views | [Board (kanban)](features/board.md) | Cards in lanes by a select column; drag a card to another lane to change it. | ✅ | ✅ | ✅ | ✅ |
+| Views | [Board (kanban)](features/board.md) | Cards in lanes by a select column; drag a card to another lane to change it, order cards by hand, compact cards that open, lanes that fold. | ✅ | ✅ | ✅ | ✅ |
 | Views | [Form](features/form.md) | A one-record form with required fields and rules — buy a membership, request a pause. | ✅ | ✅ | ✅ | ✅ |
 | Views | [Stats (KPI tiles)](features/stats.md) | Number tiles, progress bars, goals, streaks and tiered badges over the aggregate pipeline. | ✅ | ✅ | ✅ | ✅ |
 | Views | [Timeline (gantt)](features/timeline.md) | Rows as bars across weeks or months between a start and an end date. | ✅ | ✅ | ✅ | ✅ |
