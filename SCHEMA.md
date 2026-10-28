@@ -1735,6 +1735,7 @@ is not stopped by it.
 - **Ordering cards by hand.** On a `reorderable` table each lane follows `position`: a card dropped on another
   goes before it (after it on its lower half), on the lane's empty space to the end, and each card has
   up/down arrows. A move is one undo entry. Not on a self-service table, in the archive, or while a search is active.
+  Another view or embed of the table lists rows in the board's order with `"defaultSort": "position"`.
 - **Compact cards (`summary`).** Cards start closed: the title, with the `summary` columns beneath as one line.
   The chevron on the title opens a card to every field; the pencil edits all of them. Without `summary` nothing
   folds. A lane folds by the chevron on its heading, on every board. Both are kept per viewer, in this browser.
