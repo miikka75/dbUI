@@ -29,6 +29,7 @@ Ticket board:
 ```
 
 - `lanes` fixes the lane order; values not listed are not shown.
+- `summary` makes cards compact: a closed card shows its title and these columns on one line; the chevron opens it. Lanes fold by their heading.
 - On a `reorderable` table, cards are ordered by hand: drop a card on another, or use its up/down arrows.
 
 ## Backends

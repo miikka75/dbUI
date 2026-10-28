@@ -120,6 +120,44 @@ test.describe('Board on a reorderable table', () => {
   });
 });
 
+test.describe('Board with a summary', () => {
+  test('cards start closed on their summary line, open by the chevron, and lanes fold', async ({ page }) => {
+    const schema = JSON.parse(JSON.stringify(SCHEMA));
+    schema.views.find(v => v.name === 'tickets_board').board.summary = ['assignee'];
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema } });
+    for (const r of [{ id: 'tk1', title: 'Alpha', status: 'open', assignee: 'Sam' }, { id: 'tk2', title: 'Beta', status: 'open', assignee: '' }])
+      await page.request.post('/api/putRow', { data: { tableId: 'tickets', data: r, tab: 'active' } });
+    await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    const open = async () => {
+      await page.goto('/');
+      await page.waitForFunction(() => window.appInstance && !appInstance.loading, { timeout: 30000 });
+      await page.evaluate(() => appInstance.selectTab('tickets_board'));
+      await page.waitForSelector('[data-testid="board-lane-open"]');
+    };
+    await open();
+    const card = page.locator('[data-testid="board-card-tk1"]');
+    await expect(page.locator('[data-testid="board-summary-tk1"]')).toHaveText('Sam');
+    await expect(card.locator('.field-box')).toHaveCount(0);
+
+    await page.locator('[data-testid="board-open-tk1"]').click();
+    await expect(card.locator('.field-box')).toHaveCount(1);
+    await expect(page.locator('[data-testid="board-summary-tk1"]')).toHaveCount(0);
+
+    await page.locator('[data-testid="board-lane-fold-open"]').click();
+    await expect(page.locator('[data-testid="board-lane-open"] [data-testid^="board-card-"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid="board-lane-open"]')).toContainText('2');
+
+    // Both are kept in this browser.
+    await open();
+    await expect(page.locator('[data-testid="board-lane-open"] [data-testid^="board-card-"]')).toHaveCount(0);
+    await page.locator('[data-testid="board-lane-fold-open"]').click();
+    await expect(page.locator('[data-testid="board-card-tk1"] .field-box')).toHaveCount(1);
+    await expect(page.locator('[data-testid="board-card-tk2"] .field-box')).toHaveCount(0);
+  });
+});
+
 test.describe('Board embedded in a page', () => {
   test('renders as a board, keeps the move between lanes, and leaves add/archive/delete to its own screen', async ({ page }) => {
     const schema = JSON.parse(JSON.stringify(SCHEMA));

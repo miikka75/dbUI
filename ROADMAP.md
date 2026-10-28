@@ -1775,6 +1775,26 @@ phase 3 does the same job for free.
 - Own touch handling, not SortableJS: it moves DOM nodes itself, fighting Vue's render, and is a new vendor file.
 - Tests: Playwright touch emulation for long-press, edge scroll and drop.
 
+### Compact board cards, and lanes that fold *(landed 2026-10-28)*
+
+- A card shows each column as an outlined field box, so the bishopric's callings card (person + five fields)
+  is ~250 px tall and a lane fills a phone screen with two or three cards.
+- **`board.summary: ["organization", "calling"]`:** a closed card is its title plus these values as one
+  plain-text line (`a · b`, through `displayValue`), ~50 px. The colour stripe stays. `summary` is what stays
+  visible; every other `columns` field folds. No `summary`: nothing folds, cards as today. Chosen over a
+  per-column `fold` flag: the closed card is stated in one place, in its own order.
+- **Open/close:** the card's title becomes a chevron toggle (the row-expand convention). Open shows every
+  `columns` field as today; the pencil still edits all of them. Open state per viewer, in this browser.
+- **Default:** with `summary` set, cards start closed. The view's `collapsed` key is not reused: there it means
+  an accordion (one card open), here any number may be open.
+- **Lanes fold:** a lane's header becomes a chevron toggle hiding its cards (count stays), per viewer. On a
+  phone, where lanes stack, this makes the board a short list per status. Phase groups already fold the same way.
+- Drag, arrows, add-in-lane and edit mode are unchanged; a drop onto a closed card uses the same halves.
+- Bishopric: `summary: ["organization", "calling"]` on `admin_callings` (a bundle revision).
+- Considered instead: `split` layout (status becomes a field, not a heading), `list` (read-only), table
+  (cramped on a phone), `pivot` (counts only). The board stays the right shape for a status workflow.
+- Tests: `board.spec.js` — closed card shows the summary line only, the chevron opens it, a lane folds.
+
 ### Prose that names its rows — a per-row template for an embed
 
 A `markdown` view is prose **plus** grids: `{{self}}` and `{{view:x}}` render a table, a card stack or
