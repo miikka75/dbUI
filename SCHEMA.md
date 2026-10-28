@@ -1719,7 +1719,8 @@ reuses the data-view load path (filters, `compute`, `defaultSort` all apply) and
     "title": "title",                // OPTIONAL — card heading column (default: first entry of `columns`)
     "color": "assignee",             // OPTIONAL — column whose value tints each card's left border (hashed)
     "addInLane": true,               // OPTIONAL — per-lane "+" adds a row pre-stamped with that lane value
-    "laneWhen": { "done": { … } }   // OPTIONAL — a card may enter that lane only while its row matches
+    "laneWhen": { "done": { … } },  // OPTIONAL — a card may enter that lane only while its row matches
+    "summary": ["assignee"]          // OPTIONAL — a closed card shows these on one line; other fields fold
   },
   "columns": ["title", "assignee"]   // card-face columns (the lane/title columns are shown separately)
 }
@@ -1734,6 +1735,9 @@ is not stopped by it.
 - **Ordering cards by hand.** On a `reorderable` table each lane follows `position`: a card dropped on another
   goes before it (after it on its lower half), on the lane's empty space to the end, and each card has
   up/down arrows. A move is one undo entry. Not on a self-service table, in the archive, or while a search is active.
+- **Compact cards (`summary`).** Cards start closed: the title, with the `summary` columns beneath as one line.
+  The chevron on the title opens a card to every field; the pencil edits all of them. Without `summary` nothing
+  folds. A lane folds by the chevron on its heading, on every board. Both are kept per viewer, in this browser.
 - **One source, one lane column.** The source must be **exactly one** table and `lane` must be a `select`
   **or a `ref`** column on it (load-time validation enforces both) — a drag writes one column on one table,
   so a union/join or an unsupported lane type would be ambiguous. This mirrors why a mirror-**detail** table

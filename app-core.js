@@ -11026,7 +11026,15 @@ function createVueApp() {
   // name/embed parameterized like the other kind components; the embed path preloads its own rows.
   app.component('board-view', {
     props: { name: { type: String, default: null }, embed: { type: Boolean, default: false } },
-    data: function() { return { dragId: null, overLane: null, overCard: null, collapsed: {}, menuOf: {}, editing: {} }; },
+    data: function() { return { dragId: null, overLane: null, overCard: null, collapsed: {}, menuOf: {}, editing: {}, fold: { cards: {}, lanes: {} } }; },
+    // Open cards and folded lanes, per viewer in this browser, per board.
+    watch: {
+      viewName: { immediate: true, handler: function(n) {
+        var f = null;
+        try { f = JSON.parse(localStorage.getItem('board_fold:' + n) || 'null'); } catch (e) {}
+        this.fold = { cards: (f && f.cards) || {}, lanes: (f && f.lanes) || {} };
+      } }
+    },
     computed: {
       a: function() { return appInstance; },
       viewName: function() { return this.name || appInstance.currentTable; },
@@ -11291,7 +11299,19 @@ function createVueApp() {
         if (title && title !== this.laneCol && cols.indexOf(title) < 0) cols.unshift(title);
         return cols;
       },
-      toggleEdit: function(item) { this.editing[item.id] = !this.editing[item.id]; }
+      toggleEdit: function(item) { this.editing[item.id] = !this.editing[item.id]; },
+      // `board.summary`: a closed card is its title and these values on one line; the rest folds.
+      isClosed: function(item) { return !!this.cfg.summary && !this.fold.cards[item.id]; },
+      summaryLine: function(item) {
+        var shown = this.cardCols(item);
+        return this.cfg.summary.filter(function(c) { return shown.indexOf(c) >= 0 && item[c] != null && item[c] !== ''; })
+          .map(function(c) { return appInstance.displayValue(c, item[c]); }).join(' · ');
+      },
+      toggleFold: function(kind, key) {
+        var m = this.fold[kind];
+        if (m[key]) delete m[key]; else m[key] = true;
+        try { localStorage.setItem('board_fold:' + this.viewName, JSON.stringify(this.fold)); } catch (e) {}
+      }
     }),
     template: ''
       + '<component :is="embed ? \'div\' : \'v-card\'" :variant="embed ? undefined : \'outlined\'" :class="embed ? \'my-2\' : \'\'" data-testid="board-view">'
@@ -11309,17 +11329,23 @@ function createVueApp() {
       + '         :style="overLane===lane.key ? \'outline:2px dashed rgb(var(--v-theme-primary))\' : \'\'"'
       + '         @dragover.prevent="onLaneOver(lane.key)" @dragleave="onLaneLeave" @drop="onDrop(lane.key)" :data-testid="\'board-lane-\'+lane.key">'
       + '      <div style="display:flex;align-items:center;gap:6px;font-weight:600;font-size:0.85rem;padding:2px 4px 6px">'
-      + '        <span>{{ laneLabel(lane.key) }}</span><span style="opacity:0.5;font-weight:400">{{ lane.count }}</span>'
+      + '        <span role="button" tabindex="0" style="cursor:pointer" :aria-expanded="String(!fold.lanes[lane.key])" @click="toggleFold(\'lanes\', lane.key)" @keydown.enter.prevent="toggleFold(\'lanes\', lane.key)" :data-testid="\'board-lane-fold-\'+lane.key">'
+      + '          <v-icon size="small">{{ fold.lanes[lane.key] ? \'mdi-chevron-right\' : \'mdi-chevron-down\' }}</v-icon> {{ laneLabel(lane.key) }}</span><span style="opacity:0.5;font-weight:400">{{ lane.count }}</span>'
       + '        <template v-if="canAddInLane(lane.key)"><v-spacer></v-spacer>'
       + '        <v-btn icon="mdi-plus" size="x-small" variant="text" density="comfortable" :title="t(\'board.add_in_lane\')" @click="addInLane(lane.key)" :data-testid="\'board-add-\'+lane.key"></v-btn></template>'
       + '      </div>'
+      + '      <template v-if="!fold.lanes[lane.key]">'
       + '      <div v-for="item in lane.items" :key="item.id"'
       + '           :draggable="canEditCard(item) && canMoveCards && !editing[item.id] ? \'true\' : \'false\'" @dragstart="onDragStart(item)" @dragend="onDragEnd"'
       + '           @dragover.prevent.stop="onCardOver($event, lane.key, item)" @drop.stop="onDrop(lane.key, item)"'
       + '           :style="\'background:rgb(var(--v-theme-surface));border:1px solid rgb(var(--v-theme-outline),0.15);border-radius:6px;padding:6px 8px;margin-bottom:6px;cursor:\'+(canEditCard(item) && canMoveCards && !editing[item.id] ?\'grab\':\'default\')+(cardColor(item)?\';border-left:3px solid \'+cardColor(item):\'\')+dropMark(item)"'
       + '           :data-testid="\'board-card-\'+item.id">'
       + '        <div style="display:flex;align-items:flex-start;gap:4px">'
-      + '          <div style="font-weight:600;font-size:0.85rem;flex:1">{{ cardTitle(item) }}</div>'
+      + '          <div v-if="cfg.summary" role="button" tabindex="0" style="font-weight:600;font-size:0.85rem;flex:1;cursor:pointer" :aria-expanded="String(!isClosed(item))"'
+      + '               @click="toggleFold(\'cards\', item.id)" @keydown.enter.prevent="toggleFold(\'cards\', item.id)" :data-testid="\'board-open-\'+item.id">'
+      + '            <v-icon size="small">{{ isClosed(item) ? \'mdi-chevron-right\' : \'mdi-chevron-down\' }}</v-icon> {{ cardTitle(item) }}'
+      + '            <div v-if="isClosed(item) && !editing[item.id]" class="text-caption text-medium-emphasis" style="font-weight:400" :data-testid="\'board-summary-\'+item.id">{{ summaryLine(item) }}</div></div>'
+      + '          <div v-else style="font-weight:600;font-size:0.85rem;flex:1">{{ cardTitle(item) }}</div>'
       + '          <template v-if="canReorder">'
       + '          <v-btn icon="mdi-arrow-up" size="x-small" variant="text" density="comfortable" :disabled="!laneNeighbour(item, -1)" :title="t(\'btn.move_up\')" :aria-label="t(\'btn.move_up\')" @click="moveStep(item, -1)" :data-testid="\'board-up-\'+item.id"></v-btn>'
       + '          <v-btn icon="mdi-arrow-down" size="x-small" variant="text" density="comfortable" :disabled="!laneNeighbour(item, 1)" :title="t(\'btn.move_down\')" :aria-label="t(\'btn.move_down\')" @click="moveStep(item, 1)" :data-testid="\'board-down-\'+item.id"></v-btn></template>'
@@ -11345,10 +11371,11 @@ function createVueApp() {
       // against. Dropping them collapses the box and pushes the value out through its bottom border.
       + '        <template v-if="editing[item.id]"><v-field v-for="col in editCols()" :key="col" class="field-box" variant="outlined" active :label="t(\'field.\'+col) || col">'
       + '          <template v-slot:default="{ props: fp }"><div v-bind="fp" class="field-box-value"><data-cell :item="item" :col="col" :owner="viewName"></data-cell></div></template></v-field></template>'
-      + '        <template v-else><v-field v-for="col in cardCols(item)" :key="col" class="field-box" variant="outlined" active :label="t(\'field.\'+col) || col">'
+      + '        <template v-else-if="!isClosed(item)"><v-field v-for="col in cardCols(item)" :key="col" class="field-box" variant="outlined" active :label="t(\'field.\'+col) || col">'
       + '          <template v-slot:default="{ props: fp }"><div v-bind="fp" class="field-box-value">{{ displayValue(col, item[col]) }}</div></template></v-field></template>'
       + '      </div>'
       + '      <div v-if="!lane.items.length" style="opacity:0.4;font-size:0.78rem;padding:4px">—</div>'
+      + '      </template>'
       + '    </div>'
       + '  </div>'
       + '</div>'

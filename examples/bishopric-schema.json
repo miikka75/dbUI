@@ -1130,7 +1130,8 @@
         "board": {
           "lane": "status",
           "color": "organization",
-          "addInLane": true
+          "addInLane": true,
+          "summary": ["organization", "calling"]
         },
         "columns": [
           "person",
