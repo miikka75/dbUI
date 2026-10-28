@@ -849,6 +849,11 @@ function validateSchema() {
       if (!lw || typeof lw !== 'object' || Array.isArray(lw)) errors.push('board "' + v + '": `laneWhen` must map a lane to a condition, like { "granted": { "balance": { "gte": { "col": "cost" } } } }');
       else Object.keys(lw).forEach(function(k) { if (!lw[k] || typeof lw[k] !== 'object' || Array.isArray(lw[k])) errors.push('board "' + v + '": `laneWhen.' + k + '` must be a condition object'); });
     }
+    // `board.summary`: the closed card's line, so it must name columns the board shows.
+    if (view.board && view.board.summary !== undefined) {
+      var bsum = view.board.summary, bcols = (view.columns || []).map(function(c) { return c && typeof c === 'object' ? c.name : c; });
+      if (!Array.isArray(bsum) || !bsum.length || bsum.some(function(c) { return bcols.indexOf(c) < 0; })) errors.push('board "' + v + '": `summary` must list columns of the view, like ["organization", "calling"]');
+    }
     // A computed lookup reading a view (`lookup.view`) must name one that exists, and not the view itself.
     (view.columns || []).concat(view.compute || []).forEach(function(cc) {
       var lk = cc && typeof cc === 'object' && cc.computed && cc.computed.lookup;
