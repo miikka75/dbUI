@@ -1785,6 +1785,8 @@ phase 3 does the same job for free.
   per-column `fold` flag: the closed card is stated in one place, in its own order.
 - **Open/close:** the card's title becomes a chevron toggle (the row-expand convention). Open shows every
   `columns` field as today; the pencil still edits all of them. Open state per viewer, in this browser.
+  *(Revised 2026-10-30: an open card is in edit mode and has no pencil; archive/delete sit under the fields,
+  so the header keeps its width for the title.)*
 - **Default:** with `summary` set, cards start closed. The view's `collapsed` key is not reused: there it means
   an accordion (one card open), here any number may be open.
 - **Lanes fold:** a lane's header becomes a chevron toggle hiding its cards (count stays), per viewer. On a

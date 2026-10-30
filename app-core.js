@@ -11307,6 +11307,8 @@ function createVueApp() {
         return this.cfg.summary.filter(function(c) { return shown.indexOf(c) >= 0 && item[c] != null && item[c] !== ''; })
           .map(function(c) { return appInstance.displayValue(c, item[c]); }).join(' · ');
       },
+      // With a summary, an open card is in edit mode (no pencil); without one, the pencil toggles it.
+      isEditing: function(item) { return this.cfg.summary ? !this.isClosed(item) && this.canEditCard(item) : !!this.editing[item.id]; },
       toggleFold: function(kind, key) {
         var m = this.fold[kind];
         if (m[key]) delete m[key]; else m[key] = true;
@@ -11336,22 +11338,18 @@ function createVueApp() {
       + '      </div>'
       + '      <template v-if="!fold.lanes[lane.key]">'
       + '      <div v-for="item in lane.items" :key="item.id"'
-      + '           :draggable="canEditCard(item) && canMoveCards && !editing[item.id] ? \'true\' : \'false\'" @dragstart="onDragStart(item)" @dragend="onDragEnd"'
+      + '           :draggable="canEditCard(item) && canMoveCards && !isEditing(item) ? \'true\' : \'false\'" @dragstart="onDragStart(item)" @dragend="onDragEnd"'
       + '           @dragover.prevent.stop="onCardOver($event, lane.key, item)" @drop.stop="onDrop(lane.key, item)"'
-      + '           :style="\'background:rgb(var(--v-theme-surface));border:1px solid rgb(var(--v-theme-outline),0.15);border-radius:6px;padding:6px 8px;margin-bottom:6px;cursor:\'+(canEditCard(item) && canMoveCards && !editing[item.id] ?\'grab\':\'default\')+(cardColor(item)?\';border-left:3px solid \'+cardColor(item):\'\')+dropMark(item)"'
+      + '           :style="\'background:rgb(var(--v-theme-surface));border:1px solid rgb(var(--v-theme-outline),0.15);border-radius:6px;padding:6px 8px;margin-bottom:6px;cursor:\'+(canEditCard(item) && canMoveCards && !isEditing(item) ?\'grab\':\'default\')+(cardColor(item)?\';border-left:3px solid \'+cardColor(item):\'\')+dropMark(item)"'
       + '           :data-testid="\'board-card-\'+item.id">'
       + '        <div style="display:flex;align-items:flex-start;gap:4px">'
-      + '          <div v-if="cfg.summary" role="button" tabindex="0" style="font-weight:600;font-size:0.85rem;flex:1;cursor:pointer" :aria-expanded="String(!isClosed(item))"'
+      + '          <div v-if="cfg.summary" role="button" tabindex="0" class="board-card-title" style="cursor:pointer" :title="cardTitle(item)" :aria-expanded="String(!isClosed(item))"'
       + '               @click="toggleFold(\'cards\', item.id)" @keydown.enter.prevent="toggleFold(\'cards\', item.id)" :data-testid="\'board-open-\'+item.id">'
-      + '            <v-icon size="small">{{ isClosed(item) ? \'mdi-chevron-right\' : \'mdi-chevron-down\' }}</v-icon> {{ cardTitle(item) }}'
-      + '            <div v-if="isClosed(item) && !editing[item.id]" class="text-caption text-medium-emphasis" style="font-weight:400" :data-testid="\'board-summary-\'+item.id">{{ summaryLine(item) }}</div></div>'
-      + '          <div v-else style="font-weight:600;font-size:0.85rem;flex:1">{{ cardTitle(item) }}</div>'
+      + '            <v-icon size="small">{{ isClosed(item) ? \'mdi-chevron-right\' : \'mdi-chevron-down\' }}</v-icon> {{ cardTitle(item) }}</div>'
+      + '          <div v-else class="board-card-title" :title="cardTitle(item)">{{ cardTitle(item) }}</div>'
       + '          <template v-if="canReorder">'
       + '          <v-btn icon="mdi-arrow-up" size="x-small" variant="text" density="comfortable" :disabled="!laneNeighbour(item, -1)" :title="t(\'btn.move_up\')" :aria-label="t(\'btn.move_up\')" @click="moveStep(item, -1)" :data-testid="\'board-up-\'+item.id"></v-btn>'
       + '          <v-btn icon="mdi-arrow-down" size="x-small" variant="text" density="comfortable" :disabled="!laneNeighbour(item, 1)" :title="t(\'btn.move_down\')" :aria-label="t(\'btn.move_down\')" @click="moveStep(item, 1)" :data-testid="\'board-down-\'+item.id"></v-btn></template>'
-      + '          <v-btn v-if="canEditCard(item)" :icon="editing[item.id] ? \'mdi-check\' : \'mdi-pencil-outline\'" size="x-small" variant="text" density="comfortable" :color="editing[item.id] ? \'primary\' : undefined" :title="t(\'btn.edit\')" @click="toggleEdit(item)" :data-testid="\'board-edit-\'+item.id"></v-btn>'
-      + '          <confirm-x v-if="!embed && canEditCard(item) && hasArchive" :armed="isArchArmed(item)" action="archive" dense density="comfortable" :data-testid="\'board-arch-\'+item.id" @click="archItem(item)"></confirm-x>'
-      + '          <confirm-x v-if="!embed && canEditCard(item)" :armed="isDelArmed(item)" dense density="comfortable" :data-testid="\'board-del-\'+item.id" @click="delItem(item)"></confirm-x>'
       + '          <v-menu v-if="canEditCard(item) && canMoveCards" v-model="menuOf[item.id]"><template v-slot:activator="{ props }">'
       + '            <v-btn v-bind="props" icon="mdi-dots-vertical" size="x-small" variant="text" density="comfortable" :title="t(\'board.move_to\')" :data-testid="\'board-move-\'+item.id"></v-btn></template>'
       // No heading over the lane list: the menu opens from a button that already carries "move to" as its
@@ -11361,6 +11359,8 @@ function createVueApp() {
       + '            <v-list-item v-for="opt in laneMenuItems()" :key="opt.value" @click="moveTo(item, opt.value)" :active="String(item[laneCol]||\'\')===opt.value" :disabled="!laneAllowed(item, opt.value)">'
       + '              <v-list-item-title>{{ opt.title }}</v-list-item-title></v-list-item></v-list></v-menu>'
       + '        </div>'
+      // Under the header rather than in it, so the card's buttons do not narrow it.
+      + '        <div v-if="isClosed(item)" style="padding-left:20px;font-size:0.78rem;opacity:0.7" :data-testid="\'board-summary-\'+item.id">{{ summaryLine(item) }}</div>'
       // Field face (both modes): one <v-field> per column — the SAME component v-text-field wraps its
       // input in, so the card gets Vuetify's real notched outline with the field name floated into the
       // gap in the top-left border, identical to the profile fields in Settings. `active` keeps the label
@@ -11369,10 +11369,16 @@ function createVueApp() {
       // The slot content IS the field's input area, so it has to carry the slot's own props — those
       // supply the `v-field__input` class the outline's height and the label's float offset are measured
       // against. Dropping them collapses the box and pushes the value out through its bottom border.
-      + '        <template v-if="editing[item.id]"><v-field v-for="col in editCols()" :key="col" class="field-box" variant="outlined" active :label="t(\'field.\'+col) || col">'
+      + '        <template v-if="isEditing(item)"><v-field v-for="col in editCols()" :key="col" class="field-box" variant="outlined" active :label="t(\'field.\'+col) || col">'
       + '          <template v-slot:default="{ props: fp }"><div v-bind="fp" class="field-box-value"><data-cell :item="item" :col="col" :owner="viewName"></data-cell></div></template></v-field></template>'
       + '        <template v-else-if="!isClosed(item)"><v-field v-for="col in cardCols(item)" :key="col" class="field-box" variant="outlined" active :label="t(\'field.\'+col) || col">'
       + '          <template v-slot:default="{ props: fp }"><div v-bind="fp" class="field-box-value">{{ displayValue(col, item[col]) }}</div></template></v-field></template>'
+      // The card's own actions sit under its fields, so the header keeps its width for the title.
+      + '        <div v-if="canEditCard(item) && !isClosed(item)" style="display:flex;justify-content:flex-end;gap:2px">'
+      + '          <v-btn v-if="canEditCard(item) && !cfg.summary" :icon="editing[item.id] ? \'mdi-check\' : \'mdi-pencil-outline\'" size="x-small" variant="text" density="comfortable" :color="editing[item.id] ? \'primary\' : undefined" :title="t(\'btn.edit\')" @click="toggleEdit(item)" :data-testid="\'board-edit-\'+item.id"></v-btn>'
+      + '          <confirm-x v-if="!embed && canEditCard(item) && hasArchive" :armed="isArchArmed(item)" action="archive" dense density="comfortable" :data-testid="\'board-arch-\'+item.id" @click="archItem(item)"></confirm-x>'
+      + '          <confirm-x v-if="!embed && canEditCard(item)" :armed="isDelArmed(item)" dense density="comfortable" :data-testid="\'board-del-\'+item.id" @click="delItem(item)"></confirm-x>'
+      + '        </div>'
       + '      </div>'
       + '      <div v-if="!lane.items.length" style="opacity:0.4;font-size:0.78rem;padding:4px">—</div>'
       + '      </template>'

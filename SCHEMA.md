@@ -1737,7 +1737,9 @@ is not stopped by it.
   up/down arrows. A move is one undo entry. Not on a self-service table, in the archive, or while a search is active.
   Another view or embed of the table lists rows in the board's order with `"defaultSort": "position"`.
 - **Compact cards (`summary`).** Cards start closed: the title, with the `summary` columns beneath as one line.
-  The chevron on the title opens a card to every field; the pencil edits all of them. Without `summary` nothing
+  The chevron on the title opens a card in edit mode, every field editable (no pencil); a viewer who cannot edit
+  sees the values. Archive and delete sit under the fields, so a closed card's header holds only its title, arrows
+  and move menu. An open card is not draggable; close it or use its arrows. Without `summary` nothing
   folds. A lane folds by the chevron on its heading, on every board. Both are kept per viewer, in this browser.
 - **One source, one lane column.** The source must be **exactly one** table and `lane` must be a `select`
   **or a `ref`** column on it (load-time validation enforces both) — a drag writes one column on one table,
