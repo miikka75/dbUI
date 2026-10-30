@@ -127,7 +127,8 @@ test.describe('Board with a summary', () => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.request.post('/api/resetData');
     await page.request.post('/api/saveSchema', { data: { schema } });
-    for (const r of [{ id: 'tk1', title: 'Alpha', status: 'open', assignee: 'Sam' }, { id: 'tk2', title: 'Beta', status: 'open', assignee: '' }])
+    for (const r of [{ id: 'tk1', title: 'Alpha', status: 'open', assignee: 'Sam' }, { id: 'tk2', title: 'Beta', status: 'open', assignee: '' },
+      { id: 'tk9', title: 'Maria-Theresia Josefiina Wallenius-Koskenniemi', status: 'in_progress', assignee: 'Ada' }])
       await page.request.post('/api/putRow', { data: { tableId: 'tickets', data: r, tab: 'active' } });
     await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
     const open = async () => {
@@ -140,9 +141,19 @@ test.describe('Board with a summary', () => {
     const card = page.locator('[data-testid="board-card-tk1"]');
     await expect(page.locator('[data-testid="board-summary-tk1"]')).toHaveText('Sam');
     await expect(card.locator('.field-box')).toHaveCount(0);
+    await expect(page.locator('[data-testid="board-del-tk1"]')).toHaveCount(0);
+    // A long title stays on one line and keeps the move menu inside the card (it used to land ~48px outside).
+    await expect.poll(() => page.locator('[data-testid="board-card-tk9"]').evaluate((c) => {
+      const m = c.querySelector('[data-testid="board-move-tk9"]').getBoundingClientRect(), r = c.getBoundingClientRect();
+      return m.right < r.right + 12 && c.querySelector('[data-testid="board-open-tk9"]').getBoundingClientRect().height < 30;
+    })).toBe(true);
 
+    // Open is edit mode: every field's editor, title included, and no pencil.
     await page.locator('[data-testid="board-open-tk1"]').click();
-    await expect(card.locator('.field-box')).toHaveCount(1);
+    await expect(card.locator('.field-box')).toHaveCount(2);
+    await expect(card.locator('.field-box [contenteditable]')).toHaveText('Alpha');
+    await expect(page.locator('[data-testid="board-edit-tk1"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid="board-del-tk1"]')).toBeVisible();
     await expect(page.locator('[data-testid="board-summary-tk1"]')).toHaveCount(0);
 
     await page.locator('[data-testid="board-lane-fold-open"]').click();
@@ -153,7 +164,7 @@ test.describe('Board with a summary', () => {
     await open();
     await expect(page.locator('[data-testid="board-lane-open"] [data-testid^="board-card-"]')).toHaveCount(0);
     await page.locator('[data-testid="board-lane-fold-open"]').click();
-    await expect(page.locator('[data-testid="board-card-tk1"] .field-box')).toHaveCount(1);
+    await expect(page.locator('[data-testid="board-card-tk1"] .field-box')).toHaveCount(2);
     await expect(page.locator('[data-testid="board-card-tk2"] .field-box')).toHaveCount(0);
   });
 });

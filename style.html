@@ -102,6 +102,9 @@ input[type="date"]:focus { outline: none; border-color: rgb(var(--v-theme-primar
    empty lanes doesn't turn into a column of empty boxes. */
 .board-lane-row { display: flex; gap: 10px; overflow-x: auto; padding: 8px; align-items: stretch; }
 .board-lane { flex: 0 0 240px; min-width: 240px; min-height: 140px; border-radius: 8px; padding: 6px; background: rgb(var(--v-theme-on-surface), 0.04); box-sizing: border-box; }
+/* A card title stays on one line and fades where it overflows, so the card's buttons stay inside it. */
+.board-card-title { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; font-weight: 600; font-size: 0.85rem;
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent); }
 @media (max-width: 599.98px) {
   .board-lane-row { flex-direction: column; overflow-x: visible; }
   .board-lane { flex: 1 1 auto; min-width: 0; width: 100%; min-height: 0; }
