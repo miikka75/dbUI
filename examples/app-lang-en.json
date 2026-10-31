@@ -58,6 +58,7 @@
       "btn.edit": "Edit",
       "btn.move_up": "Move up",
       "btn.move_down": "Move down",
+      "btn.restore": "Restore",
       "btn.copy": "Copy",
       "btn.show": "Show",
       "btn.hide": "Hide",

@@ -1,6 +1,6 @@
 # Archive, auto-archive & copy forward
 
-An `archivable` table gets **Upcoming / Past** tabs and an archive button per row; restore brings a row back. `archiveAfter` files rows away on their own — by a date passing, or a status left alone for a while. `copy` on a page copies a date range of rows (e.g. a week of classes) to a new date.
+An `archivable` table gets **Upcoming / Past** tabs and an archive button per row; restore brings a row back, and an `archiveAfter` sweep leaves a restored row alone. `archiveAfter` files rows away on their own — by a date passing, or a status left alone for a while. `copy` on a page copies a date range of rows (e.g. a week of classes) to a new date.
 
 ![The Past tab of an archivable table (demo)](../screenshots/archive.png)
 

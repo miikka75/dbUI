@@ -331,7 +331,8 @@
         return m ? new Date(+m[1], +m[2] - 1, +m[3]).getTime() : Date.parse(v);
       };
       return (rows || []).filter(function(r) {
-        if (!r || !r.id || (byValue && cfg.values.indexOf(r[cfg.column]) < 0)) return false;
+        // An explicit 'active' is a person putting the row back (Restore, or undoing an archive): leave it.
+        if (!r || !r.id || r._status === 'active' || (byValue && cfg.values.indexOf(r[cfg.column]) < 0)) return false;
         var t = cfg.dateColumn ? when(r[cfg.dateColumn]) : Date.parse(r.updated_at);
         return !isNaN(t) && t <= cutoff;
       }).map(function(r) { return r.id; });
