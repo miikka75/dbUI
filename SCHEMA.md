@@ -246,6 +246,7 @@ hand. Reversible from the archive tab like any other archived row.
   concurrent second run is harmless.
 - **`after`**: `"30min"`, `"2h"`, `"1d"`, `"2w"`, `"1m"` (months), `"1y"`; `"0d"` archives at once.
 - **`dateColumn`**: age from the row's own date instead of `updated_at` (`column`/`values` optional).
+- **A row restored by hand stays active**: the sweep skips it from then on; archive it by hand again.
 - Calendars and lookups still read archived rows.
 - **Mind what totals the table feeds.** Archiving removes a row from every ordinary view, so a
   leaderboard or balance over the same table needs `includeArchive: true` or it will quietly shed

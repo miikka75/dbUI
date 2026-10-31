@@ -219,6 +219,11 @@ describe('backend-helpers - autoArchiveIds by the row own date, after a duration
     assert.deepEqual(H.autoArchiveIds([{ id: 'd', day: '2026-10-19' }], { dateColumn: 'day', after: '8h' }, today), ['d']);
     assert.deepEqual(H.autoArchiveIds([{ id: 'd', day: '2026-10-19' }], { dateColumn: 'day', after: '10h' }, today), []);
   });
+  it('a row restored by hand (explicit `_status: active`) stays; one never archived still goes', () => {
+    const rows = [{ id: 'restored', day: '2026-10-01', _status: 'active' }, { id: 'plain', day: '2026-10-01' }];
+    assert.deepEqual(H.autoArchiveIds(rows, { dateColumn: 'day', after: '1d' }, NOW), ['plain']);
+    assert.deepEqual(H.autoArchiveIds([{ id: 'r', status: 'done', updated_at: '2026-10-01T00:00:00Z', _status: 'active' }], { column: 'status', values: ['done'], after: '1d' }, NOW), []);
+  });
   it('no duration, or an unreadable one, archives nothing rather than everything', () => {
     assert.deepEqual(H.autoArchiveIds(classes, { dateColumn: 'starts_at' }, NOW), []);
     assert.deepEqual(H.autoArchiveIds(classes, { dateColumn: 'starts_at', after: 'soon' }, NOW), []);
