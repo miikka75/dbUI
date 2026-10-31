@@ -1189,7 +1189,7 @@ function createVueApp() {
       },
       staticTranslationKeys: function() {
         return ['app.title', 'btn.add', 'btn.show_more', 'btn.compare_add', 'copy.events', 'copy.from', 'copy.to', 'copy.target', 'copy.times', 'copy.count', 'copy.skipped', 'btn.show_active', 'btn.show_archived', 'btn.show_all', 'btn.show_fewer', 'btn.decrease', 'btn.increase', 'settings.linked_list', 'auth.sign_in', 'auth.with_google', 'auth.or', 'auth.email', 'auth.send_email', 'auth.check_email', 'auth.check_email_code', 'auth.code', 'kiosk.fullscreen', 'kiosk.exit', 'kiosk.lock', 'kiosk.unlock', 'kiosk.pin', 'kiosk.pin_short', 'kiosk.wrong_pin', 'btn.more',
-         'btn.edit', 'btn.move_up', 'btn.move_down', 'btn.copy', 'btn.show', 'btn.hide', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'cal.feed_url', 'feed.subscribe', 'feed.link_pending', 'feed.unsubscribe', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.no_blob_store', 'msg.feed_cap_reached', 'settings.feeds', 'settings.feed_regenerate', 'settings.feed_unpublish', 'settings.feed_not_republishing', 'settings.feed_all_personal', 'settings.feed_subscribers', 'settings.feed_revoking', 'settings.feed_over_cap', 'settings.feed_unpublished', 'settings.feed_revoked', 'settings.feed_sweep', 'settings.csp_reports', 'settings.csp_token', 'settings.csp_bad_token', 'settings.csp_read_failed', 'settings.csp_none', 'settings.csp_extensions', 'settings.csp_directive', 'settings.csp_blocked', 'settings.csp_count', 'settings.csp_last_seen', 'btn.refresh', 'settings.csp_rotate', 'msg.feed_swept', 'cal.err_no_source', 'cal.err_table', 'cal.err_date_col', 'cal.err_not_date', 'cal.err_title_col', 'settings.add_calendar', 'settings.cal_title', 'settings.cal_table', 'settings.cal_date_col', 'settings.cal_title_cols', 'settings.cal_add_source', 'btn.delete', 'btn.confirm_delete', 'cal.err_not_rotation', 'settings.cal_rotations', 'msg.name_taken', 'cal.err_name', 'lang.add_language', 'btn.cancel', 'timeline.empty', 'col.switch_list',
+         'btn.edit', 'btn.move_up', 'btn.move_down', 'btn.restore', 'btn.copy', 'btn.show', 'btn.hide', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'cal.feed_url', 'feed.subscribe', 'feed.link_pending', 'feed.unsubscribe', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.no_blob_store', 'msg.feed_cap_reached', 'settings.feeds', 'settings.feed_regenerate', 'settings.feed_unpublish', 'settings.feed_not_republishing', 'settings.feed_all_personal', 'settings.feed_subscribers', 'settings.feed_revoking', 'settings.feed_over_cap', 'settings.feed_unpublished', 'settings.feed_revoked', 'settings.feed_sweep', 'settings.csp_reports', 'settings.csp_token', 'settings.csp_bad_token', 'settings.csp_read_failed', 'settings.csp_none', 'settings.csp_extensions', 'settings.csp_directive', 'settings.csp_blocked', 'settings.csp_count', 'settings.csp_last_seen', 'btn.refresh', 'settings.csp_rotate', 'msg.feed_swept', 'cal.err_no_source', 'cal.err_table', 'cal.err_date_col', 'cal.err_not_date', 'cal.err_title_col', 'settings.add_calendar', 'settings.cal_title', 'settings.cal_table', 'settings.cal_date_col', 'settings.cal_title_cols', 'settings.cal_add_source', 'btn.delete', 'btn.confirm_delete', 'cal.err_not_rotation', 'settings.cal_rotations', 'msg.name_taken', 'cal.err_name', 'lang.add_language', 'btn.cancel', 'timeline.empty', 'col.switch_list',
          'img.replace', 'img.upload', 'img.remove', 'img.url', 'img.view', 'img.open_original',
          'btn.close', 'btn.previous', 'btn.next',
          // View background images (Settings -> Backgrounds); bg.fit_* label the `fit` modes in bgFitItems.
@@ -9427,12 +9427,14 @@ function createVueApp() {
     computed: {
       canPrintCard: function() { return appInstance.canPrintCard; },
       canMutateRows: function() { return appInstance.canMutateRows; },
-      hasArchive: function() { return appInstance.hasArchive; }
+      hasArchive: function() { return appInstance.hasArchive; },
+      viewingArchive: function() { return appInstance.viewingArchive; }
     },
     methods: Object.assign({}, ROOT_PROXY, {
       isArmed: function(k) { return appInstance.isArmed(k); },
       printCard: function(it) { return appInstance.printCard(it); },
       archiveRow: function(it) { return appInstance.archiveRow(it); },
+      restoreRow: function(it) { return appInstance.restoreRow(it); },
       deleteRow: function(it) { return appInstance.deleteRow(it); }
     }),
     template: ''
@@ -9447,7 +9449,7 @@ function createVueApp() {
       + '<template v-slot:append>'
       + '<v-btn v-if="canPrintCard" icon="mdi-printer" size="x-small" variant="text" @click="printCard(item)"></v-btn>'
       + '<template v-if="canMutateRows">'
-      + '<confirm-x v-if="hasArchive" :armed="isArmed(\'arch:\'+item.id)" action="archive" dense @click="archiveRow(item)"></confirm-x>'
+      + '<row-archive v-if="hasArchive" dense :archived="viewingArchive" :armed="isArmed(\'arch:\'+item.id)" @archive="archiveRow(item)" @restore="restoreRow(item)"></row-archive>'
       + '<confirm-x :armed="isArmed(\'row:\'+item.id)" dense @click="deleteRow(item)"></confirm-x>'
       + '</template>'
       + '</template>'
@@ -9687,6 +9689,17 @@ function createVueApp() {
     },
     template: '<v-btn :icon="armed ? \'mdi-check-circle\' : spec.icon" :size="dense ? \'x-small\' : \'small\'" variant="text"'
       + ' :color="armed ? spec.color : undefined" :title="text" :aria-label="text" @click="$emit(\'click\', $event)"></v-btn>'
+  });
+
+  // A row's archive action: two-press archive on the active tab, one-press Restore on the Past tab.
+  app.component('row-archive', {
+    props: { archived: Boolean, armed: Boolean, dense: Boolean },
+    emits: ['archive', 'restore'],
+    inject: ['uiHost'],
+    computed: { restoreText: function() { return this.uiHost.t('btn.restore'); } },
+    template: '<v-btn v-if="archived" icon="mdi-archive-arrow-up-outline" :size="dense ? \'x-small\' : \'small\'" variant="text"'
+      + ' :title="restoreText" :aria-label="restoreText" data-testid="row-restore" @click="$emit(\'restore\')"></v-btn>'
+      + '<confirm-x v-else :armed="armed" action="archive" :dense="dense" @click="$emit(\'archive\')"></confirm-x>'
   });
 
   // A LABELLED two-press button: the first press arms it (the check mark, in red), the second acts.
