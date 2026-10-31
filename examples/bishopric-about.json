@@ -19,6 +19,7 @@
     "45": "No visible change: the schema moves to version 5, where a booking cut-off is written as a duration (\"30min\").",
     "46": "Callings can be put in order by hand within a status: drop a card on another to place it before it, or use Move up / Move down in the card's menu. Cards no longer follow the date. Existing callings keep their current order until the first move.",
     "47": "Callings cards are compact: a closed card shows the name with the organization and calling beneath; the chevron on the name opens it to every field. Each status column folds by its heading. Both are remembered in this browser.",
-    "48": "The meeting agenda lists callings (releases, sustainings, ordinations, welcomes) in the same order as the Calling board."
+    "48": "The meeting agenda lists callings (releases, sustainings, ordinations, welcomes) in the same order as the Calling board.",
+    "49": "In Finnish, the music leader calling is now called Musiikinohjaaja."
   }
 }
