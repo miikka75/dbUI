@@ -20,7 +20,7 @@
       "title": "Bishopric Tool",
       "description": "A ward bishopric’s working tool — meeting programs, assignments, interviews and a members roster.",
       "icon": "./examples/bishopric-favicon.svg",
-      "revision": 48,
+      "revision": 49,
       "tables": 14,
       "views": 19,
       "schema": {
@@ -38,12 +38,12 @@
           "code": "fi",
           "name": "Suomi",
           "file": "bishopric-lang-fi.json",
-          "hash": "e882a53ac80412f0"
+          "hash": "90ebe0fbdb49fe09"
         }
       ],
       "about": {
         "file": "bishopric-about.json",
-        "hash": "6ad37de7af1629e9"
+        "hash": "ef0aa78ddd53e5eb"
       },
       "notes": {
         "29": "Welcome the newly baptized and those who moved in; releases now come before sustainings.",
@@ -64,7 +64,8 @@
         "45": "No visible change: the schema moves to version 5, where a booking cut-off is written as a duration (\"30min\").",
         "46": "Callings can be put in order by hand within a status: drop a card on another to place it before it, or use Move up / Move down in the card's menu. Cards no longer follow the date. Existing callings keep their current order until the first move.",
         "47": "Callings cards are compact: a closed card shows the name with the organization and calling beneath; the chevron on the name opens it to every field. Each status column folds by its heading. Both are remembered in this browser.",
-        "48": "The meeting agenda lists callings (releases, sustainings, ordinations, welcomes) in the same order as the Calling board."
+        "48": "The meeting agenda lists callings (releases, sustainings, ordinations, welcomes) in the same order as the Calling board.",
+        "49": "In Finnish, the music leader calling is now called Musiikinohjaaja."
       }
     },
     {
