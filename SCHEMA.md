@@ -1320,6 +1320,11 @@ narrows events whose row HAS the column, so a calendar of classes and workouts f
 workouts. The picks are kept in the reader's browser, per calendar — a convenience, not a setting.
 `validateSchema` names a filter column no source has, or one with no options.
 
+On a **page** with `filters` that embeds a stats view with `tiles`, **Add to comparison** saves the current
+picks as a row of a table under the stats: one line per row, one column per tile, sortable. An admin's or
+editor's rows belong to the page (its stored `_pages` doc, under the page's own read access) and everyone
+sees them; anyone else's stay in their browser, listed after the page's.
+
 ### Booking from the calendar (`respond`)
 
 A source may name an rsvp view over its own table — `{ "table": "classes", "dateColumn": "starts_at", "respond":
