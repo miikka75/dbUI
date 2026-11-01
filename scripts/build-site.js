@@ -10,6 +10,7 @@
 // are classic scripts that share them as globals.
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { execFileSync } = require('child_process');
 const ESBUILD = 'esbuild@0.28.2';
 
@@ -57,8 +58,35 @@ function build(root, outDir, opts) {
     fs.mkdirSync(path.dirname(to), { recursive: true });
     fs.copyFileSync(path.join(root, ...rel.split('/')), to);
   }
-  if (opts.minify) minify(outDir, files.filter((rel) => /^[^/]+\.js$/.test(rel)));
+  if (opts.minify) minify(outDir, files.filter((rel) => /^[^/]+\.js$/.test(rel) && rel !== 'sw.js'));
+  if (files.includes('sw.js')) writeServiceWorker(outDir, files);
   return files;
+}
+
+// What the service worker precaches: what every boot loads, whichever backend. The rest is cached on
+// first use (a backend's files, examples, the PGlite dist).
+const VENDOR_SHELL = ['vendor/vue.js', 'vendor/vuetify.js', 'vendor/vuetify.css', 'vendor/mdi.css',
+  'vendor/fonts/materialdesignicons-webfont.woff2'];
+function shellOf(files) {
+  return files.filter((f) => /^[^/]+\.(html|js|json|svg|png)$/.test(f) && f !== 'sw.js' && f !== 'schema.schema.json'
+    && !CONFIG.includes(f) && !/^(backend-(?!helpers\.js)|storage-)/.test(f)).concat(VENDOR_SHELL.filter((f) => files.includes(f)));
+}
+
+// The published sw.js gets the two cache revisions and the shell; the source copy keeps its placeholders.
+function writeServiceWorker(outDir, files) {
+  const rev = (list) => {
+    const h = crypto.createHash('sha256');
+    for (const f of list.slice().sort()) h.update(f + '\0').update(fs.readFileSync(path.join(outDir, ...f.split('/'))));
+    return h.digest('hex').slice(0, 12);
+  };
+  const vendor = files.filter((f) => f.startsWith('vendor/'));
+  const app = files.filter((f) => !f.startsWith('vendor/') && f !== 'sw.js');
+  const file = path.join(outDir, 'sw.js');
+  const src = fs.readFileSync(file, 'utf8');
+  const out = src.replace("'__APP_REV__'", JSON.stringify(rev(app))).replace("'__VENDOR_REV__'", JSON.stringify(rev(vendor)))
+    .replace("'__SHELL__'", JSON.stringify(shellOf(files)));
+  if (out === src || /'__(APP_REV|VENDOR_REV|SHELL)__'/.test(out)) throw new Error('build-site: sw.js placeholders not found');
+  fs.writeFileSync(file, out);
 }
 
 // In place, with a linked source map beside each file (the source is public anyway).
@@ -69,7 +97,7 @@ function minify(outDir, scripts) {
     '--outdir=.', '--allow-overwrite', '--log-level=warning']), { cwd: outDir, stdio: 'inherit', shell: process.platform === 'win32' });
 }
 
-module.exports = { SITE, CONFIG, scriptsOf, isPublished, build };
+module.exports = { SITE, CONFIG, scriptsOf, isPublished, shellOf, build };
 
 if (require.main === module) {
   const arg = (name) => { const i = process.argv.indexOf(name); return i > 0 ? process.argv[i + 1] : null; };
