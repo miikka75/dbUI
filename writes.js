@@ -10,8 +10,7 @@
 //     chokepoint, and a rewrite if there is not. It is the cheap insurance this file exists to keep;
 //   - uniform failure handling, instead of each call site deciding for itself whether to notify.
 //
-// None of those are here yet, deliberately. This lands as a pure pass-through so it can be verified as
-// a no-op, and the interesting behaviour goes in afterwards against a suite that already passes.
+// Failure handling is here (`onError`); the other two are not.
 //
 // The invariant is enforced, not just intended: dev/test/write-funnel.test.js asserts that no direct
 // backend.putRow/deleteRow/moveRow call survives outside this file. A funnel with a bypass is not one.
@@ -46,34 +45,42 @@
   // republishing on one would push a file that disagrees with the database. And an observer that throws
   // is swallowed: a feed that cannot be regenerated must not turn a saved row into a failed one, since
   // the row is the thing the user actually asked for.
-  var observers = [];
-  function notify(tableId) {
-    observers.forEach(function (fn) { try { fn(tableId); } catch (e) {} });
+  var observers = [], failObservers = [];
+  function notify(list, args) {
+    list.slice().forEach(function (fn) { try { fn.apply(null, args); } catch (e) {} });
   }
-  function after(tableId, p) {
-    return p.then(function (r) { notify(tableId); return r; });
+  function subscribe(list, fn) {
+    list.push(fn);
+    return function () { var i = list.indexOf(fn); if (i >= 0) list.splice(i, 1); };
+  }
+  // The funnel's own catch reports a failure even when the caller ignores the promise, and keeps an
+  // ignored one from becoming an unhandled rejection. The caller still sees the rejection.
+  function after(tableId, p, opts) {
+    var out = p.then(function (r) { notify(observers, [tableId]); return r; });
+    out.catch(function (e) { if (!(opts && opts.quiet)) notify(failObservers, [tableId, e]); });
+    return out;
   }
 
   var Writes = {
     // Register an observer. Returns an unsubscribe, so a test can leave no trace.
-    onWrite: function (fn) {
-      observers.push(fn);
-      return function () { var i = observers.indexOf(fn); if (i >= 0) observers.splice(i, 1); };
-    },
+    onWrite: function (fn) { return subscribe(observers, fn); },
+    // Called with (tableId, error) when a write rejects. A caller's own catch runs after it.
+    onError: function (fn) { return subscribe(failObservers, fn); },
 
     // Upsert a row. `part` is the partition ('active' by default), as in the backend contract.
-    putRow: function (tableId, row, part) {
-      return after(tableId, run(function (b) { return b.putRow(tableId, row, part); }));
+    // `opts.quiet`: a failure the caller expects, not reported to onError.
+    putRow: function (tableId, row, part, opts) {
+      return after(tableId, run(function (b) { return b.putRow(tableId, row, part); }), opts);
     },
 
-    deleteRow: function (tableId, id, part) {
-      return after(tableId, run(function (b) { return b.deleteRow(tableId, id, part); }));
+    deleteRow: function (tableId, id, part, opts) {
+      return after(tableId, run(function (b) { return b.deleteRow(tableId, id, part); }), opts);
     },
 
     // Not atomic on any backend — the contract says so, and moving that guarantee here would be
     // pretending. It funnels through for the same reason the others do.
-    moveRow: function (tableId, row, fromPart, toPart) {
-      return after(tableId, run(function (b) { return b.moveRow(tableId, row, fromPart, toPart); }));
+    moveRow: function (tableId, row, fromPart, toPart, opts) {
+      return after(tableId, run(function (b) { return b.moveRow(tableId, row, fromPart, toPart); }), opts);
     }
   };
 
