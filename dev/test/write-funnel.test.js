@@ -89,3 +89,69 @@ describe('write funnel — the pass-through behaves', () => {
     await assert.rejects(() => Writes.putRow('t', { id: 'x' }, 'active'), /no backend/);
   });
 });
+
+describe('write funnel — failures are reported once, in one place', () => {
+  const Writes = require('../../writes');
+  const failing = () => ({
+    putRow: () => Promise.reject(new Error('refused')),
+    deleteRow: () => { throw new Error('sync refusal'); },
+    moveRow: () => Promise.reject(new Error('refused'))
+  });
+  const ticks = () => new Promise((r) => setImmediate(r));
+
+  it('onError gets (table, error), and the caller still sees the rejection', async () => {
+    globalThis.backend = failing();
+    const seen = [];
+    const off = Writes.onError((t, e) => seen.push([t, e.message]));
+    try {
+      await assert.rejects(() => Writes.putRow('tasks', { id: 'r1' }, 'active'), /refused/);
+      await assert.rejects(() => Writes.deleteRow('tasks', 'r1', 'active'), /sync refusal/);
+      await assert.rejects(() => Writes.moveRow('tasks', { id: 'r1' }, 'active', 'archive'), /refused/);
+      assert.deepEqual(seen, [['tasks', 'refused'], ['tasks', 'sync refusal'], ['tasks', 'refused']]);
+    } finally { off(); delete globalThis.backend; }
+  });
+
+  it('a successful write is not a failure', async () => {
+    globalThis.backend = { putRow: () => 'ok' };
+    const seen = [];
+    const off = Writes.onError((t) => seen.push(t));
+    try {
+      await Writes.putRow('tasks', { id: 'r1' }, 'active');
+      assert.deepEqual(seen, []);
+    } finally { off(); delete globalThis.backend; }
+  });
+
+  it('quiet: a failure the caller expects is not reported', async () => {
+    globalThis.backend = failing();
+    const seen = [];
+    const off = Writes.onError((t) => seen.push(t));
+    try {
+      await assert.rejects(() => Writes.deleteRow('tasks', 'r1', 'active', { quiet: true }));
+      assert.deepEqual(seen, []);
+    } finally { off(); delete globalThis.backend; }
+  });
+
+  it("the caller's own catch runs after onError, so its message is the one left showing", async () => {
+    globalThis.backend = failing();
+    const order = [];
+    const off = Writes.onError(() => order.push('funnel'));
+    try {
+      await Writes.putRow('tasks', { id: 'r1' }, 'active').catch(() => order.push('caller'));
+      assert.deepEqual(order, ['funnel', 'caller']);
+    } finally { off(); delete globalThis.backend; }
+  });
+
+  it('an ignored failing write is reported, not an unhandled rejection', async () => {
+    globalThis.backend = failing();
+    const unhandled = [], seen = [];
+    const onUnhandled = (e) => unhandled.push(e);
+    process.on('unhandledRejection', onUnhandled);
+    const off = Writes.onError((t) => seen.push(t));
+    try {
+      Writes.putRow('tasks', { id: 'r1' }, 'active');   // fire-and-forget, as most call sites are
+      await ticks(); await ticks();
+      assert.deepEqual(seen, ['tasks']);
+      assert.deepEqual(unhandled, []);
+    } finally { off(); process.off('unhandledRejection', onUnhandled); delete globalThis.backend; }
+  });
+});
