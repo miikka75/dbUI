@@ -196,3 +196,11 @@ describe('app-core.js root component — no dead methods', () => {
     assert.deepEqual(dead, [], 'root methods with no caller — delete them: ' + dead.join(', '));
   });
 });
+
+describe('app-core.js — preferences go through loadPref / savePref', () => {
+  it('no raw JSON read or write of localStorage outside the two helpers', () => {
+    const raw = SRC.split('\n').filter((l) => /JSON\.parse\(localStorage\.getItem|localStorage\.setItem\([^;]*JSON\.stringify/.test(l));
+    assert.deepEqual(raw.filter((l) => !/^function (loadPref|savePref)\b|^\s+try \{ var v = JSON\.parse\(localStorage\.getItem\(key\)\)/.test(l)), [],
+      'use loadPref(key, def) / savePref(key, value): they never throw on blocked storage');
+  });
+});
