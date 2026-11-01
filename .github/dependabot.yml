@@ -2,7 +2,7 @@
 # https://docs.github.com/code-security/dependabot/working-with-dependabot/dependabot-options-reference
 #
 # Covers the two npm projects and the GitHub Actions used by the workflows. NOT covered: the browser
-# libraries in vendor/ (Vue, Vuetify, MDI, PGlite, qrcode-generator, supabase-js) — they are pinned in vendor/versions
+# libraries in vendor/ (Vue, Vuetify, MDI, PGlite, qrcode-generator, supabase-js, Firebase) — they are pinned in vendor/versions
 # and fetched by update-vendor.sh, which also rewrites the CDN fallback URLs and SRI hashes; the
 # .github/workflows/vendor-updates.yml workflow checks npm for those weekly and opens the bump PR.
 version: 2

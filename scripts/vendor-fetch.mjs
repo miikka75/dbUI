@@ -31,6 +31,7 @@ const V = Object.fromEntries(versionsText.split('\n').filter(Boolean).map((l) =>
 
 // package -> [source path in the tarball (under package/), destination under vendor/]. Keep in step with
 // update-vendor.sh, scripts/vendor-pglite.sh, deploy-pages.yml and the web SessionStart hook.
+const FIREBASE_COMPAT = ['app', 'auth', 'firestore', 'storage'].map((n) => `firebase-${n}-compat.js`);
 const PACKAGES = [
   { spec: `vue@${V.VUE}`, files: [['dist/vue.global.prod.js', 'vue.js']] },
   { spec: `vuetify@${V.VUETIFY}`, files: [['dist/vuetify.min.js', 'vuetify.js'], ['dist/vuetify.min.css', 'vuetify.css']] },
@@ -38,6 +39,7 @@ const PACKAGES = [
     ['fonts/materialdesignicons-webfont.woff2', 'fonts/materialdesignicons-webfont.woff2']] },
   { spec: `qrcode-generator@${V.QRCODE}`, files: [['qrcode.js', 'qrcode.js']] },
   { spec: `@supabase/supabase-js@${V.SUPABASE}`, files: [['dist/umd/supabase.js', 'supabase.js']] },
+  { spec: `firebase@${V.FIREBASE}`, files: FIREBASE_COMPAT.map((f) => [f, 'firebase/' + f]) },
   // PGlite's ESM entry loads content-hashed chunks and three binaries relative to itself (see
   // scripts/vendor-pglite.sh), so the chunks are matched by pattern.
   { spec: `@electric-sql/pglite@${V.PGLITE}`, dir: 'pglite',
@@ -48,7 +50,7 @@ const PACKAGES = [
 
 // The CDN fallbacks' SRI pins, which must be the hashes of the files served from /vendor.
 const SRI_PINS = [['vue.js', 'index.html'], ['vuetify.js', 'index.html'], ['qrcode.js', 'app-core.js'],
-  ['supabase.js', 'index.html']];
+  ['supabase.js', 'index.html'], ...FIREBASE_COMPAT.map((f) => ['firebase/' + f, 'index.html'])];
 
 // Minimal tar reader: ustar entries, plus the pax ('x') and GNU ('L') long-name records npm can emit.
 function untar(buf) {
@@ -120,7 +122,7 @@ function main() {
   }
   checkSriPins();
   fs.writeFileSync(STAMP, versionsText);
-  console.log(`✓ vendor/ — Vue ${V.VUE}, Vuetify ${V.VUETIFY}, MDI ${V.MDI}, qrcode-generator ${V.QRCODE}, PGlite ${V.PGLITE}, supabase-js ${V.SUPABASE}`);
+  console.log(`✓ vendor/ — Vue ${V.VUE}, Vuetify ${V.VUETIFY}, MDI ${V.MDI}, qrcode-generator ${V.QRCODE}, PGlite ${V.PGLITE}, supabase-js ${V.SUPABASE}, Firebase ${V.FIREBASE}`);
 }
 
 try {
