@@ -285,6 +285,14 @@ function validateSchema() {
       if (seen === 2) errors.push('table "' + st + '": more than one `stamped` column — the rules layers resolve ONE column against its list and cannot loop a map');
     }
   }
+  // `@me` resolves through a column's `list`, never a `ref`; the write layers then refuse every owner's value.
+  for (var mt in SCHEMA) {
+    var mcols = (SCHEMA[mt] && SCHEMA[mt].columns) || {};
+    for (var mc in mcols) {
+      var md = mcols[mc];
+      if (md && typeof md === 'object' && md.defaultFrom === '@me' && md.type === 'ref' && !md.list) errors.push('table "' + mt + '": column "' + mc + '" has `defaultFrom: "@me"` on a `ref` — `@me` resolves through a list, so declare it `"list": "' + (md.table || '') + '"` with a `valueCol` instead');
+    }
+  }
   for (var at in SCHEMA) {
     var aa = SCHEMA[at] && SCHEMA[at].archiveAfter;
     if (!aa) continue;

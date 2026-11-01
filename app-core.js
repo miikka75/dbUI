@@ -5217,9 +5217,11 @@ function createVueApp() {
             Undo.record({ table: table, part: 'active',
               forward: { type: 'put', id: row.id, row: (function() { var r = { id: row.id }; r[parentCol] = newParent; return r; })() },
               inverse: { type: 'put', id: row.id, row: (function() { var r = { id: row.id }; r[parentCol] = oldParent; return r; })() } });
+            var oldHandle = self.refIdentityValue(row);
             row[parentCol] = newParent;
             row.updated_at = new Date().toISOString();
             Writes.putRow(table, row, 'active');
+            self._moveRefLink(table, row, oldHandle);   // a derived handle carries the group's name
           });
           Undo.record({ forward: { type: 'trans', ns: table, from: oldParent, to: newParent },
                         inverse: { type: 'trans', ns: table, from: newParent, to: oldParent } });
@@ -5337,7 +5339,7 @@ function createVueApp() {
         if (item[col] === value) return;
         var lv = this.lockedListValues[this.currentRefTable];
         if (lv && lv[item[col]]) { this.notify(this.t('msg.locked')); return; }  // renaming a pinned value breaks the filter
-        var oldVal = item[col];
+        var oldVal = item[col], oldHandle = this.refIdentityValue(item);
         item[col] = value;
         item.updated_at = new Date().toISOString();
         var self = this;
@@ -5383,6 +5385,7 @@ function createVueApp() {
           Undo.record({ table: refTable, part: 'active',
             forward: { type: 'put', id: item.id, row: (function() { var r = { id: item.id }; r[col] = value; return r; })() },
             inverse: { type: 'put', id: item.id, row: (function() { var r = { id: item.id }; r[col] = oldVal; return r; })() } });
+          self._moveRefLink(refTable, item, oldHandle);   // by handle, not by `retired`: a handle names one row
           if (!(oldVal && value && retired)) return;
           Undo.record({ forward: { type: 'trans', ns: refTable, from: oldVal, to: value },
                         inverse: { type: 'trans', ns: refTable, from: value, to: oldVal } });
@@ -5525,7 +5528,6 @@ function createVueApp() {
         // every table column backed by this list (both partitions). Skip no-ops / blank endpoints.
         if (!(oldVal && value && oldVal !== value)) return;
         var self = this, after = this.listsCache[name].slice();
-        var email = (this.listUserLinks[name] || {})[oldVal] || '';
         // ONE entry for the whole rename: the list's own array, the label that travels with the value,
         // the account keyed by it, and every row that stored it. The body RETURNS the cascade's promise
         // because an archive partition that is not cached is fetched before it can be rewritten — see
@@ -5538,16 +5540,7 @@ function createVueApp() {
                         inverse: { type: 'lists', list: name, values: before } });
           Undo.record({ forward: { type: 'trans', ns: name, from: oldVal, to: value },
                         inverse: { type: 'trans', ns: name, from: value, to: oldVal } });
-          // Two state sets rather than one move, so the pair inverts exactly. Only when a link exists:
-          // migrateListUserLink is itself a no-op without one, and an op for a link nobody has would
-          // clear a link somebody else made between the rename and the undo.
-          if (email) {
-            Undo.record({ forward: { type: 'link', list: name, value: oldVal, email: '' },
-                          inverse: { type: 'link', list: name, value: oldVal, email: email } });
-            Undo.record({ forward: { type: 'link', list: name, value: value, email: email },
-                          inverse: { type: 'link', list: name, value: value, email: '' } });
-          }
-          self.migrateListUserLink(name, oldVal, value);
+          self._moveUserLink(name, oldVal, value);
           self.migrateListTranslation(name, oldVal, value);
           return self.propagateListChange(name, oldVal, value);
         });
@@ -5576,6 +5569,28 @@ function createVueApp() {
         this.setListUserLink(list, oldVal, '');                 // drop the stale-keyed link
         if (newVal) this.setListUserLink(list, newVal, email);  // re-link under the new value (delete => none)
       },
+      // migrateListUserLink inside an open Undo.action. Two state sets rather than one move, so the pair
+      // inverts exactly; none without a link, or an undo would clear a link somebody made meanwhile.
+      _moveUserLink: function(list, oldVal, newVal) {
+        var email = (this.listUserLinks[list] || {})[oldVal] || '';
+        if (email) {
+          Undo.record({ forward: { type: 'link', list: list, value: oldVal, email: '' },
+                        inverse: { type: 'link', list: list, value: oldVal, email: email } });
+          if (newVal) Undo.record({ forward: { type: 'link', list: list, value: newVal, email: email },
+                                    inverse: { type: 'link', list: list, value: newVal, email: '' } });
+        }
+        this.migrateListUserLink(list, oldVal, newVal);
+      },
+      // A user-linked lookup keys its links by the row's handle, which renaming either dimension can change.
+      _moveRefLink: function(table, row, oldHandle) {
+        if (!oldHandle || !this.isUserLinkList(table)) return;
+        var col = Columns.lookupIdentityCol(SCHEMA, table), order = getColumns(table);
+        var handle = function(r) { return Columns.rowHandle(SCHEMA[table], order, r, col); };
+        var newHandle = handle(row);
+        if (!newHandle || newHandle === oldHandle) return;   // half a pair: keep the link, as a blank list value does
+        if ((this.dataCache[table] || []).some(function(r) { return r !== row && handle(r) === oldHandle; })) return;
+        this._moveUserLink(table, oldHandle, newHandle);
+      },
       focusNextListItem: function(e) {
         var el = e.target;
         el.blur();
@@ -5596,7 +5611,6 @@ function createVueApp() {
         // remain — blank the cell for select columns, drop the element for multiselect columns.
         if (!oldVal) return;
         var self = this, after = this.listsCache[name].slice();
-        var email = (this.listUserLinks[name] || {})[oldVal] || '';
         // Undoable for the same reason a rename is, and here it matters more: the cascade BLANKS the
         // value out of every row that stored it, which is the sharpest unrecoverable edit in this tab.
         // No translation op — this path never moved the key, so `list.<name>.<value>` is still there and
@@ -5604,9 +5618,7 @@ function createVueApp() {
         return Undo.action('delete value', function() {
           Undo.record({ forward: { type: 'lists', list: name, values: after },
                         inverse: { type: 'lists', list: name, values: before } });
-          if (email) Undo.record({ forward: { type: 'link', list: name, value: oldVal, email: '' },
-                                   inverse: { type: 'link', list: name, value: oldVal, email: email } });
-          self.migrateListUserLink(name, oldVal, null);
+          self._moveUserLink(name, oldVal, null);
           return self.propagateListChange(name, oldVal, null);
         });
       },

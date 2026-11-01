@@ -3768,10 +3768,11 @@ Recorded so the roadmap shows what graduated rather than silently shrinking.
   `identityList` — so a table-backed identity source is a coherent schema against today's code. What
   stops it is that the link PICKER renders only in the Lists tab, gated on `canEditList`, which returns
   false for a lookup by design; that a lookup rename calls `propagateRefChange` and
-  `migrateListTranslation` but not `migrateListUserLink`, so the account link is silently orphaned; and
+  `migrateListTranslation` but not `migrateListUserLink`, so the account link is silently orphaned *(fixed: both lookup renames move it by the row's handle)*; and
   that modelling the column as `ref:` rather than `list:` empties `identityList` and `stampedOf`, which
-  short-circuits `ownerIdentityOk` permissive and unbinds the stamped column. That second one is a real
-  bug on the shipped `userlink` path today, independent of any of this, and is worth fixing on its own.
+  short-circuits `ownerIdentityOk` permissive and unbinds the stamped column. *(Fixed: a `ref` identity
+  column now names its table, so the rules verify it and fail closed, and `validateSchema` says to use
+  `list:`. A stamped `ref` was already a load error.)*
   Two consequences of the answer that DO need acting on, and are not about the merge: identity is 1:1
   (`_list_users` is keyed `list~value` and `_mirrorIdentity` clears a value from whoever held it before),
   so two parents who both log chores need two member values rather than a shared "Parent"; and a

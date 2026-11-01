@@ -376,7 +376,7 @@ service cloud.firestore {
     // admin-write-only, so a member cannot forge it, and userData() has already fetched it — this costs
     // no extra get(). A QUERY (find the link naming me) is what rules cannot do; this is the same
     // denormalize-for-schema-blind-rules trick as rwTables.
-    //   Enforced only for a column backed by a LIST. Without one the identity is the profile display
+    //   Enforced only for a column backed by a LIST (a `ref` names its table). Without one the identity is the profile display
     // name, which the user writes themselves, so there would be nothing to verify against.
     //   No `identity` map on the grant -> migration grace, permissive, exactly like selfServiceTable():
     // it starts binding once an admin re-saves the links.

@@ -3018,10 +3018,12 @@ to the caller's account, otherwise their profile display name. So a household ca
 A member who is linked to nothing resolves to the fail-closed sentinel and matches no rows — the same
 stance as an empty profile name.
 
+- `@me` resolves through a column's `list`. On a `type: "ref"` column it is a load error; point a `list`
+  at the lookup instead.
 - The resolution needs the caller's **own** link, which they may read (`getMyListValues` — a rules-provable
   equality query on their own email; see the `_list_users` read rule). The full value→email map stays
   admin-only, and the avatar projection still never carries an email.
-- **Renaming a list value** migrates the link with it, but the identity is keyed by the old string, so a
+- **Renaming a list value**, or a lookup row's handle (either dimension, when the handle is derived), migrates the link with it, but the identity is keyed by the old string, so a
   rename that races another writer can leave the link behind.
 
 ### Membership requests (self-service, admin-approved)
