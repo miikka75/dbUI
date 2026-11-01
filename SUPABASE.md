@@ -22,8 +22,9 @@ Wiring is applied to `index.html` (mode branch, shared-link support, SDK + adapt
 `ui.html` (setup button + step), `app-core.js` (`saveSupabaseConfig`, `shareLink`, setup fields), and the
 `backend-conformance` drift-guard test.
 
-The Supabase SDK loads as a classic UMD script (`https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2`,
-global `window.supabase`), exactly like the Firebase compat SDK — no ES modules, matching this branch.
+The Supabase SDK loads as a classic UMD script (global `window.supabase`), exactly like the Firebase
+compat SDK — no ES modules. It is vendored like Vue: `/vendor/supabase.js` at the version pinned in
+`vendor/versions`, with an SRI-pinned jsdelivr fallback.
 
 ## Supabase project setup
 
