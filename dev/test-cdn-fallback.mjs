@@ -26,6 +26,8 @@ function vendorPathFor(url) {
   if (url.includes('/vuetify@') && url.endsWith('.css')) return join(ROOT, 'vendor', 'vuetify.css');
   if (url.includes('/@mdi/font@') && url.endsWith('.css')) return join(ROOT, 'vendor', 'mdi.css');
   if (url.includes('/@supabase/supabase-js@')) return join(ROOT, 'vendor', 'supabase.js');
+  const fb = /\/npm\/firebase@[0-9.]+\/(firebase-\w+-compat\.js)$/.exec(url);
+  if (fb) return join(ROOT, 'vendor', 'firebase', fb[1]);
   return null;
 }
 
@@ -46,7 +48,7 @@ const versions = Object.fromEntries(readFileSync(join(ROOT, 'vendor', 'versions'
   .split('\n').filter(Boolean).map(l => l.split('=')));
 const versionChecks = [
   ['vue@' + versions.VUE, 'VUE'], ['vuetify@' + versions.VUETIFY, 'VUETIFY'], ['@mdi/font@' + versions.MDI, 'MDI'],
-  ['@supabase/supabase-js@' + versions.SUPABASE, 'SUPABASE'],
+  ['@supabase/supabase-js@' + versions.SUPABASE, 'SUPABASE'], ['npm/firebase@' + versions.FIREBASE, 'FIREBASE'],
 ];
 
 let failed = 0;
