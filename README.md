@@ -145,6 +145,10 @@ The setup itself is per-provider, and each guide carries it end to end rather th
 Then fill the database: pick one of the shipped examples on the empty-database screen, or
 Settings → Import from JSON for a bundle of your own.
 
+Both deploys (the Pages workflow and Firebase Hosting's `predeploy`) publish `_site/`, which
+`node scripts/build-site.js --minify` fills with the files the app serves, its own scripts minified.
+Development serves the source as it is.
+
 ## Sharing & Access
 
 ### Shareable Links (URL params)
