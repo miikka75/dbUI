@@ -4,8 +4,7 @@
     "directly and emits nothing, so index.html keeps loading the same plain <script src> files.",
     "Run it with `npm run typecheck` from dev/.",
     "",
-    "Scope is the Vue-free domain modules -- the ones that already have node:test coverage. app-core.js",
-    "and the backend adapters come later; they need the contract typed first."
+    "Scope: every top-level module but the ones dev/test/typecheck-scope.test.js lists as outside it."
   ],
   "compilerOptions": {
     "allowJs": true,
@@ -49,6 +48,18 @@
     "leftovers.js",
     "live-sync.js",
     "backend-helpers.js",
-    "csp.js"
+    "csp.js",
+    "stats.js",
+    "form.js",
+    "brand.js",
+    "reorder.js",
+    "profiles.js",
+    "images.js",
+    "bundle.js",
+    "undo.js",
+    "csp-client.js",
+    "databases.js",
+    "backend-kv.js",
+    "storage-supabase.js"
   ]
 }

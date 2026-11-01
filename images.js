@@ -37,7 +37,7 @@
   // with a TooLarge error once every step has overflowed; the caller words it.
   function fit(resize, cap, steps) {
     var attempt = function(i) {
-      if (i >= steps.length) { var e = new Error('too large'); e.tooLarge = true; return Promise.reject(e); }
+      if (i >= steps.length) return Promise.reject(Object.assign(new Error('too large'), { tooLarge: true }));
       return Promise.resolve(resize(steps[i].max, steps[i].q)).then(function(url) {
         return String(url).length <= cap ? url : attempt(i + 1);
       });
