@@ -116,6 +116,28 @@ test('the account picker reaches a catalogue maintained as a table', async ({ pa
     .toEqual({ primary_president: 'pres@x.test' });
 });
 
+test('renaming a linked position carries its account, and undo takes it back', async ({ page }) => {
+  await boot(page);
+  const links = () => page.evaluate(() => appInstance.listUserLinks.ref_positions || {});
+  await page.evaluate(() => appInstance.setListUserLink('ref_positions', 'primary_president', 'pres@x.test'));
+  await expect.poll(links, { timeout: 6000 }).toEqual({ primary_president: 'pres@x.test' });
+
+  // The value cell: the derived handle changes with it.
+  await page.evaluate(() => { const a = appInstance; a.saveRefField(a.dataCache.ref_positions.find((r) => r.id === 'p1'), 'calling', 'chair'); });
+  await expect.poll(links, { timeout: 6000 }).toEqual({ primary_chair: 'pres@x.test' });
+  // The group: every child's derived handle carries its name.
+  await page.evaluate(() => appInstance.renameRefParent('primary', 'kids'));
+  await expect.poll(links, { timeout: 6000 }).toEqual({ kids_chair: 'pres@x.test' });
+  // An overriding handle cell does not move when the dimensions do.
+  await page.evaluate(() => appInstance.setListUserLink('ref_positions', 'the_chorister', 'ch@x.test'));
+  await page.evaluate(() => appInstance.renameRefParent('music', 'choir'));
+  await expect.poll(links, { timeout: 6000 }).toEqual({ kids_chair: 'pres@x.test', the_chorister: 'ch@x.test' });
+
+  await page.evaluate(() => appInstance.undoLast());   // the choir rename: nothing linked moved
+  await page.evaluate(() => appInstance.undoLast());   // the kids rename
+  await expect.poll(links, { timeout: 6000 }).toEqual({ primary_chair: 'pres@x.test', the_chorister: 'ch@x.test' });
+});
+
 test('a position added in the app is linkable without anyone filling in a handle', async ({ page }) => {
   await boot(page);
   // The defect this design exists to remove: the handle column is hidden, and the lookup editor draws

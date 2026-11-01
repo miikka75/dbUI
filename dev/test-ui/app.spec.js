@@ -2156,6 +2156,21 @@ test.describe('A lookup that declares its hierarchy', () => {
     expect(r.good).toBe('');
   });
 
+  test('validateSchema names `@me` on a ref column', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const errs = () => window.validateSchema().filter((e) => e.indexOf('me_ref') >= 0).join(' | ');
+      window.SCHEMA.me_ref = { columns: { who: { type: 'ref', table: 'ref_members', defaultFrom: '@me' } } };
+      const bad = errs();
+      window.SCHEMA.me_ref.columns.who = { type: 'select', list: 'ref_members', defaultFrom: '@me' };
+      const good = errs();
+      delete window.SCHEMA.me_ref;
+      return { bad, good };
+    });
+    expect(r.bad).toContain('declare it `"list": "ref_members"`');
+    expect(r.good).toBe('');
+  });
+
   test('validateSchema refuses a rotation that groups a lookup differently than the lookup does', async ({ page }) => {
     await ensureAppReady(page);
     const r = await page.evaluate(() => {

@@ -372,6 +372,11 @@ describe('backend-helpers - identity columns', () => {
     s2.tables.chore_log.ownerWritable = ['chore', 'note'];
     assert.equal(H.ownerWritableOf(s2).chore_log.identityCol, '');
   });
+  it('a `ref` identity column is verified against its table, not waved through as a display name', () => {
+    const s3 = JSON.parse(JSON.stringify(schema));
+    s3.tables.chore_log.columns[1] = { name: 'person', type: 'ref', table: 'ref_members', defaultFrom: '@me' };
+    assert.equal(H.ownerWritableOf(s3).chore_log.identityList, 'ref_members');
+  });
 
   const bounds = { identityCol: 'person', identityList: 'members' };
   it('accepts the caller own value and refuses anybody else', () => {

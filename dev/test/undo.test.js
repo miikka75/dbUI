@@ -539,6 +539,7 @@ describe('undo — the value cascades', () => {
       listUserLinks: { status: { open: 'a@b.c' } },
       saveLists: () => {},
       migrateListUserLink: () => {}, migrateListTranslation: () => {},
+      _moveUserLink: appCoreFn('_moveUserLink', {}),
       propagateListChange: function() {
         // Stands in for the real cascade: async (it fetches uncached partitions) and it records rows.
         return Promise.resolve().then(() => {
@@ -579,6 +580,7 @@ describe('undo — the value cascades', () => {
         currentRefTable: 'ref_callings', refParentCol: 'org',
         dataCache: { ref_callings: kids },
         notify: () => {}, t: (k) => k,
+        refIdentityValue: () => '', _moveRefLink: () => {},
         migrateListTranslation: () => {},
         propagateListChange: () => Promise.resolve(0)
       }, 'Music', 'Music and Choirs');
@@ -609,6 +611,7 @@ describe('undo — the value cascades', () => {
         canEditCurrentRef: true, lockedListValues: {},
         currentRefTable: 'cities', dataCache: { cities: [item] },
         saveTimers: {}, notify: () => {}, t: (k) => k, _liveFlush: () => {},
+        refIdentityValue: () => '', _moveRefLink: () => {},
         migrateListTranslation: () => {},
         propagateRefChange: () => Promise.resolve(0)
       }, item, 'city', 'Tampere');
@@ -637,6 +640,7 @@ describe('undo — the value cascades', () => {
         canEditCurrentRef: true, lockedListValues: {},
         currentRefTable: 'ref_callings', dataCache: { ref_callings: [item, other] },
         saveTimers: {}, notify: () => {}, t: (k) => k, _liveFlush: () => {},
+        refIdentityValue: () => '', _moveRefLink: () => {},
         migrateListTranslation: () => { throw new Error('must not migrate a value still in use'); },
         propagateRefChange: () => { throw new Error('must not cascade a value still in use'); }
       }, item, 'calling', 'branch president');

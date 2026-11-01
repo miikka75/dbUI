@@ -433,7 +433,7 @@ $$;
 -- as somebody else, which the column bounds cannot catch since the column IS one they may write. The
 -- caller's value comes from `_users/<email>.identity`, mirrored by setListUser: admin-write-only, so a
 -- member cannot forge it, and app_user_data() already reads it. Mirrors firestore.rules ownerIdentityOk.
---   Only for a LIST-backed column: without a list the identity is the profile display name, which the
+--   Only for a LIST-backed column (a `ref` names its table): without a list the identity is the profile display name, which the
 -- user writes themselves, so there would be nothing to verify against.
 --   No `identity` on the grant -> migration grace (permissive), like app_self_service's missing doc.
 create or replace function public.app_owner_identity_ok(coll text, incoming jsonb)

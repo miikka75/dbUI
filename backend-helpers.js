@@ -179,13 +179,14 @@
         // predict it) — which left the owner free to write SOMEBODY ELSE'S identity into it and log a
         // chore as them. Naming it here lets the write layers require it to be the caller's own.
         // `identityList` is the column's list, so the caller's value can be looked up the same way `@me`
-        // resolves it; '' means the identity is the profile display name.
+        // resolves it; '' means the identity is the profile display name. A `ref` column names its table
+        // instead: '' there would read as "nothing to verify" and let a member log as anybody.
         var identityCol = '', identityList = '';
         for (var c3 in defs) {
           var d3 = defs[c3];
           if (!d3 || typeof d3 !== 'object' || d3.defaultFrom !== '@me') continue;
           if (list.indexOf(c3) < 0) continue;            // not owner-writable -> already unreachable
-          identityCol = c3; identityList = d3.list || '';
+          identityCol = c3; identityList = d3.list || (d3.type === 'ref' && d3.table) || '';
           break;                                          // one identity column per table
         }
         out[t] = { cols: list.slice(), locked: locked, whileCol: whileCol, whileVals: whileVals,
