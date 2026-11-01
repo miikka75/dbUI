@@ -378,8 +378,9 @@ function createVueApp() {
       signInOpen: false, authEmail: '', authCode: '', authSent: false, authCodeAllowed: false, authBusy: false, authError: '', authLinkPending: false,
       // A page's `filters` picks, { page: { column: [values] } }, kept per viewer in their browser.
       pagePicks: {},
-      // A page's saved comparison rows, { page: [{ id, picks }] }; see pageCompareRows.
+      // A page's saved comparison rows, { page: [{ id, picks }] }: this browser's, and the page's shared ones.
       pageCompares: {},
+      pageCompareShared: {},
       // Settings -> Users: what the admin narrowed the list to (a search, roles, linked lists).
       userFilter: { q: '', roles: [], lists: [] },
       // The scan button (nav.scan): its typing dialog, what is typed, and which view a typed code is for.
@@ -743,8 +744,13 @@ function createVueApp() {
         var n = this.currentTable, p = this.pagePicks[n]; if (p) return p;
         try { return JSON.parse(localStorage.getItem('page_filter:' + n) || '{}') || {}; } catch (e) { return {}; }
       },
-      // Comparison rows, kept in this browser; only addCompareRow/removeCompareRow write them.
+      // Comparison rows: the page's shared ones (on its _pages doc, edited by canEditPages), then this browser's.
       pageCompareRows: function() {
+        var n = this.currentTable;
+        var shared = (this.pageCompareShared[n] || []).map(function(r) { return Object.assign({ shared: true }, r); });
+        return shared.concat(this._localCompareRows);
+      },
+      _localCompareRows: function() {
         var n = this.currentTable, r = this.pageCompares[n]; if (r) return r;
         try { var v = JSON.parse(localStorage.getItem('page_compare:' + n) || '[]'); return Array.isArray(v) ? v : []; } catch (e) { return []; }
       },
@@ -3576,13 +3582,20 @@ function createVueApp() {
         if (backend.getPage) {
           Promise.resolve(backend.getPage(name)).then(function(p) {
             self.pageCache[name] = (p && p.markdown != null) ? p.markdown : seed();
+            self._gotSharedCompare(name, p);
           }).catch(function() { self.pageCache[name] = seed(); }).then(needed);
           return;
         }
         Promise.resolve(backend.getTableData('_pages', 'active')).then(function(d) {
           var row = (d && d.rows || []).find(function(r) { return r.id === name; });
-          self.pageCache[name] = row ? row.markdown : seed();
+          self.pageCache[name] = (row && row.markdown != null) ? row.markdown : seed();   // a doc may hold only `compare`
+          self._gotSharedCompare(name, row);
         }).catch(function() {}).then(needed);
+      },
+      _gotSharedCompare: function(name, doc) {
+        var all = Object.assign({}, this.pageCompareShared);
+        all[name] = (doc && Array.isArray(doc.compare)) ? doc.compare : [];
+        this.pageCompareShared = all;
       },
       // Embed resolution lives in /embeds.js (pure over this ctx). The root keeps same-named thin
       // wrappers so components/templates/tests are unchanged; only root-state reads cross this seam.
@@ -7041,19 +7054,29 @@ function createVueApp() {
         var n = this.currentTable, all = Object.assign({}, this.pageCompares); all[n] = rows; this.pageCompares = all;
         try { localStorage.setItem('page_compare:' + n, JSON.stringify(rows)); } catch (e) {}
       },
-      // Save the live picks as a row, unless already saved.
+      // Merges into the page's _pages doc, so the body beside it is untouched.
+      _setSharedCompare: function(rows) {
+        var n = this.currentTable, all = Object.assign({}, this.pageCompareShared); all[n] = rows; this.pageCompareShared = all;
+        Writes.putRow('_pages', { id: n, compare: rows }, 'active');
+      },
+      // Save the live picks as a row, unless already saved: shared with the page by an editor, else in this browser.
       addCompareRow: function() {
         var picked = this.pagePicked, picks = {};
         this.pageFilterCols.forEach(function(c) { if ((picked[c] || []).length) picks[c] = picked[c].slice(); });
         var key = JSON.stringify(picks);
         if (this.pageCompareRows.some(function(r) { return JSON.stringify(r.picks) === key; })) return;
-        this._setCompareRows(this.pageCompareRows.concat([{ id: 'cmp-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), picks: picks }]));
+        var row = { id: 'cmp-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), picks: picks };
+        if (this.canEditPages) this._setSharedCompare((this.pageCompareShared[this.currentTable] || []).concat([row]));
+        else this._setCompareRows(this._localCompareRows.concat([row]));
       },
       removeCompareRow: function(row) {
+        if (row.shared && !this.canEditPages) return;
         var k = 'compare:' + row.id;
         if (!this.isArmed(k)) { this.armConfirm(k); return; }
         this.pendingConfirm = null;
-        this._setCompareRows(this.pageCompareRows.filter(function(r) { return r.id !== row.id; }));
+        var keep = function(r) { return r.id !== row.id; };
+        if (row.shared) this._setSharedCompare((this.pageCompareShared[this.currentTable] || []).filter(keep));
+        else this._setCompareRows(this._localCompareRows.filter(keep));
       },
       // A page's `search` narrows the lists drawn on it (not embedRows, which lookups also read).
       pageSearched: function(rows, name) {
@@ -7428,7 +7451,7 @@ function createVueApp() {
             self._gatherMembers()
           ]).then(function(res) {
             var d = res[0], da = res[1], members = res[2];
-            var pages = (d && d.rows || []).filter(function(r) { return r.id && r.markdown; });
+            var pages = (d && d.rows || []).filter(function(r) { return r.id && (r.markdown || (r.compare || []).length); });
             var assets = (da && da.rows || []).filter(function(r) { return r.id && r.src; }).map(function(r) { return { id: r.id, src: r.src }; });
             var schema = self._exportableSchema();
             var extras = {};
@@ -7913,7 +7936,10 @@ function createVueApp() {
           });
           pages.forEach(function(page) {
             chain = chain.then(step('mdi-file-document-outline', page.id, function() {
-              return Writes.putRow('_pages', { id: page.id, markdown: page.markdown }, 'active');
+              var doc = { id: page.id };
+              if (page.markdown) doc.markdown = page.markdown;
+              if (Array.isArray(page.compare)) doc.compare = page.compare;
+              return Writes.putRow('_pages', doc, 'active');
             }));
           });
           assets.forEach(function(asset) {
@@ -11510,7 +11536,7 @@ function createVueApp() {
       + '<tbody><tr v-for="l in lines" :key="l.row.id" data-testid="compare-row">'
       + '<td data-testid="compare-label">{{ l.label }}</td>'
       + '<td v-for="(v, vi) in l.values" :key="vi" class="text-right" style="font-variant-numeric:tabular-nums" data-testid="compare-value">{{ v }}</td>'
-      + '<td class="text-right" style="width:1%"><confirm-x dense :armed="a.isArmed(\'compare:\' + l.row.id)" @click="a.removeCompareRow(l.row)"></confirm-x></td>'
+      + '<td class="text-right" style="width:1%"><confirm-x v-if="!l.row.shared || a.canEditPages" dense :armed="a.isArmed(\'compare:\' + l.row.id)" @click="a.removeCompareRow(l.row)"></confirm-x></td>'
       + '</tr></tbody></v-table>'
       + '</div>'
   });

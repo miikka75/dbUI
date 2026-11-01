@@ -231,7 +231,7 @@ test('comparison rows: the picks saved as rows, each with its own numbers, kept 
   await page.reload();
   await page.waitForFunction(() => window.appInstance && !appInstance.loading);
   await page.evaluate(() => appInstance.selectTab('stats'));
-  await expect.poll(table).toEqual([all + ' 3 2', 'Kim 3 1', 'South · Lee 2 1']);   // kept in this browser
+  await expect.poll(table).toEqual([all + ' 3 2', 'Kim 3 1', 'South · Lee 2 1']);   // kept with the page
   // A tile's header sorts by its number, a second click reverses; the choice survives a reload.
   await page.locator('[data-testid="compare-sort-1"]').click();
   await expect.poll(table).toEqual(['Kim 3 1', 'South · Lee 2 1', all + ' 3 2']);   // a tie keeps the added order
@@ -333,4 +333,33 @@ test('a page search narrows its lists, by email or by the name on screen', async
   await page.locator('[data-testid="view-search"] input').fill('');
   await page.evaluate(() => appInstance.setPagePick('status', ['North']));
   await expect.poll(shown).toEqual(['ann@x', 'cid@x']);
+});
+
+test('comparison rows an editor adds are the page\'s; a viewer sees them and keeps their own', async ({ page }) => {
+  await setup(page);
+  await page.request.post('/api/setUserRole', { data: { uid: 'v@x', role: 'viewer', user: 'v@x', tables: ['visits', 'sessions'] }, headers: ADMIN });
+  await boot(page);
+  await page.evaluate(() => appInstance.selectTab('stats'));
+  await page.locator('[data-testid="compare-add"]').click();
+  const rows = page.locator('[data-testid="compare-row"]');
+  await expect(rows).toHaveCount(1);
+  // Stored on the page's own doc, beside (not instead of) its body.
+  await expect.poll(async () => {
+    const d = await (await page.request.post('/api/getTableData', { data: { tableId: '_pages', tab: 'active' }, headers: ADMIN })).json();
+    return ((d.rows || []).find((r) => r.id === 'stats') || {}).compare?.length;
+  }).toBe(1);
+
+  await page.addInitScript(() => localStorage.setItem('test_user', 'v@x'));   // runs after boot's, so it wins
+  await page.reload();
+  await page.waitForFunction(() => window.appInstance && !appInstance.loading);
+  await page.evaluate(() => appInstance.selectTab('stats'));
+  await expect(rows).toHaveCount(1);
+  await expect(rows.first().locator('button')).toHaveCount(0);              // the page's row: not theirs to remove
+  await page.locator('[data-testid="page-filter-coach"]').click();
+  await page.locator('.v-overlay--active .v-list-item', { hasText: 'Kim' }).click();
+  await page.keyboard.press('Escape');
+  await page.locator('[data-testid="compare-add"]').click();
+  await expect(rows).toHaveCount(2);
+  await expect(rows.nth(1).locator('button')).toHaveCount(1);               // their own, in this browser
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('page_compare:stats')).length)).toBe(1);
 });

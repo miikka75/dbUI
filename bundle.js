@@ -98,7 +98,7 @@
     var langCodes = (want('languages') && imported.translations) ? Object.keys(imported.translations) : [];
     // Page bodies and image assets are content, so they follow the data. An over-cap asset is dropped
     // rather than attempted: both production rule layers refuse it, so it could only fail.
-    var pages = (wantData && Array.isArray(imported.pages)) ? imported.pages.filter(function(p) { return p.id && p.markdown; }) : [];
+    var pages = (wantData && Array.isArray(imported.pages)) ? imported.pages.filter(function(p) { return p.id && (p.markdown || (p.compare || []).length); }) : [];
     var assets = (wantData && Array.isArray(imported.assets))
       ? imported.assets.filter(function(a) { return a && a.id && typeof a.src === 'string' && a.src.length <= opts.assetCap; }) : [];
     // The roster only when the file carries one AND an admin asked for it in the same gesture.

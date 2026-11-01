@@ -1719,12 +1719,14 @@ phase 3 does the same job for free.
 - `bookings.room` lookup; Room is a Statistics filter, offering each name once.
 - Page filters narrow one another (`pageFilterOptions`): values still present in the page's rows.
 
-### Comparing statistics — saved rows of picks *(step 1 landed 2026-10-19)*
+### Comparing statistics — saved rows of picks *(steps 1–2 landed; step 2 2026-11-01)*
 
 - **Add to comparison** saves the page's picks as a row; a table under the stats shows one line per row,
   one column per tile, sortable. Any page with filters embedding a stats view with `tiles`.
 - **Step 1 (built):** rows in this browser (`page_compare:<page>`); only `addCompareRow`/`removeCompareRow` write.
-- **Step 2 (open):** rows shared with the page (`_pages`, one entry per row), edited by `canEditPages`.
+- **Step 2 (built):** an editor's rows are the page's — a `compare` array on its own `_pages` doc, so they
+  share its read gate (one entry per row would have escaped `pageAccess`). Last writer wins. Viewers keep
+  their browser rows, listed after.
 - **Later:** a period per row.
 
 ### `archiveAfter` by the row's own date, as a duration *(landed 2026-10-19)*

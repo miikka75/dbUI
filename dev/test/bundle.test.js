@@ -88,10 +88,10 @@ describe('importPlan', () => {
     assert.deepEqual(Bundle.importPlan(imported, only('data'), SCHEMA, opts).rowJobs.map((j) => j.row.id), ['n']);
   });
   it('pages and assets follow the data; an over-cap asset is dropped rather than attempted', () => {
-    const imported = { pages: [{ id: 'p', markdown: 'x' }, { id: 'q' }],
+    const imported = { pages: [{ id: 'p', markdown: 'x' }, { id: 'q' }, { id: 'c', compare: [{ id: 'r', picks: {} }] }],
       assets: [{ id: 'a', src: '12345' }, { id: 'b', src: '12345678901' }, { id: 'c' }] };
     const p = Bundle.importPlan(imported, all, SCHEMA, opts);
-    assert.deepEqual(p.pages.map((x) => x.id), ['p']);
+    assert.deepEqual(p.pages.map((x) => x.id), ['p', 'c'], 'a page holding only shared comparison rows still travels');
     assert.deepEqual(p.assets.map((x) => x.id), ['a']);
     assert.deepEqual(Bundle.importPlan(imported, only('schema'), SCHEMA, opts).pages, []);
   });

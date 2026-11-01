@@ -31,6 +31,7 @@ Page filters:
 ```
 
 - `search: true` searches every column but bookkeeping ones; a table may carry `search` too.
+- Under a page's stats, **Add to comparison** saves the picks as a row. An editor's rows are shared with the page; a viewer's stay in their browser.
 
 ## Backends
 
