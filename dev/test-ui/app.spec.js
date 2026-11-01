@@ -7872,6 +7872,7 @@ test.describe('Filter array-IN -> $or on export', () => {
 });
 
 test.describe('PWA installability (no errors)', () => {
+  test.use({ serviceWorkers: 'allow' });
   test('boots installable: valid manifest, square PNG icons, SW registered, no errors', async ({ page }) => {
     test.setTimeout(20000);
     const errors = [];
@@ -10114,8 +10115,6 @@ test.describe('form view', () => {
 });
 
 test.describe('Security policy reports in Settings', () => {
-  // sw.js passes every fetch through, and a request a service worker makes is invisible to page.route.
-  test.use({ serviceWorkers: 'block' });
   test('reads the collector with the pasted token and counts extension reports apart', async ({ page }) => {
     const asked = [];
     // A regex, not a glob: in a glob `?` is a wildcard, and a miss here reads the REAL collector.

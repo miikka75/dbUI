@@ -43,6 +43,9 @@ module.exports = defineConfig({
   fullyParallel: true,
   use: {
     headless: true,
+    // The published sw.js serves from its cache, where page.route cannot see a request. Specs that test
+    // the worker opt back in; dev/test-site.js covers its caching.
+    serviceWorkers: 'block',
   },
   projects: [
     { name: 'app', testIgnore: PGLITE_SPEC },

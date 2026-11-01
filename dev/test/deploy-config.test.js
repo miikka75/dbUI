@@ -81,10 +81,11 @@ describe('deploy config — what is published', () => {
     for (const f of MUST_NOT_PUBLISH.concat(MUST_PUBLISH)) {
       const full = path.join(root, ...f.split('/'));
       fs.mkdirSync(path.dirname(full), { recursive: true });
-      fs.writeFileSync(full, f === 'index.html' ? INDEX : 'x');
+      fs.writeFileSync(full, f === 'index.html' ? INDEX : f === 'sw.js' ? fs.readFileSync(path.join(ROOT, 'sw.js')) : 'x');
     }
     const out = path.join(root, '_site');
     const files = Site.build(root, out, opts);
+    files.sw = fs.readFileSync(path.join(out, 'sw.js'), 'utf8');
     fs.rmSync(root, { recursive: true, force: true });
     return files;
   }
@@ -93,6 +94,16 @@ describe('deploy config — what is published', () => {
     const files = buildFixture();
     assert.deepEqual(MUST_NOT_PUBLISH.filter((f) => files.includes(f)), [], 'these would be public');
     assert.deepEqual(MUST_PUBLISH.filter((f) => !files.includes(f)), [], 'the site needs these');
+  });
+
+  // The source sw.js does nothing (development); the published one caches under the build's revisions.
+  it('the published service worker carries its revisions and a shell of published files', () => {
+    const files = buildFixture();
+    assert.doesNotMatch(files.sw, /'__(APP_REV|VENDOR_REV|SHELL)__'/);
+    const shell = JSON.parse(/SHELL = (\[[^\]]*\])/.exec(files.sw)[1]);
+    assert.ok(shell.includes('index.html') && shell.includes('app-core.js') && shell.includes('vendor/vue.js'), shell.join(', '));
+    assert.deepEqual(shell.filter((f) => !files.includes(f)), [], 'the shell names files the site does not publish');
+    assert.match(fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8'), /var APP_REV = '__APP_REV__'/, 'the source sw.js must keep its placeholders');
   });
 
   it('a Firebase-hosted copy also ships its config files, so visitors connect without setup', () => {

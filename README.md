@@ -232,8 +232,10 @@ standalone window with no browser address bar.
   app resolves it against the deployment root before it reaches the manifest. `background_color`/`theme_color` follow the current Vuetify theme; a
   dynamic `theme-color` meta tracks the in-app light/dark toggle. The runtime manifest's install
   icons come from **`schema.icons` when set, else the bundled static files** (below).
-- **Service worker** (`sw.js`): minimal pass-through `fetch` (no offline caching) — its purpose
-  is to satisfy the browser installability check so the install prompt appears reliably.
+- **Service worker** (`sw.js`): on the published site it precaches what every boot loads and caches the
+  rest on first use, so a repeat visit downloads nothing and the app opens offline. A deploy changes the
+  app cache; `vendor/` (the 17 MB PGlite dist included) has its own and is kept until it changes. In
+  development it does nothing.
 - **Per-database icons via `schema.icons` (optional).** All three icon surfaces — tab favicon,
   apple-touch tile, and the manifest install icon — are driven from the database schema, so one
   deployment serving several databases gives each its own. The fields, defaults and authoring advice
