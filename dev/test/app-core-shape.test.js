@@ -184,3 +184,15 @@ describe('app-core.js root component — no predicate with a hardcoded answer', 
       'deliberate flag, it is not a predicate — name it like a flag and say why here: ' + constants.join(', '));
   });
 });
+
+// A root method nothing calls is dead code, and a spec that calls it tests code the app never runs.
+describe('app-core.js root component — no dead methods', () => {
+  it('every method is called from the app, not only from its definition or a spec', () => {
+    const appFiles = fs.readdirSync(path.join(__dirname, '..', '..')).filter((f) => /\.(js|html)$/.test(f))
+      .concat(['dev/dev-client.js', 'dev/backend-local-client.js']);
+    const app = appFiles.map((f) => fs.readFileSync(path.join(__dirname, '..', '..', f), 'utf8')).join('\n');
+    const uses = (n) => (app.match(new RegExp('(^|[^\w$])' + n.replace(/\$/g, '\$') + '(?![\w$])', 'g')) || []).length;
+    const dead = memberNames(rootBlock('methods')).filter((n) => uses(n) <= 1);
+    assert.deepEqual(dead, [], 'root methods with no caller — delete them: ' + dead.join(', '));
+  });
+});

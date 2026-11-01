@@ -1885,8 +1885,6 @@ function createVueApp() {
       },
       // --- Calendar helpers (used by the calendar view + calendar embeds) ---
       _calToday: function() { return fmtDate(new Date()); },
-      _calCellsMonth: function(anchor, weekStart) { return Calendar.cellsMonth(anchor, weekStart, this._calToday()); },
-      _calCellsWeek: function(anchor, weekStart) { return Calendar.cellsWeek(anchor, weekStart, this._calToday()); },
       // BCP-47 locale for Intl date names: an explicit `language.locale`, else the language CODE itself
       // (a standard code like `en`/`es`/`sv` IS a valid BCP-47 tag — so the calendar follows the SELECTED
       // app language, not the browser). The browser locale is only a last resort when the code is unusable.
@@ -1996,7 +1994,6 @@ function createVueApp() {
         this.currentData.push(viewRow);
         this.notify(this.t('msg.row_added'));
       },
-      calRotationSources: function(name) { return Calendar.rotationSources(VIEWS, name); },
       // Visible grid window {from, toExclusive} for a calendar's anchor+mode (month/list -> month grid,
       // week -> week strip). Bounds rotation generation to what's actually on screen.
       _calWindowFor: function(anchor, mode, weekStart) { return Calendar.windowFor(anchor, mode, weekStart, this._calToday()); },
@@ -2285,11 +2282,6 @@ function createVueApp() {
       dateColumnItems: function(table) {
         var self = this;
         return this.dateColumnsOf(table).map(function(c) { return { title: self.tOr('field.' + c, c), value: c }; });
-      },
-      // The saved definition's table names, for the list row, as labels.
-      calSourceLabels: function(c) {
-        var self = this;
-        return (c.sources || []).map(function(s) { return self.tOr('tab.' + s.table, s.table); }).join(', ');
       },
       dateColumnsOf: function(table) {
         return getColumns(table).filter(function(c) { return Columns.colIsDate(SCHEMA, c) || Columns.colIsDateTime(SCHEMA, c); });
@@ -5854,25 +5846,18 @@ function createVueApp() {
       // as an explicit `{ image: '' }` TOMBSTONE — the override that means "none" — and the entry is only
       // deleted when there is no schema default for it to override (which keeps the config free of
       // tombstones that say nothing). restoreViewBackground deletes it to bring the default back.
-      saveViewBackground: function(viewName, patch) {
-        var cfg = Object.assign({}, this.appConfig || {});
+      // A view's stored background: `bg`, a tombstone hiding the schema's, or no entry at all.
+      _withBackground: function(cfg, viewName, bg) {
         cfg.backgrounds = Object.assign({}, cfg.backgrounds || {});
-        var next = Object.assign({}, cfg.backgrounds[viewName], patch);
-        if (!next.image && !this.schemaBackground(viewName)) delete cfg.backgrounds[viewName];
-        else if (!next.image) cfg.backgrounds[viewName] = { image: '' };   // tombstone: hide the schema default
-        else cfg.backgrounds[viewName] = next;
-        cfg.mode = this.mode;
-        this._saveFolderConfig(cfg, viewName);
+        if (bg && bg.image) cfg.backgrounds[viewName] = bg;
+        else if (this.schemaBackground(viewName)) cfg.backgrounds[viewName] = { image: '' };
+        else delete cfg.backgrounds[viewName];
+        return cfg;
       },
       // The schema's declared background for a view, if any (what a tombstone hides / restore brings back).
       schemaBackground: function(viewName) {
         var v = VIEWS[viewName];
         return (v && v.background && v.background.image) ? v.background : null;
-      },
-      // Is this view's background currently a tombstone hiding a schema default?
-      backgroundHidden: function(viewName) {
-        var ov = ((this.appConfig && this.appConfig.backgrounds) || {})[viewName];
-        return !!(ov && !ov.image && this.schemaBackground(viewName));
       },
       // Drop the override entirely, so the schema-declared background applies again.
       restoreViewBackground: function(viewName) {
@@ -6015,10 +6000,7 @@ function createVueApp() {
           if (menuImage === (item.image || '') && (!menuImage || d.focus === (item.focus || 'center'))) { delete look.image; delete look.focus; }
           else { look.image = menuImage; if (menuImage) look.focus = d.focus; else delete look.focus; }
           if (Object.keys(look).length) cfg.navAppearance[d.id] = look; else delete cfg.navAppearance[d.id];
-          cfg.backgrounds = Object.assign({}, cfg.backgrounds || {});
-          if (bgImage) cfg.backgrounds[d.id] = { image: bgImage, fit: d.fit, width: Number(d.width) || 40, position: d.position, opacity: Number(d.opacity), fixed: !!d.fixed };
-          else if (self.schemaBackground(d.id)) cfg.backgrounds[d.id] = { image: '' };   // tombstone: hide the schema default
-          else delete cfg.backgrounds[d.id];
+          self._withBackground(cfg, d.id, bgImage ? { image: bgImage, fit: d.fit, width: Number(d.width) || 40, position: d.position, opacity: Number(d.opacity), fixed: !!d.fixed } : null);
           cfg.mode = self.mode;
           self._saveFolderConfig(cfg, d.id);
           self.appearanceDraft = null;
@@ -6956,12 +6938,6 @@ function createVueApp() {
       viewIdentityMissing: function(name) {
         var self = this, cols = this.meFilterColsFor(name);
         return cols.length > 0 && cols.every(function(c) { return !self.meValueFor(c); });
-      },
-      // The same identity resolution keyed by LIST rather than by column, for the callers that have no
-      // column to ask about (a rotation view's slots are column NAMES, not cells). meValueFor is the
-      // column-shaped wrapper.
-      meValueForList: function(list) {
-        return this._listValueOf(this._myIdentity(), list);
       },
       // An IDENTITY is the pair `@me` resolves through: the account's per-list values, and its display
       // name for lists that are not userlink-backed. `myListValues` is this for the signed-in user; a
@@ -8349,9 +8325,6 @@ function createVueApp() {
       // Parses the #hex codes, sorts by luminance + chroma, and maps roles: lightest->background,
       // 2nd-lightest->surface, darkest->text(on-surface), most-saturated->primary, next->secondary.
       // (Inverted bg/text for dark mode.) One save for the whole set.
-      _rgb: function(hex) { return Brand.rgb(hex); },
-      _luminance: function(hex) { return Brand.luminance(hex); },
-      _chroma: function(hex) { return Brand.chroma(hex); },
       _parsePalette: function(str) { return Brand.parsePalette(str); },
       // The role mapping itself is Brand.rolesFor (pure, unit-tested). What stays here is the part that
       // is not: which mode is showing, writing each role through setThemeColor so it live-previews, the
