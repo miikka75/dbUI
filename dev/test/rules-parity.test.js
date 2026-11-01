@@ -253,7 +253,7 @@ describe('rules parity — both backends mirror the same schema-derived facts', 
   // Both rules layers are schema-blind, so saveSchema denormalizes what they need into _meta docs.
   // A backend that forgets one doesn't fail loudly — the corresponding rule just falls through to its
   // "no mirror yet" migration branch, which is permissive by design. So the only thing keeping the two
-  // honest is that they write the SAME set.
+  // honest is that they write the SAME set: one saveSchema, backend-kv.js's, which Firebase runs too.
   const mirrorKeys = (src) => {
     const body = src.slice(src.indexOf('saveSchema:'), src.indexOf('getPage:'));
     return (body.match(/setMeta\('([a-zA-Z]+)'/g) || [])
@@ -262,15 +262,15 @@ describe('rules parity — both backends mirror the same schema-derived facts', 
   };
 
   const FIREBASE = read('backend-firebase.js');
-  const KV = read('backend-kv.js');   // the contract Supabase and browser-local PGlite share
+  const KV = read('backend-kv.js');   // the contract all three document backends share
 
-  it('backend-firebase and backend-kv saveSchema mirror an identical key set', () => {
-    assert.deepEqual(mirrorKeys(KV), mirrorKeys(FIREBASE),
-      'one backend mirrors a _meta doc the other does not — its rules layer will silently use the permissive fallback');
+  it('backend-firebase runs the shared saveSchema rather than its own mirror list', () => {
+    assert.match(FIREBASE, /return _kvSaveSchema\.call\(this, schema\);/);
+    assert.doesNotMatch(FIREBASE, /setMeta\('ownerTables'/, 'backend-firebase.js writes its own mirror again');
   });
 
   it('the mirrored set is the one the rules layers actually read', () => {
-    const keys = mirrorKeys(FIREBASE);
+    const keys = mirrorKeys(KV);
     for (const k of ['schema', 'ownerTables', 'pageAccess', 'ownerWritable', 'listTables', 'listWritable']) {
       assert.ok(keys.includes(k), `saveSchema no longer mirrors _meta/${k}`);
     }
