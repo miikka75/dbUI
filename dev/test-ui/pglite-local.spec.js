@@ -133,11 +133,7 @@ test('the production access policy is enforcing, against the identity in localSt
   expect(wrote).toMatch(/row-level security/);
 });
 
-// The service worker (sw.js) calls clients.claim(), so it takes over the page part-way through boot --
-// and requests a service worker re-issues are NOT visible to page.route(). Blocking it here is what lets
-// the vendored dist be hidden at all; it has nothing to do with the behaviour under test.
 test.describe('CDN fallback', () => {
-  test.use({ serviceWorkers: 'block' });
 
   test('falls back to the CDN when the vendored dist is missing', async ({ page }) => {
     // /vendor/pglite is GENERATED, not committed, so a fork that never ran ./update-vendor.sh serves a
