@@ -49,6 +49,7 @@
     "leftovers.js",
     "live-sync.js",
     "backend-helpers.js",
-    "csp.js"
+    "csp.js",
+    "schema-validate.js"
   ]
 }
