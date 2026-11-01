@@ -19,6 +19,8 @@
 //             `streak` counts PERIODS, not rows: how many `interval`s in a row (daily | weekly | monthly,
 //             default weekly), ending now, have at least one row dated in them by `column`.
 //             `icons: [{ at, icon }]` picks the tile's icon by its value -- the highest rung reached.
+//             `series: { column, interval, count }` makes it one tile per period, the last `count`
+//             ending now, oldest first: each tile's rows are those `column` dates into that period.
 //             `when` narrows the rows for that tile only (the shared condition language), which is how
 //             "signed in today" and "signed in this week" become two tiles over one view.
 //
@@ -69,6 +71,19 @@
     if (!seen[cur]) cur--;
     while (seen[cur]) { n++; cur--; }
     return n;
+  }
+  // The first day of period `p`, as YYYY-MM-DD: the inverse of periodOf.
+  function periodStart(p, interval) {
+    var d = interval === 'monthly' ? new Date(Date.UTC(Math.floor(p / 12), p % 12, 1))
+          : new Date((interval === 'daily' ? p : p * 7 - 3) * 86400000);
+    return d.toISOString().slice(0, 10);
+  }
+  // A series tile's caption: the period it covers, in the reader's locale.
+  function periodLabel(period, locale) {
+    var p = period.start.split('-'), d = new Date(+p[0], +p[1] - 1, +p[2]);
+    var o = period.interval === 'monthly' ? { month: 'short', year: 'numeric' }
+          : period.interval === 'daily' ? { weekday: 'short', day: 'numeric', month: 'short' } : { day: 'numeric', month: 'short' };
+    return new Intl.DateTimeFormat(locale, o).format(d);
   }
   // The icon of the highest rung the value has reached, or null below the first.
   function iconFor(value, icons) {
@@ -200,7 +215,7 @@
         });
       });
     } else {
-      (opts.tiles || []).forEach(function(t) {
+      var tileOf = function(t, rows, period) {
         var bucket = t.when ? rows.filter(function(r) { return Rows.condMatches(r, t.when); }) : rows;
         var v = t.agg === 'streak' ? streak(bucket, t.column, t.interval || 'weekly', now) : reduce(bucket, t.agg || 'count', t.column);
         // `plus`: more counts or sums, each over its own rows.
@@ -219,8 +234,17 @@
           display: t.display || defDisplay,
           // A streak is a count of periods; formatting it through its date column would print a date.
           column: t.agg === 'streak' ? null : (t.column || null),   // lets the renderer format through the column's type
-          icon: iconFor(v, t.icons)
+          icon: iconFor(v, t.icons),
+          period: period || null
         });
+      };
+      (opts.tiles || []).forEach(function(t) {
+        var s = t.series;
+        if (!s) return tileOf(t, rows);
+        var iv = s.interval || 'weekly', cur = periodOf(dayIndex(now.toISOString()), iv);
+        var byPeriod = {};
+        rows.forEach(function(r) { var d = dayIndex(r[s.column]); if (d !== null) (byPeriod[periodOf(d, iv)] = byPeriod[periodOf(d, iv)] || []).push(r); });
+        for (var k = (s.count || 1) - 1; k >= 0; k--) tileOf(t, byPeriod[cur - k] || [], { interval: iv, start: periodStart(cur - k, iv) });
       });
     }
 
@@ -291,7 +315,7 @@
     return { tiles: out };
   }
 
-  var M = { build: build };
+  var M = { build: build, periodLabel: periodLabel };
   if (isNode) module.exports = M;
   else root.Stats = M;
 })(typeof globalThis !== 'undefined' ? globalThis : (typeof self !== 'undefined' ? self : this));

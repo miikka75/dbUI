@@ -388,3 +388,33 @@ describe('stats.js — distinct', () => {
     assert.equal(Stats.build([{ attendance: 'attended' }], { tiles: [{ agg: 'count', plus: [{ agg: 'sum', column: 'walk_ins' }] }] }).tiles[0].value, 1);
   });
 });
+
+describe('stats.js — series (one tile per period)', () => {
+  const now = new Date(2026, 9, 13, 12);   // Tuesday 13 Oct 2026, local
+  const rows = [
+    { d: '2026-09-28', min: 30 }, { d: '2026-10-04', min: 20 },   // the week of 28 Sep
+    { d: '2026-10-12', min: 45 }, { d: '2026-10-13T08:00:00', min: 15 },   // this week, a datetime too
+    { d: '2026-08-01', min: 99 }, { d: '', min: 5 }                // too old, and undated
+  ];
+  const build = (t) => Stats.build(rows, { tiles: [t] }, { now }).tiles;
+
+  it('sums each of the last N weeks, oldest first, labelled by the Monday', () => {
+    const ts = build({ agg: 'sum', column: 'min', series: { column: 'd', interval: 'weekly', count: 3 } });
+    assert.deepEqual(ts.map((t) => [t.period.start, t.value]), [['2026-09-28', 50], ['2026-10-05', 0], ['2026-10-12', 60]]);
+    assert.equal(ts[0].column, 'min');
+  });
+  it('months and days, and `when` still narrows each period', () => {
+    assert.deepEqual(build({ agg: 'count', series: { column: 'd', interval: 'monthly', count: 2 } }).map((t) => [t.period.start, t.value]),
+      [['2026-09-01', 1], ['2026-10-01', 3]]);
+    assert.deepEqual(build({ agg: 'count', when: { min: { gt: 20 } }, series: { column: 'd', interval: 'daily', count: 2 } }).map((t) => [t.period.start, t.value]),
+      [['2026-10-12', 1], ['2026-10-13', 0]]);
+  });
+  it('`goal: "max"` scales the periods against the busiest one', () => {
+    const ts = build({ agg: 'sum', column: 'min', goal: 'max', series: { column: 'd', count: 3 } });
+    assert.deepEqual(ts.map((t) => t.pct), [83, 0, 100]);
+  });
+  it('the caption is the period in the reader\'s locale', () => {
+    assert.equal(Stats.periodLabel({ interval: 'monthly', start: '2026-10-01' }, 'en-US'), 'Oct 2026');
+    assert.equal(Stats.periodLabel({ interval: 'weekly', start: '2026-10-12' }, 'en-US'), 'Oct 12');
+  });
+});

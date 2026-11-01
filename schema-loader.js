@@ -825,6 +825,16 @@ function validateSchema() {
         // An unknown interval would silently be weekly; a streak of the wrong unit still looks right.
         if (t.interval !== undefined && ['daily', 'weekly', 'monthly'].indexOf(t.interval) < 0) errors.push('stats "' + v + '" ' + at + ': `interval` is "' + t.interval + '" — use daily, weekly or monthly');
         if (t.interval !== undefined && ag !== 'streak') errors.push('stats "' + v + '" ' + at + ': `interval` is read only by `agg: "streak"`');
+        if (t.series !== undefined) {
+          var se = t.series;
+          if (!se || typeof se !== 'object' || !se.column) errors.push('stats "' + v + '" ' + at + ': `series` must be like { "column": "done_on", "interval": "weekly", "count": 6 }');
+          else {
+            stCol(se.column, at + ' series');
+            if (se.interval !== undefined && ['daily', 'weekly', 'monthly'].indexOf(se.interval) < 0) errors.push('stats "' + v + '" ' + at + ': `series.interval` is "' + se.interval + '" — use daily, weekly or monthly');
+            if (se.count !== undefined && !(Number.isInteger(se.count) && se.count >= 1 && se.count <= 60)) errors.push('stats "' + v + '" ' + at + ': `series.count` must be a whole number from 1 to 60');
+          }
+          if (ag === 'streak') errors.push('stats "' + v + '" ' + at + ': a `streak` already counts periods and cannot be a `series`');
+        }
         // `icons` rungs must ascend for the same reason a goal ladder must: the highest one reached wins.
         if (t.icons !== undefined) {
           if (!Array.isArray(t.icons) || !t.icons.length) errors.push('stats "' + v + '" ' + at + ': `icons` must be a list like [{ "at": 1, "icon": "mdi-fire" }]');

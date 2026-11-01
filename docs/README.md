@@ -19,7 +19,7 @@ Every feature of the app, with a page each: what it does, the schema that turns 
 | Views | [RSVP waitlist](features/rsvp.md#rsvp-waitlist) | A full event takes a queue; a cancellation books the longest-waiting member automatically. | ✅ | ✅ | ❌ rules cannot promote; not offered | ✅ |
 | Views | [Board (kanban)](features/board.md) | Cards in lanes by a select column; drag a card to another lane to change it, order cards by hand, compact cards that open, lanes that fold. | ✅ | ✅ | ✅ | ✅ |
 | Views | [Form](features/form.md) | A one-record form with required fields and rules — buy a membership, request a pause. | ✅ | ✅ | ✅ | ✅ |
-| Views | [Stats (KPI tiles)](features/stats.md) | Number tiles, progress bars, goals, streaks and tiered badges over the aggregate pipeline. | ✅ | ✅ | ✅ | ✅ |
+| Views | [Stats (KPI tiles)](features/stats.md) | Number tiles, progress bars, goals, streaks, a tile per period and tiered badges over the aggregate pipeline. | ✅ | ✅ | ✅ | ✅ |
 | Views | [Timeline (gantt)](features/timeline.md) | Rows as bars across weeks or months between a start and an end date. | ✅ | ✅ | ✅ | ✅ |
 | Views | [Scan (barcode / QR)](features/scan.md) | Scanning or typing a code appends a row — a chore done, a gym visit — with printable labels and phone-camera links. | ✅ | ✅ | ✅ | ✅ |
 | Views | [Search & reader filters](features/search-filters.md) | A search box over chosen columns, and drop-down filters a reader narrows a page or calendar by. | ✅ | ✅ | ✅ | ✅ |
