@@ -138,6 +138,19 @@ test('renaming a linked position carries its account, and undo takes it back', a
   await expect.poll(links, { timeout: 6000 }).toEqual({ primary_chair: 'pres@x.test', the_chorister: 'ch@x.test' });
 });
 
+test('deleting a linked position drops its account, and undo brings it back', async ({ page }) => {
+  await boot(page);
+  const links = () => page.evaluate(() => appInstance.listUserLinks.ref_positions || {});
+  await page.evaluate(() => appInstance.setListUserLink('ref_positions', 'primary_teacher', 't@x.test'));
+  await expect.poll(links, { timeout: 6000 }).toEqual({ primary_teacher: 't@x.test' });
+
+  // Otherwise a teacher added later under Primary would inherit this account.
+  await page.evaluate(() => appInstance._deleteFromSources(['ref_positions'], 'p2'));
+  await expect.poll(links, { timeout: 6000 }).toEqual({});
+  await page.evaluate(() => appInstance.undoLast());
+  await expect.poll(links, { timeout: 6000 }).toEqual({ primary_teacher: 't@x.test' });
+});
+
 test('a position added in the app is linkable without anyone filling in a handle', async ({ page }) => {
   await boot(page);
   // The defect this design exists to remove: the handle column is hidden, and the lookup editor draws
