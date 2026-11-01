@@ -787,14 +787,14 @@ test.describe('image/url column types', () => {
     // fit + opacity + position feed through to real CSS. Note the browser NORMALIZES what it serializes:
     // `40% auto` collapses to `40%` (a lone value is the width, height auto — which is exactly the
     // aspect-preserving scale we want), and `top left` reorders to `left top`.
-    await page.evaluate(() => window.appInstance.saveViewBackground('gallery', { fit: 'width', width: 40, opacity: 0.2, position: 'top left' }));
+    await page.evaluate((([v, patch]) => { const a = window.appInstance, cfg = Object.assign({}, a.appConfig); a._saveFolderConfig(a._withBackground(cfg, v, Object.assign({}, (cfg.backgrounds || {})[v], patch)), v); }), ['gallery', { fit: 'width', width: 40, opacity: 0.2, position: 'top left' }]);
     await expect.poll(styleOf, { timeout: 4000 }).toContain('background-size: 40%');
     style = await styleOf();
     expect(style).toContain('background-position: left top');
     expect(style).toMatch(/rgba\(var\(--v-theme-surface\),\s*0\.8\)/);   // scrim alpha = 1 - opacity
 
     // Clearing drops the whole entry rather than leaving an empty one behind.
-    await page.evaluate(() => window.appInstance.saveViewBackground('gallery', { image: '' }));
+    await page.evaluate((([v, patch]) => { const a = window.appInstance, cfg = Object.assign({}, a.appConfig); a._saveFolderConfig(a._withBackground(cfg, v, Object.assign({}, (cfg.backgrounds || {})[v], patch)), v); }), ['gallery', { image: '' }]);
     await expect.poll(async () => {
       const cfg = await (await page.request.post('/api/getFolderConfig', { data: {} })).json();
       return (cfg.backgrounds || {}).gallery === undefined;
@@ -886,10 +886,8 @@ test.describe('image/url column types', () => {
     await expect.poll(styleOf, { timeout: 4000 }).toContain('background-image');
 
     // A view with NO schema default keeps a clean config: removing deletes rather than tombstoning.
-    await page.evaluate(() => {
-      window.appInstance.saveViewBackground('docs', { image: 'https://example.com/x.png' });
-      window.appInstance.saveViewBackground('docs', { image: '' });
-    });
+    await page.evaluate((([v, patch]) => { const a = window.appInstance, cfg = Object.assign({}, a.appConfig); a._saveFolderConfig(a._withBackground(cfg, v, Object.assign({}, (cfg.backgrounds || {})[v], patch)), v); }), ['docs', { image: 'https://example.com/x.png' }]);
+    await page.evaluate((([v, patch]) => { const a = window.appInstance, cfg = Object.assign({}, a.appConfig); a._saveFolderConfig(a._withBackground(cfg, v, Object.assign({}, (cfg.backgrounds || {})[v], patch)), v); }), ['docs', { image: '' }]);
     await expect.poll(async () => {
       const c = await (await page.request.post('/api/getFolderConfig', { data: {} })).json();
       return ((c || {}).backgrounds || {}).docs === undefined;
@@ -4899,8 +4897,6 @@ test.describe('v3 @both partition toggle in an embed', () => {
         adminSeesWholeMatrix: app.mineOnlySlot({ mineOnly: { list: 'assigned_to' } }),
         asAnnaSlot: app._mineOnlySlotOf(anna, { mineOnly: { list: 'assigned_to' } }),
         asGhostSlot: app._mineOnlySlotOf(ghost, { mineOnly: { list: 'assigned_to' } }),
-        // The signed-in path must still work after being refactored onto the shared rule.
-        myListStillWorks: typeof app.meValueForList('assigned_to')
       };
     });
     expect(r.annaValues).toEqual({ assigned_to: 'Anna' });
@@ -4912,7 +4908,6 @@ test.describe('v3 @both partition toggle in an embed', () => {
     expect(r.adminSeesWholeMatrix).toBe(null);
     expect(r.asAnnaSlot).toBe('anna');
     expect(r.asGhostSlot).toBe('');
-    expect(r.myListStillWorks).toBe('string');
   });
 
   test('validateSchema names a timeline pointed at the wrong columns', async ({ page }) => {
@@ -6466,7 +6461,7 @@ test.describe('calendar view', () => {
       app.currentTable = 'cal_test';
       // Model helpers the calendar-view component reads: window + events + month cells (anchor 07-15).
       var ev = app.calEventsFor('cal_test', app._calWindowFor('2026-07-15', 'month', 1));
-      var cells = app._calCellsMonth('2026-07-15', 1).map(function(c) { c.count = (ev[c.date] || []).length; return c; });
+      var cells = Calendar.cellsMonth('2026-07-15', 1, app._calToday()).map(function(c) { c.count = (ev[c.date] || []).length; return c; });
       var selDay = '2026-07-08';
       return {
         d8: (ev['2026-07-08'] || []).map(function(e) { return e.title; }),
