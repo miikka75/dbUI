@@ -172,6 +172,8 @@ jobs:
     # it to buy 26s would trade a real guard for a little wall time, so this stays at 2. PW_WORKERS
     # overrides if a bigger runner ever makes 4 comfortable.
     - run: npx playwright test
+    - name: The published folder boots (what both deploys upload)
+      run: npm run test:site
     - name: Firebase-mode E2E (app against auth/firestore/storage emulators)
       run: npm run test:e2e-firebase
     - name: Upload report on failure

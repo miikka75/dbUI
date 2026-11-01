@@ -13,6 +13,7 @@
     "test:storage-rules": "node run-with-emulators.mjs --only storage,firestore --project demo-image -- node test-emulator/storage-rules.mjs",
     "test:rules": "node run-with-emulators.mjs --only firestore --project demo-rules -- node test-emulator/firestore-rules.mjs",
     "test:cdn": "node test-cdn-fallback.mjs",
+    "test:site": "node test-site.js",
     "csp:sync": "node sync-csp.js",
     "docs:screenshots": "node docs-screenshots.js",
     "free-ports": "node free-emulator-ports.mjs",

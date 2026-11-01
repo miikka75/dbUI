@@ -20,31 +20,13 @@
     }
   },
   "hosting": {
-    "predeploy": ["node scripts/vendor-fetch.mjs"],
-    "public": ".",
+    "predeploy": [
+      "node scripts/vendor-fetch.mjs",
+      "node scripts/build-site.js --with-config"
+    ],
+    "public": "_site",
     "ignore": [
-      "firebase.json",
-      "**/.*",
-      ".*/**",
-      "**/.*/**",
-      ".git/**",
-      "**/node_modules/**",
-      "dev/**",
-      "docs/**",
-      "functions/**",
-      ".github/**",
-      "*.md",
-      "*.sh",
-      "*.bat",
-      "*.cmd",
-      "*.ps1",
-      "*.exe",
-      "scripts/**",
-      "storage.rules",
-      "csp.js",
-      "drive-sync-export-*.json",
-      "*-import.json",
-      "*-export.json"
+      "**/.*"
     ],
     "headers": [
       {
