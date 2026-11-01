@@ -223,12 +223,33 @@ describe('deploy config — the browser-local Postgres backend', () => {
   // Four places materialise vendor/ and they must agree, or the QR encoder is present in one
   // environment and absent in another -- where the label sheet silently prints Code 39 instead, which
   // looks like a design choice rather than a missing file.
-  it('every path that materialises vendor/ knows about the QR encoder', () => {
+  it('every path that materialises vendor/ knows about the QR encoder and the Supabase SDK', () => {
     for (const f of [['update-vendor.sh'], ['.claude', 'hooks', 'session-start.sh'],
                      ['.github', 'workflows', 'deploy-pages.yml'], ['scripts', 'vendor-fetch.mjs']]) {
       const src = fs.readFileSync(path.join(ROOT, ...f), 'utf8');
       assert.match(src, /qrcode/, f.join('/') + ' does not materialise vendor/qrcode.js');
+      assert.match(src, /supabase\.js/, f.join('/') + ' does not materialise vendor/supabase.js');
     }
+  });
+
+  // The live deploy's SDK: a floating `@2` with no hash ran whatever jsdelivr served next.
+  it('the Supabase SDK loads from /vendor, with a CDN fallback pinned to vendor/versions and by SRI', () => {
+    const src = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+    assert.match(src, /loadScript\('\/vendor\/supabase\.js'\)\.catch/, 'index.html does not load /vendor/supabase.js first');
+    const m = /'https:\/\/cdn\.jsdelivr\.net\/npm\/@supabase\/supabase-js@([0-9.]+)\/dist\/umd\/supabase\.js', '(sha384-[A-Za-z0-9+/=]+)'/.exec(src);
+    assert.ok(m, 'the Supabase CDN fallback is missing, unversioned or carries no SRI hash');
+    assert.equal(m[1], versions.SUPABASE, 'the CDN fallback and vendor/versions name different supabase-js versions');
+    assert.doesNotMatch(src, /supabase-js@\d+'/, 'a floating supabase-js range is still loaded');
+    const file = path.join(ROOT, 'vendor', 'supabase.js');
+    if (!fs.existsSync(file)) return;
+    const want = 'sha384-' + crypto.createHash('sha384').update(fs.readFileSync(file)).digest('base64');
+    assert.equal(m[2], want, 'the SRI hash does not match vendor/supabase.js — run ./update-vendor.sh');
+  });
+
+  // update-vendor.sh rewrites pins inside index.html's inline loader, which changes that script's CSP hash.
+  it('a vendor bump re-syncs the CSP, and the bump PR commits it', () => {
+    assert.match(fs.readFileSync(path.join(ROOT, 'update-vendor.sh'), 'utf8'), /node dev\/sync-csp\.js/);
+    assert.match(fs.readFileSync(path.join(ROOT, '.github', 'workflows', 'vendor-updates.yml'), 'utf8'), /^\s+firebase\.json$/m);
   });
 
   // Same trap the PGlite pin has: bump vendor/versions by hand and the CDN fallback keeps naming the

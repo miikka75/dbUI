@@ -1,5 +1,5 @@
 # Weekly check for new releases of the browser libraries pinned in vendor/versions (Vue, Vuetify, MDI,
-# PGlite, qrcode-generator). Dependabot cannot read that file, so this does its job for vendor/: when a
+# PGlite, qrcode-generator, supabase-js). Dependabot cannot read that file, so this does its job for vendor/: when a
 # newer version is on npm it bumps vendor/versions, runs ./update-vendor.sh (which rewrites the CDN
 # fallback URLs and SRI hashes to match) and opens or refreshes one pull request.
 #
@@ -44,6 +44,7 @@ jobs:
             [MDI]=@mdi/font
             [PGLITE]=@electric-sql/pglite
             [QRCODE]=qrcode-generator
+            [SUPABASE]=@supabase/supabase-js
           )
           . vendor/versions
           # Newest stable version matching a semver range (npm prints a string for one match, an array
@@ -52,7 +53,7 @@ jobs:
             let v = JSON.parse(require("fs").readFileSync(0, "utf8") || "null");
             v = [].concat(v || []).filter(x => !x.includes("-")); console.log(v.at(-1) || "")'; }
           changes=""
-          for key in VUE VUETIFY MDI PGLITE QRCODE; do
+          for key in VUE VUETIFY MDI PGLITE QRCODE SUPABASE; do
             pkg="${PKG[$key]}"
             current="${!key}"
             # Only bumps within the current major (^, so 0.x stays within its minor) are applied: a major
@@ -114,6 +115,7 @@ jobs:
             vendor/versions
             index.html
             style.html
+            firebase.json
             app-core.js
             backend-local-pglite.js
             dev/package.json
