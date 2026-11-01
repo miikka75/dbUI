@@ -271,6 +271,46 @@ test('user-linked lists: link projection over Firestore — admin sees all links
   await expectNoCspViolations(page);
 });
 
+// Firebase runs backend-kv.js's mapping for these; this is their round trip through the real rules.
+test('shared contract: languages, translations, profiles, users and access requests round-trip on Firestore', async ({ page }) => {
+  test.setTimeout(60000);
+  await seed(page);
+  await page.goto('/');
+  await signIn(page, 'admin@test.com');
+  await page.waitForFunction(() => appInstance.isAdmin === true);
+  const admin = await page.evaluate(async () => {
+    await backend.createLanguage('fi', 'Suomi', ['tab.notes']);
+    await backend.updateTranslations('fi', { 'tab.notes': 'Muistiinpanot', 'field.title': 'Otsikko' });
+    await backend.deleteTranslations('fi', ['field.title']);
+    await backend.renameLanguage('fi', 'Finnish');
+    await backend_users.setProfileName('admin@test.com', 'Boss');
+    await backend_users.setUserRole('viewer@test.com', 'viewer', 'viewer@test.com', ['notes']);
+    return {
+      fi: await backend.getTranslations('fi'),
+      langs: (await backend.getAvailableLanguages()).map((l) => l.code + ':' + l.name),
+      users: Object.keys(await backend_users.getUsers()).sort(),
+      profile: (await backend_users.getProfiles())['admin@test.com']
+    };
+  });
+  expect(admin.fi).toEqual({ 'tab.notes': 'Muistiinpanot' });
+  expect(admin.langs).toContain('fi:Finnish');
+  expect(admin.users).toEqual(['admin@test.com', 'viewer@test.com']);
+  expect(admin.profile && admin.profile.name).toBe('Boss');
+
+  // A stranger asks for access; the admin sees the request and clears it.
+  await signIn(page, 'stranger@test.com');
+  await page.evaluate(() => backend_users.requestAccess('Stranger', 'please'));
+  await signIn(page, 'admin@test.com');
+  const reqs = await page.evaluate(async () => {
+    const before = Object.keys(await backend_users.getAccessRequests());
+    await backend_users.removeAccessRequest('stranger@test.com');
+    return { before, after: Object.keys(await backend_users.getAccessRequests()) };
+  });
+  expect(reqs.before).toEqual(['stranger@test.com']);
+  expect(reqs.after).toEqual([]);
+  await expectNoCspViolations(page);
+});
+
 test('live sync: a write in one client reaches another through onSnapshot, unscoped and scoped', async ({ page, browser }) => {
   // The only end-to-end proof that backend-firebase subscribeTable works against real Firestore rules.
   // Both halves matter: the granted case (one unconstrained listener) and the self-service case, where

@@ -32,6 +32,7 @@ function loadBackend(email) {
     StorageFirestore,
     BackendHelpers: require(path.join(ROOT, 'backend-helpers.js')),
     AccessFeatures: require(path.join(ROOT, 'access-features.js')),
+    createKvBackend: require(path.join(ROOT, 'backend-kv.js')).createKvBackend,
     // initFirebase() runs on load; give it just enough to take its harmless "no config" path.
     // The REAL Databases module, bound to an empty store, rather than a stub: it is what decides
     // which database's config the backend starts with, and a stub would let that decision drift.

@@ -113,7 +113,12 @@ describe('backend contract — the browser backends preserve identity across a g
   // plain scripts that assign globals, so they cannot be exercised in Node.
   // Asserted against the source instead, the way the createLanguage rule is: the failure is a silent
   // permission hole on a production deployment, which the dev-server case above cannot reach.
-  for (const file of ['backend-firebase.js', 'backend-kv.js']) {
+  it('backend-firebase.js runs the shared setUserRole, only resetting its memoized read scope first', () => {
+    const src = fs.readFileSync(path.join(ROOT, 'backend-firebase.js'), 'utf8');
+    assert.ok(src.includes('setUserRole: function() { backend._myTablesPromise = null; return _kvSetUserRole.apply(this, arguments); }'),
+      'backend-firebase.js has its own setUserRole again — the shared one is what keeps the identity');
+  });
+  for (const file of ['backend-kv.js']) {
     it(file + ' reads the stored grant and carries its identity forward', () => {
       const src = fs.readFileSync(path.join(ROOT, file), 'utf8');
       const at = src.indexOf('setUserRole: function');

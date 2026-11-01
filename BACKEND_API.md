@@ -9,10 +9,10 @@ below (its `CONTRACT` array) and fails a backend that is missing one. Everything
 per-feature: absent means the feature degrades, not that the backend is broken — the app checks for the
 method before calling it.
 
-Implementations: `backend-kv.js` (the reference — one contract over a key-value table, run by BOTH
-`backend-supabase.js` and the browser-local `backend-local-pglite.js`, which supply only a *platform*:
-identity, realtime, uploads), `backend-firebase.js`, and the dev-server pair `backend-local.js` /
-`backend-local-client.js`.
+Implementations: `backend-kv.js` (the reference — one contract over a key-value store, run by
+`backend-supabase.js`, the browser-local `backend-local-pglite.js` and `backend-firebase.js`, which supply
+only a *platform*: identity, realtime, uploads; Firebase also overrides the methods where Firestore
+differs), and the dev-server pair `backend-local.js` / `backend-local-client.js`.
 
 A new key-value host therefore writes a platform, not a backend — see the `P` contract documented at the
 top of `backend-kv.js`. `dev/test/backend-conformance.test.js` pins that split: a platform file that grows

@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' 'sha256-AVSdx90AAaaay3LyFG6mmKvAAFJJSQS7qCSLkmMSjbA=' 'sha256-5nBeOlPWd4ATLDIX4ueiL6iNOTwpoRJ4rA1hCykUmvA=' 'sha256-+ocCZqGqDItcnHwVRHdjy6oUHbRmUM48EsY1Ds7y4Vg=' https://www.gstatic.com https://apis.google.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' data: https://cdn.jsdelivr.net; img-src 'self' https: data: blob: http://127.0.0.1:* http://localhost:*; connect-src 'self' blob: https://cdn.jsdelivr.net https://*.googleapis.com https://*.supabase.co wss://*.supabase.co http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*; frame-src https://*.firebaseapp.com https://accounts.google.com; manifest-src 'self' blob:; worker-src 'self'; base-uri 'self'; object-src 'none'; form-action 'self'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' 'sha256-AVSdx90AAaaay3LyFG6mmKvAAFJJSQS7qCSLkmMSjbA=' 'sha256-5nBeOlPWd4ATLDIX4ueiL6iNOTwpoRJ4rA1hCykUmvA=' 'sha256-eYNKhcxUypQB1bRnc+akn7qazwGMFCxKqLsCJacS1qc=' https://www.gstatic.com https://apis.google.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' data: https://cdn.jsdelivr.net; img-src 'self' https: data: blob: http://127.0.0.1:* http://localhost:*; connect-src 'self' blob: https://cdn.jsdelivr.net https://*.googleapis.com https://*.supabase.co wss://*.supabase.co http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*; frame-src https://*.firebaseapp.com https://accounts.google.com; manifest-src 'self' blob:; worker-src 'self'; base-uri 'self'; object-src 'none'; form-action 'self'">
   <!-- CSP violation reporting, installed BEFORE the first fetch below.
        `report-uri` is header-only and a <meta> CSP ignores it, so on GitHub Pages -- which cannot send
        a header at all -- the policy has no way to ask for reports. The page reports for itself
@@ -301,13 +301,12 @@
       if (backendFile === '/backend-local-client.js') {
         await loadScript('/dev-client.js');
       }
-      // Load Firestore storage adapter for Firebase mode
-      if (backendFile === '/backend-firebase.js') {
-        await loadScript('/storage-firestore.js');
-      }
-      // The two key-value backends share ONE contract implementation (backend-kv.js) and differ only in
-      // their storage adapter and their platform file. Load the adapter, then the shared contract — the
+      // Every backend but the dev server shares ONE contract implementation (backend-kv.js) and differs in
+      // its storage adapter and its platform file. Load the adapter, then the shared contract — the
       // platform file loaded below reads both as globals.
+      if (backendFile === '/backend-firebase.js') {
+        await loadScriptsOrdered(['/storage-firestore.js', '/backend-kv.js']);
+      }
       if (backendFile === '/backend-supabase.js') {
         await loadScriptsOrdered(['/storage-supabase.js', '/backend-kv.js']);
       }
