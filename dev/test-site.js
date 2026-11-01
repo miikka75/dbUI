@@ -15,8 +15,10 @@ Site.build(ROOT, OUT, { minify: true });   // as the deploys build it
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml',
   '.png': 'image/png', '.wasm': 'application/wasm', '.woff2': 'font/woff2', '.sql': 'text/plain', '.rules': 'text/plain' };
 
+const hits = [];
 const server = http.createServer((req, res) => {
   const p = decodeURIComponent(new URL(req.url, 'http://x').pathname);
+  hits.push(p);
   const file = path.join(OUT, p.endsWith('/') ? p + 'index.html' : p);
   if (!file.startsWith(OUT) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) { res.writeHead(404); return res.end(); }
   res.writeHead(200, { 'Content-Type': TYPES[path.extname(file)] || 'application/octet-stream' });
@@ -34,6 +36,33 @@ async function boot(browser, base, label, init, ready, timeout) {
   return failures;
 }
 
+// The service worker: once it controls the page, a reload fetches nothing but sw.js, and offline still boots.
+async function cached(browser, base) {
+  const setup = () => window.appInstance && window.appInstance.showSetup === true;
+  const context = await browser.newContext(), page = await context.newPage(), failures = [];
+  page.on('requestfailed', (r) => { if (r.url().startsWith(base) && !r.url().includes('/api/')) failures.push('offline: ' + r.url().slice(base.length)); });
+  page.on('pageerror', (e) => failures.push('cache: ' + String(e)));
+  await page.goto(base + '/');
+  await page.evaluate(() => navigator.serviceWorker.ready.then(() => new Promise((r) => {
+    if (navigator.serviceWorker.controller) r(); else navigator.serviceWorker.addEventListener('controllerchange', r);
+  })));
+  // Settled = booted AND the icon font loaded: a reload that interrupts the font makes the dying page
+  // request the next format in mdi.css, which would read as a download of the repeat visit.
+  const settle = () => page.waitForFunction(setup, null, { timeout: 15000 }).then(() => page.evaluate(() => document.fonts.ready));
+  await page.reload();
+  await settle();
+  hits.length = 0;
+  await page.reload();
+  await settle();
+  const fetched = hits.filter((h) => h !== '/sw.js' && !h.startsWith('/api/'));
+  if (fetched.length) failures.push('a repeat visit downloaded ' + fetched.join(', '));
+  await context.setOffline(true);
+  await page.reload();
+  await page.waitForFunction(setup, null, { timeout: 15000 }).catch(() => failures.push('offline: the app did not boot'));
+  await context.close();
+  return failures;
+}
+
 server.listen(0, '127.0.0.1', async () => {
   const base = 'http://127.0.0.1:' + server.address().port;
   const browser = await chromium.launch();
@@ -41,10 +70,11 @@ server.listen(0, '127.0.0.1', async () => {
     .concat(await boot(browser, base, 'setup', null, () => window.appInstance && window.appInstance.showSetup === true, 15000))
     .concat(await boot(browser, base, 'pglite',
       () => { localStorage.setItem('app_mode', 'pglite'); localStorage.setItem('pglite_user', 'me@example.test'); },
-      () => window.appInstance && !window.appInstance.loading && !!window.backend, 60000));
+      () => window.appInstance && !window.appInstance.loading && !!window.backend, 60000))
+    .concat(await cached(browser, base));
   await browser.close();
   server.close();
   fs.rmSync(OUT, { recursive: true, force: true });
   if (failures.length) { console.error('✗ the published site:\n  ' + failures.join('\n  ')); process.exit(1); }
-  console.log('✓ the published site boots (setup screen, in-browser Postgres)');
+  console.log('✓ the published site boots (setup screen, in-browser Postgres), and from its cache offline');
 });
