@@ -92,7 +92,7 @@ describe('app-core _deleteFromSources — delete means gone from the table', () 
     const app = {
       dataCache: { meetings: [{ id: 'm1' }], meetings__archive: [{ id: 'm1' }] },
       currentData: [{ id: 'm1' }],
-      notify: () => {}, t: (k) => k
+      notify: () => {}, t: (k) => k, _dropRefLink: () => {}
     };
     fn.call(app, ['meetings'], 'm1');
     assert.deepEqual(writes, [['meetings', 'm1', 'active'], ['meetings', 'm1', 'archive']]);
@@ -104,7 +104,7 @@ describe('app-core _deleteFromSources — delete means gone from the table', () 
   it('touches only the active store when the table has no archive', () => {
     const writes = [];
     const fn = build({ roster: { } }, writes);
-    const app = { dataCache: { roster: [{ id: 'r1' }] }, currentData: [], notify: () => {}, t: (k) => k };
+    const app = { dataCache: { roster: [{ id: 'r1' }] }, currentData: [], notify: () => {}, t: (k) => k, _dropRefLink: () => {} };
     fn.call(app, ['roster'], 'r1');
     assert.deepEqual(writes, [['roster', 'r1', 'active']]);
   });
@@ -114,7 +114,7 @@ describe('app-core _deleteFromSources — delete means gone from the table', () 
     // archived row until the next reload.
     const writes = [];
     const fn = build({ meetings: { archivable: true } }, writes);
-    const app = { dataCache: { meetings: [{ id: 'm1' }] }, currentData: [], notify: () => {}, t: (k) => k };
+    const app = { dataCache: { meetings: [{ id: 'm1' }] }, currentData: [], notify: () => {}, t: (k) => k, _dropRefLink: () => {} };
     fn.call(app, ['meetings'], 'm1');
     assert.equal(app.dataCache.meetings__archive, undefined);
   });

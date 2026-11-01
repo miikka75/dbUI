@@ -324,7 +324,7 @@ describe('undo — the row lifecycle', () => {
       appCoreFn('_deleteFromSources', {
         SCHEMA: schema, aKey: (t) => t + '__archive',
         Writes: { deleteRow: () => Promise.resolve() }
-      }).call({ dataCache: cache, currentData: [], notify: () => {}, t: (k) => k }, ['notes'], 'r1');
+      }).call({ dataCache: cache, currentData: [], notify: () => {}, t: (k) => k, _dropRefLink: () => {} }, ['notes'], 'r1');
     } finally { c.restore(); }
 
     assert.equal(c.ops.length, 1, 'the row was only in the active store, so only that store inverts');
@@ -343,7 +343,7 @@ describe('undo — the row lifecycle', () => {
       appCoreFn('_deleteFromSources', {
         SCHEMA: schema, aKey: (t) => t + '__archive',
         Writes: { deleteRow: () => Promise.resolve() }
-      }).call({ dataCache: cache, currentData: [], notify: () => {}, t: (k) => k }, ['notes'], 'r1');
+      }).call({ dataCache: cache, currentData: [], notify: () => {}, t: (k) => k, _dropRefLink: () => {} }, ['notes'], 'r1');
     } finally { c.restore(); }
     assert.deepEqual(c.ops.map((o) => o.part), ['active']);
   });

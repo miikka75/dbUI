@@ -5584,12 +5584,21 @@ function createVueApp() {
       // A user-linked lookup keys its links by the row's handle, which renaming either dimension can change.
       _moveRefLink: function(table, row, oldHandle) {
         if (!oldHandle || !this.isUserLinkList(table)) return;
-        var col = Columns.lookupIdentityCol(SCHEMA, table), order = getColumns(table);
-        var handle = function(r) { return Columns.rowHandle(SCHEMA[table], order, r, col); };
-        var newHandle = handle(row);
+        var handle = this._refHandle(table), newHandle = handle(row);
         if (!newHandle || newHandle === oldHandle) return;   // half a pair: keep the link, as a blank list value does
         if ((this.dataCache[table] || []).some(function(r) { return r !== row && handle(r) === oldHandle; })) return;
         this._moveUserLink(table, oldHandle, newHandle);
+      },
+      // A deleted lookup row takes its link with it, or a later row with the same handle inherits the account.
+      _dropRefLink: function(table, row) {
+        if (!SCHEMA[table] || !SCHEMA[table].isLookup || !this.isUserLinkList(table)) return;
+        var handle = this._refHandle(table), h = handle(row);
+        if (!h || (this.dataCache[table] || []).some(function(r) { return r.id !== row.id && handle(r) === h; })) return;
+        this._moveUserLink(table, h, null);
+      },
+      _refHandle: function(table) {
+        var col = Columns.lookupIdentityCol(SCHEMA, table), order = getColumns(table);
+        return function(r) { return Columns.rowHandle(SCHEMA[table], order, r, col); };
       },
       focusNextListItem: function(e) {
         var el = e.target;
@@ -8118,6 +8127,7 @@ function createVueApp() {
                 // column. Copied, because the live object is about to be dropped from the cache and
                 // anything still holding it may keep mutating it.
                 inverse: { type: 'put', id: itemId, row: Object.assign({}, gone) } });
+              if (store[0] === 'active') self._dropRefLink(src, gone);
             }
             Writes.deleteRow(src, itemId, store[0]);
           });
