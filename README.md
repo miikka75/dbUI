@@ -438,7 +438,7 @@ Point your editor at the meta-schema and it will complete and check the vocabula
 ├────────────────┼─────────────────────────────────┤
 │  backend-*.js  │  demo-schema.json / firebase-cfg │  ← platform + config
 ├────────────────┴─────────────────────────────────┤
-│  backend-kv.js (Supabase + in-browser PGlite)    │  ← one contract, two hosts
+│  backend-kv.js (Supabase, PGlite, Firestore)     │  ← one contract, three hosts
 ├──────────────────────────────────────────────────┤
 │ Supabase │ Firestore │ PGlite (browser / dev)    │
 └──────────────────────────────────────────────────┘
@@ -449,7 +449,9 @@ lives in, what shape it has, which schema-derived facts the schema-blind policie
 `backend-*.js` file above it is the **platform** (who the caller is, whether other clients exist, where an
 uploaded file goes). `backend-supabase.js` and `backend-local-pglite.js` are platforms only — they share
 that one contract, and both run `supabase-schema.sql` underneath it, so a policy question has a single
-answer whether the database is in São Paulo or in the tab.
+answer whether the database is in São Paulo or in the tab. `backend-firebase.js` runs the same contract
+over Firestore documents, overriding only where Firestore differs (rules-provable queries, batches,
+transactions).
 
 **Schema flow:**
 1. Server loads `examples/demo-schema.json` from disk (dev) or the database (Supabase/Firebase)
