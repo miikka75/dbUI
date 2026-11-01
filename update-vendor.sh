@@ -14,6 +14,8 @@ curl -sfo mdi.css "https://cdn.jsdelivr.net/npm/@mdi/font@${MDI}/css/materialdes
 # at boot -- see app-core `_ensureQrEncoder`. Taken verbatim, NOT minified: the CI copy comes from
 # `npm pack`, and a minified byte-stream would not match the SRI hash pinned on the CDN fallback.
 curl -sfo qrcode.js "https://cdn.jsdelivr.net/npm/qrcode-generator@${QRCODE}/qrcode.js"
+# The Supabase SDK, loaded only in Supabase mode. Its CDN fallback is SRI-pinned like Vue's.
+curl -sfo supabase.js "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@${SUPABASE}/dist/umd/supabase.js"
 # The npm/CDN mdi css lives under css/ and points at ../fonts/. We flatten it to /vendor/mdi.css, so
 # rewrite the font ref to ./fonts/ — otherwise ../fonts/ resolves to /fonts/ (404) and the icon glyphs
 # never load. (Keep this in sync with .claude/hooks/session-start.sh, which materialises vendor/ in CI.)
@@ -43,8 +45,14 @@ VUETIFY_SRI=$(openssl dgst -sha384 -binary vendor/vuetify.js | openssl base64 -A
 QRCODE_SRI=$(openssl dgst -sha384 -binary vendor/qrcode.js | openssl base64 -A)
 sed -i "s|vue.global.prod.js', 'sha384-[^']*'|vue.global.prod.js', 'sha384-${VUE_SRI}'|" index.html
 sed -i "s|vuetify.min.js', 'sha384-[^']*'|vuetify.min.js', 'sha384-${VUETIFY_SRI}'|" index.html
+SUPABASE_SRI=$(openssl dgst -sha384 -binary vendor/supabase.js | openssl base64 -A)
+sed -i "s|@supabase/supabase-js@[0-9.]*|@supabase/supabase-js@${SUPABASE}|g" index.html
+sed -i "s|umd/supabase.js', 'sha384-[^']*'|umd/supabase.js', 'sha384-${SUPABASE_SRI}'|" index.html
 # The QR fallback lives in app-core.js (the loader that fetches it on demand), not index.html.
 sed -i "s|qrcode-generator@[0-9.]*|qrcode-generator@${QRCODE}|g" app-core.js
 sed -i "s|qrcode.js', 'sha384-[^']*'|qrcode.js', 'sha384-${QRCODE_SRI}'|" app-core.js
 
-echo "✓ Updated to Vue ${VUE}, Vuetify ${VUETIFY}, MDI ${MDI}"
+# The SRI pins above sit in index.html's inline loader, so its CSP hash changed with them.
+node dev/sync-csp.js
+
+echo "✓ Updated to Vue ${VUE}, Vuetify ${VUETIFY}, MDI ${MDI}, supabase-js ${SUPABASE}"
