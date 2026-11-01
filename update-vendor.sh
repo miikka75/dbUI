@@ -16,6 +16,11 @@ curl -sfo mdi.css "https://cdn.jsdelivr.net/npm/@mdi/font@${MDI}/css/materialdes
 curl -sfo qrcode.js "https://cdn.jsdelivr.net/npm/qrcode-generator@${QRCODE}/qrcode.js"
 # The Supabase SDK, loaded only in Supabase mode. Its CDN fallback is SRI-pinned like Vue's.
 curl -sfo supabase.js "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@${SUPABASE}/dist/umd/supabase.js"
+# The Firebase compat SDK, loaded only in Firebase mode.
+mkdir -p firebase
+for n in app auth firestore storage; do
+  curl -sfo "firebase/firebase-$n-compat.js" "https://cdn.jsdelivr.net/npm/firebase@${FIREBASE}/firebase-$n-compat.js"
+done
 # The npm/CDN mdi css lives under css/ and points at ../fonts/. We flatten it to /vendor/mdi.css, so
 # rewrite the font ref to ./fonts/ — otherwise ../fonts/ resolves to /fonts/ (404) and the icon glyphs
 # never load. (Keep this in sync with .claude/hooks/session-start.sh, which materialises vendor/ in CI.)
@@ -48,6 +53,11 @@ sed -i "s|vuetify.min.js', 'sha384-[^']*'|vuetify.min.js', 'sha384-${VUETIFY_SRI
 SUPABASE_SRI=$(openssl dgst -sha384 -binary vendor/supabase.js | openssl base64 -A)
 sed -i "s|@supabase/supabase-js@[0-9.]*|@supabase/supabase-js@${SUPABASE}|g" index.html
 sed -i "s|umd/supabase.js', 'sha384-[^']*'|umd/supabase.js', 'sha384-${SUPABASE_SRI}'|" index.html
+sed -i "s|npm/firebase@[0-9.]*|npm/firebase@${FIREBASE}|g" index.html
+for n in app auth firestore storage; do
+  FB_SRI=$(openssl dgst -sha384 -binary "vendor/firebase/firebase-$n-compat.js" | openssl base64 -A)
+  sed -i "s|firebase-$n-compat.js', 'sha384-[^']*'|firebase-$n-compat.js', 'sha384-${FB_SRI}'|" index.html
+done
 # The QR fallback lives in app-core.js (the loader that fetches it on demand), not index.html.
 sed -i "s|qrcode-generator@[0-9.]*|qrcode-generator@${QRCODE}|g" app-core.js
 sed -i "s|qrcode.js', 'sha384-[^']*'|qrcode.js', 'sha384-${QRCODE_SRI}'|" app-core.js
@@ -55,4 +65,4 @@ sed -i "s|qrcode.js', 'sha384-[^']*'|qrcode.js', 'sha384-${QRCODE_SRI}'|" app-co
 # The SRI pins above sit in index.html's inline loader, so its CSP hash changed with them.
 node dev/sync-csp.js
 
-echo "✓ Updated to Vue ${VUE}, Vuetify ${VUETIFY}, MDI ${MDI}, supabase-js ${SUPABASE}"
+echo "✓ Updated to Vue ${VUE}, Vuetify ${VUETIFY}, MDI ${MDI}, supabase-js ${SUPABASE}, Firebase ${FIREBASE}"

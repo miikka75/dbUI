@@ -143,7 +143,7 @@ test.describe('per-database PWA identity', () => {
       localStorage.setItem('app_mode', 'firebase');
       localStorage.setItem('firebase_config', JSON.stringify({ projectId: 'legacy-app', apiKey: 'k' }));
     });
-    await page.route(/gstatic\.com/, (r) => r.fulfill({ status: 200, contentType: 'application/javascript', body: '' }));
+    await page.route(/\/vendor\/firebase\/|npm\/firebase@/, (r) => r.fulfill({ status: 200, contentType: 'application/javascript', body: '' }));
     await page.goto('/');
     await page.waitForFunction(() => localStorage.getItem('app_db') != null, null, { timeout: 10000 });
     expect(await page.evaluate(() => localStorage.getItem('app_db'))).toBe('firebase:legacy-app');

@@ -223,13 +223,34 @@ describe('deploy config — the browser-local Postgres backend', () => {
   // Four places materialise vendor/ and they must agree, or the QR encoder is present in one
   // environment and absent in another -- where the label sheet silently prints Code 39 instead, which
   // looks like a design choice rather than a missing file.
-  it('every path that materialises vendor/ knows about the QR encoder and the Supabase SDK', () => {
+  it('every path that materialises vendor/ knows about the QR encoder and the backend SDKs', () => {
     for (const f of [['update-vendor.sh'], ['.claude', 'hooks', 'session-start.sh'],
                      ['.github', 'workflows', 'deploy-pages.yml'], ['scripts', 'vendor-fetch.mjs']]) {
       const src = fs.readFileSync(path.join(ROOT, ...f), 'utf8');
       assert.match(src, /qrcode/, f.join('/') + ' does not materialise vendor/qrcode.js');
       assert.match(src, /supabase\.js/, f.join('/') + ' does not materialise vendor/supabase.js');
+      assert.match(src, /firebase-\$\{?n\}?-compat\.js|`firebase-\$\{n\}-compat\.js`/, f.join('/') + ' does not materialise vendor/firebase/');
     }
+  });
+
+  // The four compat bundles came from gstatic with no hash; now they are vendored like everything else.
+  it('the Firebase SDK loads from /vendor, with CDN fallbacks pinned to vendor/versions and by SRI', () => {
+    const src = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+    assert.match(src, /\/vendor\/firebase\/firebase-' \+ n \+ '-compat\.js/, 'index.html does not load /vendor/firebase/ first');
+    assert.doesNotMatch(src, /gstatic\.com\/firebasejs/, 'index.html still loads the SDK from gstatic');
+    const pins = [...src.matchAll(/'https:\/\/cdn\.jsdelivr\.net\/npm\/firebase@([0-9.]+)\/(firebase-(\w+)-compat\.js)', '(sha384-[A-Za-z0-9+/=]+)'/g)];
+    assert.deepEqual(pins.map((m) => m[3]), ['app', 'auth', 'firestore', 'storage'], 'the fallbacks must load all four bundles, app first');
+    for (const [, version, file, , sri] of pins) {
+      assert.equal(version, versions.FIREBASE, file + ': the CDN fallback and vendor/versions name different Firebase versions');
+      const local = path.join(ROOT, 'vendor', 'firebase', file);
+      if (!fs.existsSync(local)) continue;
+      const want = 'sha384-' + crypto.createHash('sha384').update(fs.readFileSync(local)).digest('base64');
+      assert.equal(sri, want, 'the SRI hash does not match vendor/firebase/' + file + ' — run ./update-vendor.sh');
+    }
+  });
+
+  it('the policy no longer allows scripts from gstatic', () => {
+    assert.doesNotMatch(require('../../csp').buildPolicy({}), /www\.gstatic\.com/);
   });
 
   // The live deploy's SDK: a floating `@2` with no hash ran whatever jsdelivr served next.

@@ -87,7 +87,7 @@
       // longer needs it would silently kill that backend. Naming the narrower grant separately makes that
       // cleanup safe to do. Unknown source expressions are ignored, so older browsers are unaffected.
       "script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' " + (opts.scriptHashes || []).join(' ')
-        + " https://www.gstatic.com https://apis.google.com https://cdn.jsdelivr.net",
+        + " https://apis.google.com https://cdn.jsdelivr.net",
       "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
       "font-src 'self' data: https://cdn.jsdelivr.net",
       "img-src 'self' https: data: blob: http://127.0.0.1:* http://localhost:*",
