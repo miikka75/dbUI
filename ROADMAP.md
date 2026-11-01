@@ -1166,7 +1166,7 @@ and the per-person feed cannot carry them. Proposal: a calendar source (and a da
 "class.date" }`, resolved with the lookup machinery `computed.lookup` already uses. That makes both the
 home list and the feed work with no copy of the date on the booking. **Small–medium; engine.**
 
-#### 9. Statistics the app shows that `stats` cannot
+#### 9. Statistics the app shows that `stats` cannot *(series and streak landed; time of day open)*
 
 - **A series**: one tile per period, for the last N periods — "minutes per week, last 6 weeks". The
   bundle hand-writes four tiles with `@week-1`…`@week-3`; `"series": { "column": "done_on",

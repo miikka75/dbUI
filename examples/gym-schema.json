@@ -1175,6 +1175,33 @@
       }
     },
     {
+      "name": "my_minutes_weeks",
+      "kind": "stats",
+      "icon": "mdi-chart-bar",
+      "sources": [
+        "workouts"
+      ],
+      "mode": "union",
+      "filter": {
+        "owner": "@me"
+      },
+      "readonly": true,
+      "stats": {
+        "tiles": [
+          {
+            "agg": "sum",
+            "column": "minutes",
+            "goal": "max",
+            "series": {
+              "column": "done_on",
+              "interval": "weekly",
+              "count": 6
+            }
+          }
+        ]
+      }
+    },
+    {
       "name": "my_top_exercises",
       "kind": "stats",
       "icon": "mdi-podium",
@@ -2098,7 +2125,7 @@
         "label": "text.add_workout",
         "icon": "mdi-plus"
       },
-      "markdown": "{{view:my_calendar}}\n\n## {{t:text.training_totals}}\n\n{{view:my_period_totals}}\n\n## {{t:text.training_top}}\n\n{{view:my_top_exercises}}\n\n## {{t:text.training_steps}}\n\n{{view:my_steps_week}}\n\n## {{t:text.training_log}}\n\n{{view:my_workouts}}\n\n## {{t:text.training_visits}}\n\n{{view:my_visits}}\n",
+      "markdown": "{{view:my_calendar}}\n\n## {{t:text.training_totals}}\n\n{{view:my_period_totals}}\n\n## {{t:text.training_top}}\n\n{{view:my_top_exercises}}\n\n## {{t:text.training_steps}}\n\n{{view:my_steps_week}}\n\n## {{t:text.training_weeks}}\n\n{{view:my_minutes_weeks}}\n\n## {{t:text.training_log}}\n\n{{view:my_workouts}}\n\n## {{t:text.training_visits}}\n\n{{view:my_visits}}\n",
       "requires": {
         "table": "memberships",
         "from": "start_on",

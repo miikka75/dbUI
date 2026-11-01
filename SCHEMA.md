@@ -1950,6 +1950,21 @@ a computed `lookup` works, which is how a booking is dated by its class). Weeks 
 - **`icons`** (any tile): the icon of the highest rung the value has reached, beside the number; none
   below the first. Rungs ascend, like a goal ladder.
 
+### A tile per period (`series`)
+
+`series` turns one tile into one per period: the last `count` (1–60) `interval`s (`daily`, `weekly` —
+the default — or `monthly`), ending now, oldest first. Each tile aggregates the rows whose `series.column`
+date falls in its period, and is captioned by that period in the reader's locale.
+
+```json
+{ "agg": "sum", "column": "minutes", "goal": "max",
+  "series": { "column": "done_on", "interval": "weekly", "count": 6 } }
+```
+
+- `when`, `plus`, `divide` and `goal` apply to each period; `goal: "max"` scales them against the busiest.
+- Anchored at today, not at the view's `period` navigation. Not with `agg: "streak"`, which already counts periods.
+- On a page with `filters`, each period is its own comparison column.
+
 ### Which end of the board is the point (`order`)
 
 `rowTiles` arrives ranked highest-first, because an aggregate view returns a ranking. That answers

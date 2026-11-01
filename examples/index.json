@@ -167,25 +167,25 @@
       "title": "Fitness Club",
       "description": "A gym's member app — class booking with door check-in, a training log and stats, memberships, personal training and a workout video library.",
       "icon": "./examples/gym-favicon.svg",
-      "revision": 4,
+      "revision": 5,
       "tables": 18,
-      "views": 37,
+      "views": 38,
       "schema": {
         "file": "gym-schema.json",
-        "hash": "51c996b73919d3f5"
+        "hash": "3a0df97c9ae5a75e"
       },
       "languages": [
         {
           "code": "en",
           "name": "English",
           "file": "gym-lang-en.json",
-          "hash": "41a6abbd6f5119ff"
+          "hash": "c2fc591d17b3369b"
         },
         {
           "code": "fi",
           "name": "Suomi",
           "file": "gym-lang-fi.json",
-          "hash": "d780b798ae1182b2"
+          "hash": "2e070e4e03190adc"
         }
       ],
       "data": {
@@ -194,13 +194,14 @@
       },
       "about": {
         "file": "gym-about.json",
-        "hash": "19662054837a66f6"
+        "hash": "4f120add281e54c7"
       },
       "notes": {
         "1": "First release: anyone can open the app and see the timetable, gyms, prices and news without an account; signing in makes you a member-to-be at once, and the member pages open when a membership is active (your history stays through a lapse); book group classes (with a valid membership; the door code needs one too), with places left, a full class refused, and booking from home closing 30 minutes before the start (after that, at the gym); check in to classes by scanning the room code, and log gym visits by scanning the door code; My calendar with your classes, workouts, visits, pauses and PT sessions, where the workout log and gym visits (the latest 5, with Show all), the totals (hours, exercises, visits, km), steps and your top 3 exercises follow the week, month or year the calendar shows; subscribe to your booked classes and workouts in your phone's calendar; coins earned by attending classes (1 per class, plus 1 per streak level reached), spent in a reward shop; buying a membership or a single visit, and pausing it (the pause shows on My calendar across its days, and while it lasts classes cannot be booked or checked in to and the door code is refused); requesting a personal trainer; trainers linked to accounts see their classes and PT clients on their own My calendar; news and a library of workouts and multi-week programmes. Approving a sign-up request makes the person a member in one press. The front desk gets the door code screen, class check-in (the changing code, walk-ins, and ticking people off by hand), membership, PT and reward boards, and statistics (visits, members, attendance by class and by trainer, visits by gym) filtered by gym, class and trainer.",
         "2": "Statistics: one view of class attendance with gym, room, class and trainer filters, and comparison rows. Front desk: Class schedule with Copy events, Memberships as a searchable list, booking lists showing three days with Show more. Rooms belong to a gym. Classes are archived two hours after they start. The front desk can run as an editor account and a door tablet as its own account. Sample dates follow today.",
         "3": "A booked place nobody has checked in to is released 10 minutes before the class starts, while the room QR is open, so someone at the gym can take it.",
-        "4": "A full class can be joined on its waitlist: when someone cancels, the first in line is booked automatically, until 10 minutes before the start."
+        "4": "A full class can be joined on its waitlist: when someone cancels, the first in line is booked automatically, until 10 minutes before the start.",
+        "5": "Training shows your workout minutes for each of the last six weeks."
       }
     }
   ]

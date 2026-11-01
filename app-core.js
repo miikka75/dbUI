@@ -761,7 +761,10 @@ function createVueApp() {
       pageCompareAnchor: function() { var v = this.pageCompareViews; return v.length ? v[v.length - 1] : null; },
       pageCompareCols: function() {
         var self = this, out = [];
-        this.pageCompareViews.forEach(function(n) { VIEWS[n].stats.tiles.forEach(function(t) { out.push(self.tOr(t.label, t.label)); }); });
+        // Built over no rows, so a `series` expands into the same columns compareRowValues fills.
+        this.pageCompareViews.forEach(function(n) { Stats.build([], VIEWS[n].stats).tiles.forEach(function(t) {
+          out.push([t.label ? self.tOr(t.label, t.label) : '', t.period ? Stats.periodLabel(t.period, self.calLocale()) : ''].filter(Boolean).join(' · '));
+        }); });
         return out;
       },
       sortedUserList: function() {
@@ -10258,7 +10261,8 @@ function createVueApp() {
       },
       // A rung's name, translatable like a tile label. A ladder authored as bare numbers has no name,
       // so it shows the threshold reached — which still says which rung is held.
-      tierLabel: function(tier) { return tier.label ? this.tOr(tier.label, tier.label) : tier.at; }
+      tierLabel: function(tier) { return tier.label ? this.tOr(tier.label, tier.label) : tier.at; },
+      periodText: function(t) { return Stats.periodLabel(t.period, this.viewHost.locale()); }
     },
     template: ''
       + '<component :is="embed ? \'div\' : \'v-card\'" :variant="embed ? undefined : \'outlined\'" :class="embed ? \'my-2\' : \'pa-4\'" data-testid="stats-view">'
@@ -10269,7 +10273,8 @@ function createVueApp() {
       // label is authored prose and is printed as written.
       +   '<div style="font-size:0.72rem;opacity:0.7;text-transform:uppercase;letter-spacing:0.03em;margin-bottom:4px">'
       +     '<list-value v-if="t.labelCol" :col="t.labelCol" :value="t.label" :view-cfg="viewCfg"></list-value>'
-      +     '<span v-else>{{ tOr(t.label, t.label) }}</span>'
+      +     '<span v-else-if="t.label">{{ tOr(t.label, t.label) }}</span>'
+      +     '<span v-if="t.period" data-testid="stat-period">{{ t.label ? \' · \' : \'\' }}{{ periodText(t) }}</span>'
       +   '</div>'
       +   '<div style="display:flex;align-items:baseline;gap:6px">'
       +     '<v-icon v-if="t.icon" :icon="t.icon" color="primary" size="26" style="align-self:center" data-testid="stat-icon"></v-icon>'

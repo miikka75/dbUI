@@ -55,6 +55,7 @@ const SHOTS = {
     { file: 'search', view: 'coach', user: 'aino@dev' },
     { file: 'form', view: 'membership_buy', user: 'aino@dev', before: (p) => p.locator('main .v-btn').first().click() },
     { file: 'stats-goal', view: 'my_level', user: 'aino@dev' },
+    { file: 'stats-series', view: 'my_minutes_weeks', user: 'aino@dev' },
     { file: 'theme', view: 'doc_home', user: 'aino@dev' },
     { file: 'bottom-nav', view: 'doc_home', user: 'aino@dev', viewport: PHONE },
     { file: 'public-visitor', view: 'class_schedule', user: '' },
