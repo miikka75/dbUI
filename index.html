@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' 'sha256-AVSdx90AAaaay3LyFG6mmKvAAFJJSQS7qCSLkmMSjbA=' 'sha256-5nBeOlPWd4ATLDIX4ueiL6iNOTwpoRJ4rA1hCykUmvA=' 'sha256-+ocCZqGqDItcnHwVRHdjy6oUHbRmUM48EsY1Ds7y4Vg=' https://www.gstatic.com https://apis.google.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' data: https://cdn.jsdelivr.net; img-src 'self' https: data: blob: http://127.0.0.1:* http://localhost:*; connect-src 'self' blob: https://cdn.jsdelivr.net https://*.googleapis.com https://*.supabase.co wss://*.supabase.co http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*; frame-src https://*.firebaseapp.com https://accounts.google.com; manifest-src 'self' blob:; worker-src 'self'; base-uri 'self'; object-src 'none'; form-action 'self'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' 'sha256-AVSdx90AAaaay3LyFG6mmKvAAFJJSQS7qCSLkmMSjbA=' 'sha256-5nBeOlPWd4ATLDIX4ueiL6iNOTwpoRJ4rA1hCykUmvA=' 'sha256-wZnHTkJyDNxBmXJyphEwfZbQZ9wcQWYQjyVC+cIE6Qw=' https://www.gstatic.com https://apis.google.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' data: https://cdn.jsdelivr.net; img-src 'self' https: data: blob: http://127.0.0.1:* http://localhost:*; connect-src 'self' blob: https://cdn.jsdelivr.net https://*.googleapis.com https://*.supabase.co wss://*.supabase.co http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*; frame-src https://*.firebaseapp.com https://accounts.google.com; manifest-src 'self' blob:; worker-src 'self'; base-uri 'self'; object-src 'none'; form-action 'self'">
   <!-- CSP violation reporting, installed BEFORE the first fetch below.
        `report-uri` is header-only and a <meta> CSP ignores it, so on GitHub Pages -- which cannot send
        a header at all -- the policy has no way to ask for reports. The page reports for itself
@@ -177,7 +177,7 @@
               // Declined -> nothing persisted; app_mode stays whatever it already was (setup screen on a fresh visit).
             }
           } else {
-            localStorage.setItem('app_mode', urlMode);
+            Databases.setMode(urlMode);
             if (qp.get('folder')) localStorage.setItem('app_folder', qp.get('folder'));
           }
         }
@@ -195,7 +195,7 @@
         }
       } catch(e) {}
 
-      var mode = localStorage.getItem('app_mode');
+      var mode = Databases.mode();
       var backendFile;
       if (mode === 'firebase') { backendFile = '/backend-firebase.js'; }
       else if (mode === 'supabase') { backendFile = '/backend-supabase.js'; }

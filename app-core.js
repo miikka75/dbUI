@@ -219,9 +219,12 @@ var app; // Vue app instance
 var appInstance; // Mounted root component proxy
 var backend; // Set by backend adapter loaded after this file
 
-function getSetting(key, def) {
-  try { var s = JSON.parse(localStorage.getItem('app_settings') || '{}'); return s[key] !== undefined ? s[key] : def; } catch(e) { return def; }
+// A per-viewer preference under its own localStorage key. Blocked or full storage forgets it, never throws.
+function loadPref(key, def) {
+  try { var v = JSON.parse(localStorage.getItem(key)); return v == null ? def : v; } catch (e) { return def; }
 }
+function savePref(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) {} }
+function getSetting(key, def) { var s = loadPref('app_settings', {}); return s[key] !== undefined ? s[key] : def; }
 
 // Privacy: keep the first word, reduce every later word to an initial. "Name Surname" -> "Name S.";
 function obscureName(s) {
@@ -358,7 +361,7 @@ function createVueApp() {
       // (the browser may delete it on its own), true = only the user can.
       localStore: { persisted: null, usage: 0, quota: 0 },
       needsReauth: false,
-      setupStep: (function() { var m = localStorage.getItem('app_mode'); return (m === 'firebase' || m === 'supabase') ? m : null; })(),
+      setupStep: (function() { var m = Databases.mode(); return (m === 'firebase' || m === 'supabase') ? m : null; })(),
       mode: '',
       currentTable: '',
       currentData: [],
@@ -373,7 +376,7 @@ function createVueApp() {
       // Booted signed-out into a database with public tables (see the backends' auth handlers).
       visitorMode: false,
       // This tablet's QR lock: { view, door, hash } -- the screen it reopens into, and the PIN's hash.
-      kioskLock: (function() { try { return JSON.parse(localStorage.getItem('kiosk_lock') || 'null'); } catch (e) { return null; } })(),
+      kioskLock: loadPref('kiosk_lock', null),
       // The sign-in dialog: Google, or an emailed code / link (when the backend offers email sign-in).
       signInOpen: false, authEmail: '', authCode: '', authSent: false, authCodeAllowed: false, authBusy: false, authError: '', authLinkPending: false,
       // A page's `filters` picks, { page: { column: [values] } }, kept per viewer in their browser.
@@ -742,7 +745,7 @@ function createVueApp() {
       pageFilterCols: function() { var v = VIEWS[this.currentTable]; return (v && typeof v.markdown === 'string' && Array.isArray(v.filters)) ? v.filters : []; },
       pagePicked: function() {
         var n = this.currentTable, p = this.pagePicks[n]; if (p) return p;
-        try { return JSON.parse(localStorage.getItem('page_filter:' + n) || '{}') || {}; } catch (e) { return {}; }
+        return loadPref('page_filter:' + n, {});
       },
       // Comparison rows: the page's shared ones (on its _pages doc, edited by canEditPages), then this browser's.
       pageCompareRows: function() {
@@ -752,7 +755,7 @@ function createVueApp() {
       },
       _localCompareRows: function() {
         var n = this.currentTable, r = this.pageCompares[n]; if (r) return r;
-        try { var v = JSON.parse(localStorage.getItem('page_compare:' + n) || '[]'); return Array.isArray(v) ? v : []; } catch (e) { return []; }
+        var v = loadPref('page_compare:' + n, []); return Array.isArray(v) ? v : [];
       },
       // Stats views on the page with whole-set `tiles` (rowTiles already compare).
       pageCompareViews: function() {
@@ -934,7 +937,7 @@ function createVueApp() {
       },
       shareLink: function() {
         var base = location.origin + location.pathname;
-        var mode = localStorage.getItem('app_mode');
+        var mode = Databases.mode();
         if (mode === 'firebase') {
           var c = Databases.config('firebase');
           if (!c) return base;
@@ -1575,7 +1578,7 @@ function createVueApp() {
       // Setup
       completeLocalSetup: function() {
         localStorage.setItem('app_folder', 'local');
-        localStorage.setItem('app_mode', 'local');
+        Databases.remember('local');
         this.mode = 'local';
         this.showSetup = false;
         this.startApp();
@@ -1588,12 +1591,12 @@ function createVueApp() {
         var email = String(this.pgliteUserInput || '').trim().toLowerCase() || 'you@local';
         localStorage.setItem('pglite_user', email);
         localStorage.setItem('app_folder', 'pglite');
-        localStorage.setItem('app_mode', 'pglite');
+        Databases.remember('pglite');
         location.reload();   // reload so index.html loads storage-pglite + backend-kv for mode=pglite
       },
       backToSetup: function() {
         this.setupStep = null;
-        try { localStorage.removeItem('app_mode'); } catch (e) {}
+        Databases.setMode(null);
       },
 
       // --- Browser-local database: size, and whether the browser may evict it -------------------------
@@ -1844,7 +1847,7 @@ function createVueApp() {
         var self = this;
         return this._kioskHash(pin).then(function(h) {
           self.kioskLock = { view: k.view, door: k.door || '', hash: h };
-          try { localStorage.setItem('kiosk_lock', JSON.stringify(self.kioskLock)); } catch (e) {}
+          savePref('kiosk_lock', self.kioskLock);
         });
       },
       kioskPinOk: function(pin) { var l = this.kioskLock; return l ? this._kioskHash(pin).then(function(h) { return h === l.hash; }) : Promise.resolve(true); },
@@ -6270,8 +6273,8 @@ function createVueApp() {
 
       // Settings
       saveSetting: function(key, val) {
-        var s = JSON.parse(localStorage.getItem('app_settings') || '{}');
-        s[key] = val; localStorage.setItem('app_settings', JSON.stringify(s));
+        var s = loadPref('app_settings', {});
+        s[key] = val; savePref('app_settings', s);
       },
       resetApp: function() {
         localStorage.clear();
@@ -7048,11 +7051,11 @@ function createVueApp() {
       setPagePick: function(col, vals) {
         var n = this.currentTable, p = Object.assign({}, this.pagePicked); p[col] = vals || [];
         var all = Object.assign({}, this.pagePicks); all[n] = p; this.pagePicks = all;
-        try { localStorage.setItem('page_filter:' + n, JSON.stringify(p)); } catch (e) {}
+        savePref('page_filter:' + n, p);
       },
       _setCompareRows: function(rows) {
         var n = this.currentTable, all = Object.assign({}, this.pageCompares); all[n] = rows; this.pageCompares = all;
-        try { localStorage.setItem('page_compare:' + n, JSON.stringify(rows)); } catch (e) {}
+        savePref('page_compare:' + n, rows);
       },
       // Merges into the page's _pages doc, so the body beside it is untouched.
       _setSharedCompare: function(rows) {
@@ -7312,7 +7315,7 @@ function createVueApp() {
       saveFirebaseConfig: function() {
         var input = this.firebaseConfigInput.trim();
         if (!input && this.hasFirebaseConfig) {
-          localStorage.setItem('app_mode', 'firebase');
+          Databases.setMode('firebase');
           location.reload();
           return;
         }
@@ -8042,8 +8045,8 @@ function createVueApp() {
       triggerOAuth: function() { if (typeof triggerOAuth === 'function') triggerOAuth(); },
       selectSetupMode: function(mode) {
         this.setupStep = mode || null;
-        if (mode) { localStorage.setItem('app_mode', mode); }
-        else { localStorage.removeItem('app_mode'); location.reload(); return; }
+        Databases.setMode(mode || null);
+        if (!mode) { location.reload(); return; }
         if (mode === 'firebase' && !this.firestoreRules) {
           var self = this;
           fetch(_u('/firestore.rules')).then(function(r) { return r.ok ? r.text() : ''; }).then(function(t) { self.firestoreRules = t; }).catch(function(){});
@@ -8279,7 +8282,7 @@ function createVueApp() {
           if (!this.$vuetify || !this.$vuetify.theme) return;
           var themes = this.$vuetify.theme.themes; themes = (themes && themes.value) ? themes.value : themes;
           var pick = function(name, fp, fb) { var c = (themes[name] && themes[name].colors) || {}; return { p: c.primary || fp, bg: c.background || c.surface || fb }; };
-          localStorage.setItem('brand_splash', JSON.stringify({ light: pick('light', '#1976d2', '#ffffff'), dark: pick('dark', '#90caf9', '#121212') }));
+          savePref('brand_splash', { light: pick('light', '#1976d2', '#ffffff'), dark: pick('dark', '#90caf9', '#121212') });
         } catch (e) {}
       },
 
@@ -8717,7 +8720,7 @@ function createVueApp() {
       // Probe local server availability for setup UI — but only when a local dev server could
       // actually be present. On a committed cloud backend (firebase/supabase) there is no /api
       // endpoint, so the probe would just log a spurious 404 to the console on every load.
-      var appMode = (function() { try { return localStorage.getItem('app_mode'); } catch (e) { return null; } })();
+      var appMode = Databases.mode();
       if (appMode !== 'firebase' && appMode !== 'supabase' && appMode !== 'pglite' && _mayLocal()) {
         fetch(_u('/api/validateFolder'), { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{"id":"probe"}' })
           .then(function(r) { if (r.ok) self.hasLocalServer = true; })
@@ -9909,8 +9912,7 @@ function createVueApp() {
       var today = this.calendarHost.today();
       // `picked`: the reader's `filters` choices, { column: [values] }, kept in THIS browser -- a
       // convenience of the viewer's, not a setting of the calendar's.
-      var picked = {};
-      try { picked = JSON.parse(localStorage.getItem('cal_filter:' + this.name) || '{}') || {}; } catch (e) { picked = {}; }
+      var picked = loadPref('cal_filter:' + this.name, {});
       return { mode: this.calendarHost.config(this.name).defaultView || 'month', anchor: today, sel: today, picked: picked };
     },
     computed: {
@@ -9979,7 +9981,7 @@ function createVueApp() {
       selectDay: function(d) { this.sel = d; },
       setPicked: function(col, vals) {
         var p = Object.assign({}, this.picked); p[col] = vals || []; this.picked = p;
-        try { localStorage.setItem('cal_filter:' + this.name, JSON.stringify(p)); } catch (e) {}
+        savePref('cal_filter:' + this.name, p);
       }
     }),
     template: ''
@@ -11096,8 +11098,7 @@ function createVueApp() {
     // Open cards and folded lanes, per viewer in this browser, per board.
     watch: {
       viewName: { immediate: true, handler: function(n) {
-        var f = null;
-        try { f = JSON.parse(localStorage.getItem('board_fold:' + n) || 'null'); } catch (e) {}
+        var f = loadPref('board_fold:' + n, null);
         this.fold = { cards: (f && f.cards) || {}, lanes: (f && f.lanes) || {} };
       } }
     },
@@ -11378,7 +11379,7 @@ function createVueApp() {
       toggleFold: function(kind, key) {
         var m = this.fold[kind];
         if (m[key]) delete m[key]; else m[key] = true;
-        try { localStorage.setItem('board_fold:' + this.viewName, JSON.stringify(this.fold)); } catch (e) {}
+        savePref('board_fold:' + this.viewName, this.fold);
       }
     }),
     template: ''
@@ -11501,8 +11502,7 @@ function createVueApp() {
   app.component('compare-rows', {
     props: { page: String },
     data: function() {
-      var s = {};
-      try { s = JSON.parse(localStorage.getItem('page_compare_sort:' + this.page) || '{}') || {}; } catch (e) {}
+      var s = loadPref('page_compare_sort:' + this.page, {});
       return { sortCol: s.col !== undefined ? s.col : null, sortAsc: s.asc !== false };
     },
     computed: {
@@ -11525,7 +11525,7 @@ function createVueApp() {
       sortAsc: function() { this.saveSort(); }
     },
     methods: Object.assign({
-      saveSort: function() { try { localStorage.setItem('page_compare_sort:' + this.page, JSON.stringify({ col: this.sortCol, asc: this.sortAsc })); } catch (e) {} }
+      saveSort: function() { savePref('page_compare_sort:' + this.page, { col: this.sortCol, asc: this.sortAsc }); }
     }, SORT_UI),
     template: ''
       + '<div class="mt-3 mb-3" data-testid="compare">'
@@ -11642,7 +11642,7 @@ function createVueApp() {
 
 function init() {
   var folder = localStorage.getItem('app_folder');
-  var savedMode = localStorage.getItem('app_mode');
+  var savedMode = Databases.mode();
   var instance = appInstance;
   if (savedMode === 'firebase') {
     instance.mode = 'firebase';
