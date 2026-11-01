@@ -1,6 +1,6 @@
 // schema.js — the Node test harness's schema loader: SCHEMA/VIEWS/_columnOrders from the demo
 // example's schema (examples/demo-schema.json — it lived in dev/ until the app itself had to be
-// able to fetch it, and dev/ is pruned from both publish paths).
+// able to fetch it, and dev/ is not published).
 //
 // The CONVERSION is /schema-normalize.js — the same module schema-loader.js runs in the browser. This
 // file used to re-implement it (flatten + colMap + implicit id), which meant the unit suite normalized

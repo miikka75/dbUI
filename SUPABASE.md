@@ -270,8 +270,8 @@ documented degradation to manual refresh and paste-a-URL.
 
 Config lives in `localStorage` (entered once via setup, or shared via `?mode=supabase&url=…&key=…`), so
 no secrets are baked into the deploy. Alternatively commit a `supabase-config.json`
-(`{"url":"…","anonKey":"…"}`) — the anon key is safe to publish; remove it from the workflow's prune list
-if you want it deployed.
+(`{"url":"…","anonKey":"…"}`) — the anon key is safe to publish; run the workflow's `scripts/build-site.js` with
+`--with-config` if you want it deployed.
 
 ### Custom domain
 

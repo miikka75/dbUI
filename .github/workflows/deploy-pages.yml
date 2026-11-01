@@ -1,8 +1,8 @@
 # .github/workflows/deploy-pages.yml
 # Deploy the static site to GitHub Pages on every push to main.
 #
-# The app is plain static files (no build step), so this just uploads the repo root as the Pages
-# artifact and publishes it. One-time setup: repo Settings -> Pages -> Build and deployment ->
+# The app is plain static files (no build step), so this copies the files the site serves into _site/
+# and publishes that. One-time setup: repo Settings -> Pages -> Build and deployment ->
 # Source: "GitHub Actions".
 name: Deploy to GitHub Pages
 
@@ -69,40 +69,18 @@ jobs:
       # relative URL), so the copy list lives in one script shared with update-vendor.sh. Missing it does
       # not kill the backend (it falls back to jsdelivr, as Vue and Vuetify do) but it does hand every
       # visitor's boot to a third party, which is the one thing that mode exists to avoid. ~17 MB of the
-      # published artifact. Runs BEFORE the prune below, which deletes scripts/.
+      # published artifact.
       - name: Materialise the PGlite WASM dist
         run: bash scripts/vendor-pglite.sh --force
 
-      # Publish the whole repo root. Excludes below keep secrets / dev-only files out of the public site.
-      - name: Prune non-public files
-        run: |
-          rm -rf .github dev docs node_modules tests test .git scripts || true
-          # NOT pruned any more: supabase-schema.sql. It was listed here as a "server-side" file — but
-          # the browser-local Postgres backend FETCHES it at boot and applies it (storage-pglite.js), so
-          # deleting it published an app whose "In this browser" mode 404s on its own access policy. It
-          # carries no secrets (it is the policy source, like firestore.rules, which the setup dialog
-          # already fetches and displays), and Firebase Hosting has always served it.
-          rm -f firebase-config.json supabase-config.json .env* firebase.json .firebaserc firestore.indexes.json || true
-          # Dot-DIRECTORIES. Editor and tooling folders hold local configuration, and .github above is
-          # only one of them: .claude/settings.local.json was being published. Keep .nojekyll and any
-          # other dotFILE Pages itself needs -- this deletes directories only.
-          find . -mindepth 1 -maxdepth 1 -type d -name '.*' ! -name '.git' -exec rm -rf {} + || true
-          # Executables, by CLASS. This list used to name split-supabase-commits.bat and nothing else,
-          # so make-supabase-pr.bat -- added later, next to it -- shipped. Naming files does not scale;
-          # naming extensions does. (update-vendor.sh is safe to drop: the vendor step above has
-          # already run, and a deploy must never re-run it.)
-          rm -f ./*.sh ./*.bat ./*.cmd ./*.ps1 ./*.exe || true
-          # Data export / import bundles carry ROW data. This is the SECOND publish path for the repo
-          # root (firebase.json hosting is the other), with its own hand-maintained exclusion list —
-          # so the same patterns have to be refused here or the leak just moves to Pages.
-          # dev/test/deploy-config.test.js checks both lists against the same filenames.
-          rm -f drive-sync-export-*.json *-import.json *-export.json || true
-          ls -a
+      # An allowlist, shared with Firebase Hosting: only what scripts/build-site.js lists is published.
+      - name: Build the published folder
+        run: node scripts/build-site.js && ls -R _site | head -40
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v5
         with:
-          path: .
+          path: _site
 
       - name: Deploy
         id: deployment
@@ -111,13 +89,12 @@ jobs:
   # Verify what was actually PUBLISHED, not what was committed.
   #
   # dev/test/csp.test.js already fails on source drift -- the meta tag not matching csp.js, the tag
-  # sinking below the first fetch. What no unit test can see is the deploy itself: a prune step that
-  # removes the wrong file, Pages serving a stale index.html, or somebody committing a csp.js change
+  # sinking below the first fetch. What no unit test can see is the deploy itself: a build step that
+  # leaves out a file, Pages serving a stale index.html, or somebody committing a csp.js change
   # without running `npm run csp:sync`. The CSP is delivered as a <meta> tag because Pages cannot send
   # a header, which means the policy is part of the payload and can be broken BY deploying.
   #
-  # A separate job, because the prune above deletes dev/ and .github/ from the working tree before the
-  # upload -- there is no dev/check-supabase.mjs left in the deploy job to run.
+  # A separate job, so it checks what Pages serves once the deploy has finished.
   #
   # No token, deliberately: this half needs none. It checks that the site serves an ENFORCING policy
   # positioned above the first fetch, and that the collector is reachable and accepts a report. The

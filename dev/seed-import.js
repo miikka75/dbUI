@@ -25,7 +25,7 @@ const path = require('path');
 const Examples = require('../examples');
 const PORT = process.env.PORT || 3000;
 const BASE = 'http://127.0.0.1:' + PORT + '/api/';
-// examples/ rather than dev/: dev/ is pruned from both publish paths, so a schema kept there can
+// examples/ rather than dev/: dev/ is not published, so a schema kept there can
 // never be fetched by the running app -- which is what the example picker does. See examples/README.md.
 const EXAMPLES = path.join(__dirname, '..', 'examples');
 

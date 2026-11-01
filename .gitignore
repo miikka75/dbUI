@@ -46,6 +46,9 @@ dev/test/.*-[0-9]*.json
 firebase-debug.log
 firestore-debug.log
 
+# What scripts/build-site.js publishes (both deploy paths upload it).
+/_site/
+
 # firebase hosting deploy cache (local, machine-specific — regenerated each deploy)
 .firebase/
 
