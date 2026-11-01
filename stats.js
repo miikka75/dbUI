@@ -81,6 +81,7 @@
   // A series tile's caption: the period it covers, in the reader's locale.
   function periodLabel(period, locale) {
     var p = period.start.split('-'), d = new Date(+p[0], +p[1] - 1, +p[2]);
+    /** @type {Intl.DateTimeFormatOptions} */
     var o = period.interval === 'monthly' ? { month: 'short', year: 'numeric' }
           : period.interval === 'daily' ? { weekday: 'short', day: 'numeric', month: 'short' } : { day: 'numeric', month: 'short' };
     return new Intl.DateTimeFormat(locale, o).format(d);

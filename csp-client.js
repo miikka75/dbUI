@@ -193,11 +193,13 @@
 
   // The token-gated GET both collectors answer. Rejects with the status, so a wrong token (403) and a
   // collector whose table was never created (502 "Storage error") are told apart on screen.
+  function httpError(res) { return Object.assign(new Error('HTTP ' + res.status), { status: res.status }); }
+
   function readLog(endpoint, token, fetchImpl) {
     var f = fetchImpl || root.fetch;
     var url = endpoint + (endpoint.indexOf('?') < 0 ? '?' : '&') + 'token=' + encodeURIComponent(token);
     return f(url).then(function(res) {
-      if (!res.ok) { var e = new Error('HTTP ' + res.status); e.status = res.status; throw e; }
+      if (!res.ok) throw httpError(res);
       return res.json();
     }).then(summarize);
   }
@@ -209,7 +211,7 @@
     var f = fetchImpl || root.fetch;
     var url = endpoint + (endpoint.indexOf('?') < 0 ? '?' : '&') + 'rotate&token=' + encodeURIComponent(token);
     return f(url, { method: 'POST' }).then(function(res) {
-      if (!res.ok) { var e = new Error('HTTP ' + res.status); e.status = res.status; throw e; }
+      if (!res.ok) throw httpError(res);
       return res.json();
     }).then(function(j) {
       if (!j || typeof j.token !== 'string' || !j.token) throw new Error('no token in the answer');
