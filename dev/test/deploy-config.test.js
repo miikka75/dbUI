@@ -46,13 +46,20 @@ describe('deploy config — what is published', () => {
   it('Firebase Hosting serves _site, built after vendor/ is fetched', () => {
     assert.equal(cfg.hosting.public, '_site');
     const hooks = [].concat(cfg.hosting.predeploy || []);
-    assert.ok(hooks.indexOf('node scripts/build-site.js --with-config') > hooks.indexOf('node scripts/vendor-fetch.mjs'),
+    assert.ok(hooks.indexOf('node scripts/build-site.js --with-config --minify') > hooks.indexOf('node scripts/vendor-fetch.mjs'),
       'predeploy must fetch vendor/ and then build _site');
   });
 
   it('GitHub Pages uploads _site, built from the same list', () => {
-    assert.match(wf, /run: node scripts\/build-site\.js/);
+    assert.match(wf, /run: node scripts\/build-site\.js --minify/);
     assert.match(wf, /upload-pages-artifact@\S+\s+with:\s+path: _site/);
+  });
+
+  // A minifier bug would ship unseen if CI tested the source; it tests the published build instead.
+  it('CI runs the UI suites against the minified published build', () => {
+    const ci = fs.readFileSync(path.join(ROOT, '.github', 'workflows', 'node.js.yml'), 'utf8');
+    assert.match(ci, /build-site\.js --minify/);
+    assert.match(ci, /run: npx playwright test\s+env:\s+STATIC_DIR: \.\.\/_site/);
   });
 
   const MUST_NOT_PUBLISH = [

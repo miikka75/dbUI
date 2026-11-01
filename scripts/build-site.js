@@ -3,10 +3,15 @@
 // workflow and Firebase Hosting's predeploy) upload that folder, so a file is public only if it is listed
 // here: a new file in the repo root stays private until someone adds it.
 //
-//   node scripts/build-site.js [--with-config] [--root <dir>] [--out <dir>]
+//   node scripts/build-site.js [--with-config] [--minify] [--root <dir>] [--out <dir>]
 // --with-config adds firebase-config.json / supabase-config.json, so visitors connect without setup.
+// --minify runs the app's own scripts through esbuild (vendor/ is already minified; index.html is not
+// touched, so the CSP hashes of its inline scripts still hold). Top-level names survive: the modules
+// are classic scripts that share them as globals.
 const fs = require('fs');
 const path = require('path');
+const { execFileSync } = require('child_process');
+const ESBUILD = 'esbuild@0.28.2';
 
 // Patterns relative to the repo root. `*` stays inside one folder, `**` crosses folders. Scripts are not
 // listed: the ones published are the ones index.html names (scriptsOf).
@@ -52,7 +57,16 @@ function build(root, outDir, opts) {
     fs.mkdirSync(path.dirname(to), { recursive: true });
     fs.copyFileSync(path.join(root, ...rel.split('/')), to);
   }
+  if (opts.minify) minify(outDir, files.filter((rel) => /^[^/]+\.js$/.test(rel)));
   return files;
+}
+
+// In place, with a linked source map beside each file (the source is public anyway).
+function minify(outDir, scripts) {
+  if (!scripts.length) return;
+  const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx';
+  execFileSync(npx, ['--yes', ESBUILD].concat(scripts, ['--minify', '--target=es2020', '--sourcemap',
+    '--outdir=.', '--allow-overwrite', '--log-level=warning']), { cwd: outDir, stdio: 'inherit', shell: process.platform === 'win32' });
 }
 
 module.exports = { SITE, CONFIG, scriptsOf, isPublished, build };
@@ -61,7 +75,7 @@ if (require.main === module) {
   const arg = (name) => { const i = process.argv.indexOf(name); return i > 0 ? process.argv[i + 1] : null; };
   const root = path.resolve(arg('--root') || path.join(__dirname, '..'));
   const out = path.resolve(arg('--out') || path.join(root, '_site'));
-  const files = build(root, out, { withConfig: process.argv.includes('--with-config') });
+  const files = build(root, out, { withConfig: process.argv.includes('--with-config'), minify: process.argv.includes('--minify') });
   if (!files.includes('index.html')) { console.error('build-site: no index.html under ' + root); process.exit(1); }
   console.log('✓ _site — ' + files.length + ' files');
 }
