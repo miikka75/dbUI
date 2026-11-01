@@ -3038,7 +3038,7 @@ stance as an empty profile name.
 - The resolution needs the caller's **own** link, which they may read (`getMyListValues` — a rules-provable
   equality query on their own email; see the `_list_users` read rule). The full value→email map stays
   admin-only, and the avatar projection still never carries an email.
-- **Renaming a list value**, or a lookup row's handle (either dimension, when the handle is derived), migrates the link with it, but the identity is keyed by the old string, so a
+- **Renaming a list value**, or a lookup row's handle (either dimension, when the handle is derived), migrates the link with it, and deleting either drops it; but the identity is keyed by the old string, so a
   rename that races another writer can leave the link behind.
 
 ### Membership requests (self-service, admin-approved)
