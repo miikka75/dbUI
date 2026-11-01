@@ -11,7 +11,7 @@ const Site = require('../scripts/build-site');
 
 const ROOT = path.join(__dirname, '..');
 const OUT = fs.mkdtempSync(path.join(os.tmpdir(), 'dbui-site-'));
-Site.build(ROOT, OUT);
+Site.build(ROOT, OUT, { minify: true });   // as the deploys build it
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml',
   '.png': 'image/png', '.wasm': 'application/wasm', '.woff2': 'font/woff2', '.sql': 'text/plain', '.rules': 'text/plain' };
 

@@ -22,7 +22,7 @@
   "hosting": {
     "predeploy": [
       "node scripts/vendor-fetch.mjs",
-      "node scripts/build-site.js --with-config"
+      "node scripts/build-site.js --with-config --minify"
     ],
     "public": "_site",
     "ignore": [

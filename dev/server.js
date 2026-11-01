@@ -35,7 +35,8 @@ const DB_PATH = (APP_DB && APP_DB !== ':memory:') ? path.resolve(__dirname, APP_
 let backend = USE_PG ? null : (USE_FS
   ? require('./storage-fs').createFsBackend(path.join(__dirname, 'data'))
   : require('./backend-local').createLocalBackend(APP_DB === ':memory:' ? undefined : (DB_PATH || path.join(__dirname, 'local.db'))));
-const STATIC_DIR = path.join(__dirname, '..');
+// STATIC_DIR=../_site serves the published build instead of the source (CI runs the UI suite against it).
+const STATIC_DIR = process.env.STATIC_DIR ? path.resolve(__dirname, process.env.STATIC_DIR) : path.join(__dirname, '..');
 
 // CSP=1 -> compute the enforced policy once at startup (inline-script hashes come from the real
 // index.html, so an edited inline block is immediately reflected here — and guarded by csp.test.js).
