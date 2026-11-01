@@ -5,11 +5,12 @@
 // is that mapping and nothing else: which store a row lives in, what shape it has, and which
 // schema-derived facts the schema-blind policies need mirrored alongside it.
 //
-// It is deliberately ignorant of WHERE the kv table is. Two hosts run it today:
+// It is deliberately ignorant of WHERE the kv table is. Three hosts run it today:
 //   backend-supabase.js      — kv in a hosted Supabase project, over the network, RLS enforced by Postgres.
 //   backend-local-pglite.js  — kv in PostgreSQL-in-WASM in the visitor's own browser (IndexedDB), the
 //                              same supabase-schema.sql applied by storage-pglite.js.
-// The two differ in their PLATFORM (who the caller is, how a file is uploaded, whether other clients
+//   backend-firebase.js      — the same documents in Firestore, overriding where Firestore differs.
+// The two Postgres hosts differ in their PLATFORM (who the caller is, how a file is uploaded, whether other clients
 // exist to hear about a change) and in nothing else. That is the whole argument for this file: the
 // alternative was a second copy of ~400 lines of access-shaped mapping, drifting from the first.
 //

@@ -43,9 +43,11 @@ describe('backend contract — Node backends (runtime)', () => {
 describe('BACKEND_API.md documents the methods the backends actually expose', () => {
   const doc = fs.readFileSync(path.join(__dirname, '..', '..', 'BACKEND_API.md'), 'utf8');
 
-  // `_`-prefixed members are internals, deliberately not part of the contract.
+  // `_`-prefixed members are internals, deliberately not part of the contract. Firebase's platform hooks
+  // (above `backend = _kv.backend`) are backend-kv.js's to document, not the contract's.
   const methodsIn = (file) => {
-    const src = fs.readFileSync(path.join(__dirname, '..', '..', file), 'utf8');
+    let src = fs.readFileSync(path.join(__dirname, '..', '..', file), 'utf8');
+    if (src.includes('backend = _kv.backend;')) src = src.slice(src.indexOf('backend = _kv.backend;'));
     return [...src.matchAll(/^\s{2,6}([a-zA-Z][a-zA-Z0-9_]*)\s*:\s*function/gm)].map((m) => m[1]);
   };
 
@@ -96,16 +98,27 @@ describe('backend contract — browser backends (source scan)', () => {
     return set;
   }
 
-  // backend-kv.js is where the contract is actually written for the two key-value backends (Supabase and
-  // the browser-local PGlite): they are PLATFORM files -- auth, realtime, uploads -- and share this one
-  // implementation. Scanning them individually would find nothing and pass vacuously.
-  for (const file of ['backend-firebase.js', 'backend-kv.js']) {
-    it(file + ' defines every contract method', () => {
-      const defined = definedMethods(file);
-      const missing = CONTRACT.filter(m => !defined.has(m));
-      assert.deepEqual(missing, [], file + ' is missing: ' + missing.join(', '));
-    });
-  }
+  // backend-kv.js is where the contract is actually written for Firebase, Supabase and the browser-local
+  // PGlite: the three are PLATFORM files -- auth, realtime, uploads -- and share this one implementation.
+  it('backend-kv.js defines every contract method', () => {
+    const defined = definedMethods('backend-kv.js');
+    const missing = CONTRACT.filter(m => !defined.has(m));
+    assert.deepEqual(missing, [], 'backend-kv.js is missing: ' + missing.join(', '));
+  });
+
+  // Firestore differs from the kv mapping where its rules refuse a list query they cannot prove, where a
+  // denied read throws, and where it has batches, arrayUnion, field deletes and transactions. Its file
+  // may redefine these and nothing else; a new copy has to be added here with its reason.
+  const FIRESTORE_OVERRIDES = ['saveSchema', 'getFolderConfig', 'bootData', 'getTableData', 'subscribeTable',
+    'putRow', 'deleteRow', 'saveLists', 'putListItem', 'getListAvatars', 'getMyListValues', 'deleteTranslations',
+    'getMyAccess', 'setUserRole', 'removeUser', 'selfRegister', 'getSharedNames', 'getSharedProfiles'];
+  it('backend-firebase.js builds on backend-kv.js and redefines only the Firestore-specific methods', () => {
+    const src = fs.readFileSync(path.join(__dirname, '..', '..', 'backend-firebase.js'), 'utf8');
+    assert.match(src, /createKvBackend\(StorageFirestore,/, 'backend-firebase.js no longer builds its backend from the shared factory');
+    const own = [...src.slice(src.indexOf('backend = _kv.backend;')).matchAll(/^ {2}([a-zA-Z]\w*)\s*:\s*function/gm)].map((m) => m[1]);
+    const extra = own.filter((m) => !FIRESTORE_OVERRIDES.includes(m));
+    assert.deepEqual(extra, [], 'backend-firebase.js re-implements shared methods: ' + extra.join(', '));
+  });
 
   // ...which only holds while they really do delegate. A platform file that grew its own copy of a
   // contract method would satisfy nothing here and drift silently, so pin the delegation itself.
@@ -193,7 +206,8 @@ describe('backend contract — the browser backends use the shared seed rule', (
   // Postgres and applying the whole schema — supabase-rls.test.js already pays that cost for the
   // policies. Scanned here instead, alongside the two it mirrors, so all three document backends are
   // held to the rule in one place.
-  for (const file of ['backend-firebase.js', 'backend-kv.js', 'dev/backend-pglite.js']) {
+  // Firebase runs backend-kv.js's createLanguage (pinned by the override list above).
+  for (const file of ['backend-kv.js', 'dev/backend-pglite.js']) {
     it(file + ' seeds translations without overwriting what is stored', () => {
       const src = fs.readFileSync(path.join(__dirname, '..', '..', ...file.split('/')), 'utf8');
       const at = Math.max(src.indexOf('createLanguage: function'), src.indexOf('async createLanguage('));

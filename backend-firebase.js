@@ -16,62 +16,52 @@ function _myEmail() {
     || (typeof appInstance !== 'undefined' && appInstance && appInstance.currentUserEmail)) || '').toLowerCase();
 }
 
-backend = {
-  getSchema: function() {
-    return StorageFirestore.getMeta('schema').then(function(d) {
-      return BackendHelpers.unwrapSchemaDoc(d);
-    });
+// The documents are the ones backend-kv.js maps, so the contract is built from it. What stays below is
+// where Firestore differs: the rules refuse a list query they cannot prove, a denied read throws, and it
+// has batches, arrayUnion, field deletes and transactions.
+var _kv = createKvBackend(StorageFirestore, {
+  name: 'Firebase',
+  myEmail: _myEmail,
+  noUsers: function() { return Promise.resolve(false); },   // unread: _myTables and getMyAccess are Firestore's own
+  // Upload a file to Firebase Storage under uploads/<user-email>/<ts>_<name>, resolving to its download
+  // URL (stored in the row by the image column). The download URL carries an access token, so the <img>
+  // renders regardless of Storage read rules. Presence of this method is what enables the image uploader;
+  // backends without it fall back to a paste-a-URL input.
+  uploadFile: function(file, opts) {
+    if (!_storage) return Promise.reject(new Error('Firebase Storage not initialized'));
+    var o = opts || {};
+    var path;
+    if (o.path) {
+      // A caller-chosen STABLE path, overwritten in place. An image must never collide, so it gets the
+      // timestamped path below; a calendar feed is the opposite -- its URL is a subscription, and a new
+      // path per publish would silently strand every subscriber on the previous file.
+      path = String(o.path);
+    } else {
+      var email = _myEmail() || 'anon';
+      var safe = String((file && file.name) || 'file').replace(/[^\w.\-]+/g, '_');
+      path = 'uploads/' + email + '/' + Date.now() + '_' + safe;
+    }
+    var meta = o.contentType ? { contentType: o.contentType } : undefined;
+    return _storage.ref().child(path).put(file, meta).then(function(snap) { return snap.ref.getDownloadURL(); });
   },
+  // Every stored path under `prefix`, for the feed sweep. listAll pages internally; files only.
+  listFiles: function(prefix) {
+    if (!_storage) return Promise.reject(new Error('Firebase Storage not initialized'));
+    return _storage.ref().child(String(prefix || '').replace(/\/+$/, '')).listAll()
+      .then(function(res) { return res.items.map(function(r) { return r.fullPath; }); });
+  }
+});
+backend = _kv.backend;
+var _kvSaveSchema = backend.saveSchema;
+Object.assign(backend, {
   saveSchema: function(schema) {
     this._capacityMirror = null;   // re-read by _capacityFor: the capacity config is part of what this rewrites
-    // Mirror the schema-derived facts the schema-blind firestore rules need, kept in sync on every
-    // schema write: _meta/ownerTables (tables with an owner column -> gates owner-create),
-    // _meta/pageAccess (restricted doc-views -> gates _pages__active reads; see pageAccessOf),
-    // _meta/ownerWritable (which columns an owner-scoped write may touch; see ownerWritableOf) and
-    // _meta/listTables (which tables own each list -> lets the /_lists rule authorize a CREATE, where
-    // there is no existing doc to read the ownership label from; see listOwnershipMap) and
-    // _meta/listWritable (which lists a NON-ADMIN may add to at all; see userWritableListsOf).
-    return Promise.all([
-      StorageFirestore.setMeta('schema', schema),
-      StorageFirestore.setMeta('ownerTables', BackendHelpers.ownerTablesMirror(schema)),
-      StorageFirestore.setMeta('pageAccess', BackendHelpers.pageAccessOf(schema)),
-      StorageFirestore.setMeta('ownerWritable', BackendHelpers.ownerWritableOf(schema)),
-      StorageFirestore.setMeta('stamped', BackendHelpers.stampedOf(schema)),
-      StorageFirestore.setMeta('listTables', listOwnershipMap((schema && schema.tables) || {})),
-      StorageFirestore.setMeta('listWritable', BackendHelpers.userWritableListsOf(schema))
-    ]);
-  },
-  // Single doc-view body by name. loadPage uses this (not the whole _pages__active collection) so that
-  // per-page access can restrict it: Firestore rules aren't filters, so a collection read is denied
-  // wholesale once ANY page is restricted, whereas a single-doc get() is authorized by the page's own
-  // rule. Returns { markdown } or null (missing / denied).
-  getPage: function(name) {
-    return StorageFirestore.get('_pages__active', name)
-      .then(function(d) { return d ? { markdown: d.markdown || '' } : null; })
-      .catch(function() { return null; });
-  },
-  // Single stored asset (a view background / an image cell's bytes) by id. Same single-doc reasoning as
-  // getPage, plus one of its own: _assets is a system store no table grant ever names, so the collection
-  // read in getTableData goes through _scopedRead and comes back EMPTY for a non-admin. Ask for the one
-  // document instead. Returns { src } or null (missing / denied).
-  getAsset: function(id) {
-    return StorageFirestore.get('_assets__active', id)
-      .then(function(d) { return d ? { src: d.src || '' } : null; })
-      .catch(function() { return null; });
-  },
-  validateFolder: function(id) {
-    return Promise.resolve({ valid: true, name: 'Firebase' });
+    return _kvSaveSchema.call(this, schema);
   },
   getFolderConfig: function() {
     // A visitor may not read the config (it can hold a shared feed's link): they get none, not an error.
     return StorageFirestore.getMeta('config').then(function(d) { return d || null; }, function(e) { if (!_myEmail()) return null; throw e; });
   },
-  setFolderConfig: function(config) {
-    return StorageFirestore.setMeta('config', config);
-  },
-  // Table ids ARE table names on every remaining backend, so there is nothing to map and nothing to
-  // create up front -- a Firestore collection / kv row springs into being on first write.
-  initSchema: function() { return Promise.resolve(null); },
   // One-round-trip boot for Firebase: schema + languages + lists + all accessible table data, fetched
   // CONCURRENTLY (Promise.all). Firestore has no Sheets-style per-call rate limit, so concurrency is
   // safe here. Access-scoped via _myTables so denied collections are never queried (rules aren't
@@ -110,12 +100,6 @@ backend = {
       // restricted editor's writes to lists outside their own tables would be denied wholesale
       // (Firestore batch commits are atomic), whereas an admin/bootstrap (allowed === null) may.
       return { schema: parsed, tableOrder: Object.keys(tables), languages: languages, lists: lists, data: {}, unrestricted: allowed === null };
-    });
-  },
-  getAvailableTables: function() { return Promise.resolve([]); },
-  getAvailableLanguages: function() {
-    return StorageFirestore.getMeta('languages').then(function(d) {
-      return d ? (d.list || []) : [];
     });
   },
   // Read a table the caller may not hold a blanket grant on. Rules are not filters: with no table
@@ -302,12 +286,6 @@ backend = {
       });
     });
   },
-  moveRow: function(tableId, rowData, fromTab, toTab) {
-    var self = this;
-    return self.deleteRow(tableId, rowData.id, fromTab).then(function() {
-      return self.putRow(tableId, rowData, toTab);
-    });
-  },
   // --- Per-list storage (Phase 1): collection `_lists`, one doc per list { name, items, tables }.
   // `tables` = owning tables (derived from schema), used by the /_lists Firestore rule to gate reads.
   // Reads are rules-safe: admins read the whole collection (and lazily migrate the legacy _meta/lists
@@ -337,43 +315,6 @@ backend = {
       }).catch(function() { return []; });            // map read denied -> fail closed
     }).catch(function() { return []; });
   },
-  _legacyGetLists: function() {
-    return StorageFirestore.getMeta('lists').then(function(d) { return (d && !d._value) ? d : {}; });
-  },
-  getLists: function() {
-    var self = this;
-    return self._myTables().then(function(tabs) {
-      if (tabs === null) {
-        return _db.collection('_lists').get().then(function(snap) {
-          if (!snap.empty) { var o = {}; snap.forEach(function(d) { var v = d.data(); o[v.name || d.id] = v.items || []; }); return o; }
-          // one-time additive migration of the legacy _meta/lists doc -> per-list _lists docs (admin only)
-          return self._legacyGetLists().then(function(legacy) {
-            if (!Object.keys(legacy).length) return {};
-            return self.saveLists(legacy).then(function() { return legacy; });
-          });
-        });
-      }
-      // restricted: rules cannot prove-authorize an `array-contains-any` query against a get()-fetched
-      // allow-set, so the collection query is denied; read each list the caller may read by name instead
-      // (a single-doc read is what listAllowed() evaluates). The candidates are ListAccess.accessibleListNames: the lists of their granted tables, plus
-      // those of every self-service table, which a member writes with no grant. A caller with no grants
-      // still asks, because self-service needs none; a refused schema read means nothing to ask for.
-      return StorageFirestore.getMeta('schema').catch(function () { return null; }).then(function (sd) {
-        var schemaTables = (BackendHelpers.unwrapSchemaDoc(sd) || {}).tables || {};
-        // A public table's lists are everyone's, a visitor's included.
-        var pubT = Object.keys(schemaTables).filter(function(t) { return schemaTables[t] && schemaTables[t].public === true; });
-        var names = ListAccess.accessibleListNames(schemaTables, tabs.concat(pubT), Object.keys(ListAccess.listOwnershipMap(schemaTables)), true);
-        if (!names.length) return {};
-        return Promise.all(names.map(function(name) {
-          return _db.collection('_lists').doc(name).get()
-            .then(function(d) { return d.exists ? { name: (d.data().name || name), items: (d.data().items || []) } : null; })
-            .catch(function() { return null; });   // denied/missing list doc -> skip (fail-closed per list)
-        })).then(function(arr) {
-          var o = {}; arr.forEach(function(x) { if (x) o[x.name] = x.items; }); return o;
-        });
-      });
-    });
-  },
   saveLists: function(lists) {
     var self = this;
     return Promise.all([StorageFirestore.getMeta('schema'), self._myTables()]).then(function(r) {
@@ -399,11 +340,6 @@ backend = {
         { merge: true });
     });
   },
-  // --- User-linked lists (Option C): link a list VALUE to a registered user, for avatar display ---
-  // Each link is its own doc { list, value, email, shared }; `shared` caches the linked user's current
-  // opt-in so a non-admin can query ONLY shared links (whose emails are already world-readable via
-  // /_profiles) — mirroring getSharedProfiles. Admins read all; only admins write.
-  _linkDocId: function(listName, value) { return ListUsers.linkDocId(listName, value); },
   // Viewer-safe { list: { value: { picture, name } } } projection. Tries the admin read (all links,
   // joined against every profile incl. unshared); on denial falls back to the shared-only query any
   // registered user may run. Never returns an email.
@@ -422,12 +358,6 @@ backend = {
           .catch(function() { return {}; });
       });
   },
-  // Admin-only: the raw { list: { value: email } } links, for the Lookup editor's picker.
-  getListUserLinks: function() {
-    return _db.collection('_list_users').get().then(function(snap) {
-      var out = {}; snap.forEach(function(d) { var v = d.data(); (out[v.list] || (out[v.list] = {}))[v.value] = v.email; }); return out;
-    });
-  },
   // SELF-scoped: { listName: myValue } for every `userlink` list that names me. This is what lets `@me`
   // resolve to a curated list value instead of my profile display name. The whole-collection read above
   // is admin-only; this equality query is rules-provable against the caller's own email (see the
@@ -439,42 +369,6 @@ backend = {
       var out = {}; snap.forEach(function(d) { var v = d.data(); if (v.list && !(v.list in out)) out[v.list] = v.value; }); return out;
     }).catch(function() { return {}; });   // never let a denied/missing link break boot
   },
-  // Admin-only: link (email set) or unlink (empty) a value. Caches the linked user's current shared flag so
-  // the shared-only query stays rules-provable; a later share/unshare needs a re-link to refresh it.
-  setListUser: function(listName, value, email) {
-    var self = this, id = self._linkDocId(listName, value);
-    if (!email) return _db.collection('_list_users').doc(id).delete().then(function() { return self._mirrorIdentity(listName, value, ''); });
-    var e = String(email).toLowerCase();
-    return _db.collection('_profiles').doc(e).get().then(function(d) {
-      return _db.collection('_list_users').doc(id).set({ list: String(listName), value: String(value), email: e, shared: (d.exists && !!d.data().shared) });
-    }).then(function() { return self._mirrorIdentity(listName, value, e); });
-  },
-  // Mirror the link onto the linked user's GRANT doc as `identity: { <list>: <value> }`. The rules need
-  // "what is this caller's own value for this list" and cannot QUERY for it; the grant doc is
-  // admin-write-only (so a member cannot forge it) and already read on every evaluation, so this is the
-  // cheapest place to put the answer. Unlinking clears the key, and re-linking a value to a different
-  // user clears it from whoever held it before.
-  _mirrorIdentity: function(listName, value, email) {
-    var col = _db.collection('_users');
-    return col.get().then(function(snap) {
-      var writes = [];
-      snap.forEach(function(doc) {
-        var d = doc.data() || {}, ident = Object.assign({}, d.identity || {});
-        var had = ident[listName];
-        if (email && doc.id === email) { if (had === value) return; ident[listName] = value; }
-        else if (had === value) { delete ident[listName]; }                 // somebody else holds it now
-        else return;
-        writes.push(doc.ref.set(Object.assign({}, d, { identity: ident }))); // whole doc: grants are small
-      });
-      return Promise.all(writes);
-    }).catch(function() { /* non-admin or offline: the link itself is already written */ });
-  },
-  getTranslations: function(langCode) {
-    return StorageFirestore.getMeta('lang_' + langCode).then(function(d) { return d || {}; });
-  },
-  updateTranslations: function(langCode, updates) {
-    return _db.collection('_meta').doc('lang_' + langCode).set(updates, { merge: true });
-  },
   // update(), not set(merge): only update() removes a field. Each key as a FieldPath, because a string
   // path reads `field.topic` as a nested field. A missing doc has nothing to remove.
   deleteTranslations: function(langCode, keys) {
@@ -482,64 +376,8 @@ backend = {
     var ref = _db.collection('_meta').doc('lang_' + langCode), args = [];
     keys.forEach(function(k) { args.push(new firebase.firestore.FieldPath(k), firebase.firestore.FieldValue.delete()); });
     return ref.update.apply(ref, args).catch(function(e) { if (!e || e.code !== 'not-found') throw e; });
-  },
-  createLanguage: function(code, name, keys) {
-    return StorageFirestore.getMeta('languages').then(function(d) {
-      var langs = BackendHelpers.addLanguage(d ? (d.list || []) : [], code, name);
-      return StorageFirestore.setMeta('languages', { list: langs });
-    }).then(function() {
-      // Read first: an existing language keeps every string it already has, and every key the
-      // caller did not mention. Import calls this for each language in the file, so writing the
-      // blank seed straight over the document erased whichever translation pack was imported
-      // first -- schema strings wiped by an app pack, or the reverse.
-      return StorageFirestore.getMeta('lang_' + code).then(function(existing) {
-        return StorageFirestore.setMeta('lang_' + code, BackendHelpers.seedTranslations(existing, keys));
-      });
-    });
-  },
-  deleteLanguage: function(code) {
-    return StorageFirestore.getMeta('languages').then(function(d) {
-      var langs = BackendHelpers.removeLanguage(d ? (d.list || []) : [], code);
-      return StorageFirestore.setMeta('languages', { list: langs });
-    }).then(function() {
-      return _db.collection('_meta').doc('lang_' + code).delete();
-    });
-  },
-  renameLanguage: function(code, name) {
-    // Update only the languages index; the lang_<code> translations doc is left intact.
-    return StorageFirestore.getMeta('languages').then(function(d) {
-      var langs = BackendHelpers.renameLanguage(d ? (d.list || []) : [], code, name);
-      return StorageFirestore.setMeta('languages', { list: langs });
-    });
-  },
-  // Upload a file to Firebase Storage under uploads/<user-email>/<ts>_<name>, resolving to its download
-  // URL (stored in the row by the image column). The download URL carries an access token, so the <img>
-  // renders regardless of Storage read rules. Presence of this method is what enables the image uploader;
-  // backends without it fall back to a paste-a-URL input.
-  uploadFile: function(file, opts) {
-    if (!_storage) return Promise.reject(new Error('Firebase Storage not initialized'));
-    var o = opts || {};
-    var path;
-    if (o.path) {
-      // A caller-chosen STABLE path, overwritten in place. An image must never collide, so it gets the
-      // timestamped path below; a calendar feed is the opposite -- its URL is a subscription, and a new
-      // path per publish would silently strand every subscriber on the previous file.
-      path = String(o.path);
-    } else {
-      var email = _myEmail() || 'anon';
-      var safe = String((file && file.name) || 'file').replace(/[^\w.\-]+/g, '_');
-      path = 'uploads/' + email + '/' + Date.now() + '_' + safe;
-    }
-    var meta = o.contentType ? { contentType: o.contentType } : undefined;
-    return _storage.ref().child(path).put(file, meta).then(function(snap) { return snap.ref.getDownloadURL(); });
-  },
-  // Every stored path under `prefix`, for the feed sweep. listAll pages internally; files only.
-  listFiles: function(prefix) {
-    if (!_storage) return Promise.reject(new Error('Firebase Storage not initialized'));
-    return _storage.ref().child(String(prefix || '').replace(/\/+$/, '')).listAll()
-      .then(function(res) { return res.items.map(function(r) { return r.fullPath; }); });
   }
-};
+});
 
 function initFirebase() {
   // The ACTIVE database's config (Databases.config), not a single global key: one browser profile may
@@ -633,7 +471,9 @@ function triggerOAuth() {
   _auth.signInWithPopup(provider).catch(function(e) { console.error('Firebase auth error:', e); });
 }
 
-var backend_users = {
+var backend_users = _kv.users;
+var _kvSetUserRole = backend_users.setUserRole, _kvSelfRegister = backend_users.selfRegister;
+Object.assign(backend_users, {
   // The CURRENT user's own access only (self-scoped) so non-admins never read the whole users map.
   getMyAccess: function() {
     var email = _myEmail();
@@ -647,45 +487,8 @@ var backend_users = {
       }).catch(function() { return { registered: false }; });  // map denied (non-admin, post-close) -> fail closed
     }).catch(function() { return { registered: false }; });
   },
-  // Admin roster for the Users tab. Lists per-user docs; if the collection is empty, one-time
-  // ADDITIVE migration from the legacy _meta/users map (admin only) then returns it.
-  getUsers: function() {
-    return _db.collection('_users').get().then(function(snap) {
-      if (!snap.empty) {
-        var o = {}; snap.forEach(function(d) { var v = d.data(); o[d.id] = { role: v.role, user: v.user || d.id, tables: v.tables || 'all' }; });
-        return o;
-      }
-      return _db.collection('_meta').doc('users').get().then(function(m) {
-        if (!m.exists) return {};
-        var map = m.data(), batch = _db.batch(), o = {};
-        Object.keys(map).forEach(function(k) {
-          var v = map[k] || {}, key = String(k).toLowerCase();
-          var doc = { role: v.role, user: v.user || key, tables: v.tables || 'all' };
-          batch.set(_db.collection('_users').doc(key), doc); o[key] = doc;
-        });
-        return batch.commit().then(function() { return o; }).catch(function() { return o; });
-      });
-    });
-  },
-  setUserRole: function(uid, role, user, tables) {
-    var key = String(uid || '').toLowerCase();
-    backend._myTablesPromise = null;   // re-granting invalidates the memoized read scope
-    // READ FIRST. The stored grant carries the `identity` mirror setListUser wrote onto it, and this
-    // document is where the rules look for it -- so rebuilding the grant without it un-links the
-    // member. Worse than losing the link: ownerIdentityOk treats a MISSING identity map as migration
-    // grace and permits any value, so editing somebody's table access re-opened "log the work as
-    // somebody else" until an admin happened to re-save the link.
-    return _db.collection('_users').doc(key).get().then(function(snap) {
-      var prev = (snap && snap.exists && snap.data()) || {};
-      var doc = BackendHelpers.userGrantDoc(key, role, user, tables, prev.identity);
-      // Source of truth = /_users/<key>; also mirror into the legacy _meta/users map so a rules
-      // rollback keeps working during the transition.
-      return Promise.all([
-        _db.collection('_users').doc(key).set(doc),
-        _db.collection('_meta').doc('users').set(Object.fromEntries([[key, doc]]), { merge: true })
-      ]);
-    });
-  },
+  // Re-granting or registering changes the memoized read scope (_myTables).
+  setUserRole: function() { backend._myTablesPromise = null; return _kvSetUserRole.apply(this, arguments); },
   removeUser: function(uid) {
     var key = String(uid || '').toLowerCase();
     var del = firebase.firestore.FieldValue.delete();
@@ -696,47 +499,7 @@ var backend_users = {
       _db.collection('_meta').doc('users').update(upd).catch(function() {})
     ]);
   },
-  // --- Membership requests (self-service; admin approves) ---
-  // An unregistered user submits a request for access; only they can write their own request doc.
-  // OPEN SIGN-UP: write my own record with exactly the schema's newUser grant; signupOk checks it.
-  selfRegister: function() {
-    var email = _myEmail();
-    if (!email) return Promise.reject(new Error('not signed in'));
-    return _db.collection('_meta').doc('schema').get().then(function(d) {
-      var nu = BackendHelpers.signupOf(BackendHelpers.unwrapSchemaDoc(d.exists ? d.data() : null) || {});
-      if (!nu) throw new Error('sign-up is closed');
-      backend._myTablesPromise = null;
-      return _db.collection('_users').doc(email).set(BackendHelpers.userGrantDoc(email, nu.role, email, nu.tables));
-    });
-  },
-  requestAccess: function(name, note) {
-    var email = _myEmail();
-    if (!email) return Promise.reject(new Error('not signed in'));
-    return _db.collection('_access_requests').doc(email).set({ email: email, name: name || '', note: note || '', ts: Date.now() });
-  },
-  getAccessRequests: function() {   // admin only
-    return _db.collection('_access_requests').get().then(function(snap) {
-      var o = {}; snap.forEach(function(d) { o[d.id] = d.data(); }); return o;
-    });
-  },
-  removeAccessRequest: function(email) {
-    return _db.collection('_access_requests').doc(String(email || '').toLowerCase()).delete();
-  },
-  // --- Opt-in display-name profiles (for user-backed lists / leaderboard identity) ---
-  getMyProfile: function() {
-    var email = _myEmail();
-    if (!email) return Promise.resolve({ name: '', shared: false, picture: '' });
-    return _db.collection('_profiles').doc(email).get()
-      .then(function(d) { return d.exists ? { name: d.data().name || '', shared: !!d.data().shared, picture: d.data().picture || '' } : { name: '', shared: false, picture: '' }; })
-      .catch(function() { return { name: '', shared: false, picture: '' }; });
-  },
-  // picture: an optional data-URL avatar (resized client-side); '' clears it. Written together with
-  // name/shared so a full set() keeps them in sync (setProfileName still merges name only, preserving this).
-  setMyProfile: function(name, shared, picture) {
-    var email = _myEmail();
-    if (!email) return Promise.reject(new Error('not signed in'));
-    return _db.collection('_profiles').doc(email).set({ name: name || '', shared: !!shared, picture: picture || '' });
-  },
+  selfRegister: function() { backend._myTablesPromise = null; return _kvSelfRegister.apply(this, arguments); },
   // Names of users who opted to share -- the query is rules-provable (constant shared==true).
   // Deliberately does NOT catch: a rejection is distinguishable from "nobody opted in", and the caller
   // (_overlayUserLists) leaves the curated list intact on a rejection. Swallowing into [] made a rules
@@ -755,22 +518,7 @@ var backend_users = {
     return _db.collection('_profiles').where('shared', '==', true).get().then(function(snap) {
       var o = {}; snap.forEach(function(d) { var v = d.data(); o[d.id] = { name: v.name || '', picture: v.picture || '' }; }); return o;
     }).catch(function() { return {}; });
-  },
-  // Admin-only: seed/rename another user's profile display name (e.g. from their access request on
-  // approval, or from the Users table). Merges name only so an existing `shared` opt-in is preserved.
-  // Rules allow admin to write any profile.
-  setProfileName: function(email, name) {
-    var k = String(email || '').toLowerCase();
-    if (!k) return Promise.resolve();
-    return _db.collection('_profiles').doc(k).set({ name: name || '' }, { merge: true });
-  },
-  // Admin-only: every user's profile ({name, shared} keyed by email), for the Users management table.
-  // Rules allow admin to read the whole /_profiles collection regardless of each doc's `shared` flag.
-  getProfiles: function() {
-    return _db.collection('_profiles').get().then(function(snap) {
-      var o = {}; snap.forEach(function(d) { o[d.id] = d.data(); }); return o;
-    }).catch(function() { return {}; });
   }
-};
+});
 
 initFirebase();
