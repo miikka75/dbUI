@@ -60,6 +60,7 @@
     "csp-client.js",
     "databases.js",
     "backend-kv.js",
-    "storage-supabase.js"
+    "storage-supabase.js",
+    "schema-validate.js"
   ]
 }
