@@ -7751,7 +7751,7 @@ test.describe('Shared-link URL params', () => {
   // asserted without a real firebase boot (which can't run in the test env).
   test('firebase k/d/p link restores firebase_config and strips the URL', async ({ page }) => {
     page.on('dialog', d => d.accept());   // user confirms the projectId connect prompt (the onboarding path)
-    await page.route(/gstatic\.com|\/backend-firebase\.js|\/storage-firestore\.js/, r =>
+    await page.route(/\/vendor\/firebase\/|npm\/firebase@|\/backend-firebase\.js|\/storage-firestore\.js/, r =>
       r.fulfill({ status: 200, contentType: 'application/javascript', body: '' }));
     await page.goto('/?mode=firebase&k=API_KEY_1&d=app.example.com&p=proj-123');
     await page.waitForFunction(() => localStorage.getItem('app_mode') === 'firebase', { timeout: 6000 });
@@ -7767,7 +7767,7 @@ test.describe('Shared-link URL params', () => {
   // Firebase branch with d= omitted: authDomain must default to <projectId>.firebaseapp.com.
   test('firebase k/p link without d= derives authDomain from projectId', async ({ page }) => {
     page.on('dialog', d => d.accept());   // user confirms the projectId connect prompt (the onboarding path)
-    await page.route(/gstatic\.com|\/backend-firebase\.js|\/storage-firestore\.js/, r =>
+    await page.route(/\/vendor\/firebase\/|npm\/firebase@|\/backend-firebase\.js|\/storage-firestore\.js/, r =>
       r.fulfill({ status: 200, contentType: 'application/javascript', body: '' }));
     await page.goto('/?mode=firebase&k=API_KEY_9&p=proj-999');
     await page.waitForFunction(() => localStorage.getItem('app_mode') === 'firebase', { timeout: 6000 });
@@ -7776,7 +7776,7 @@ test.describe('Shared-link URL params', () => {
   });
   test('firebase base64 config link restores firebase_config', async ({ page }) => {
     page.on('dialog', d => d.accept());   // user confirms the projectId connect prompt (the onboarding path)
-    await page.route(/gstatic\.com|\/backend-firebase\.js|\/storage-firestore\.js/, r =>
+    await page.route(/\/vendor\/firebase\/|npm\/firebase@|\/backend-firebase\.js|\/storage-firestore\.js/, r =>
       r.fulfill({ status: 200, contentType: 'application/javascript', body: '' }));
     const config = { apiKey: 'AK2', authDomain: 'b.example.com', projectId: 'p2' };
     const b64 = Buffer.from(JSON.stringify(config)).toString('base64');

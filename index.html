@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' 'sha256-AVSdx90AAaaay3LyFG6mmKvAAFJJSQS7qCSLkmMSjbA=' 'sha256-5nBeOlPWd4ATLDIX4ueiL6iNOTwpoRJ4rA1hCykUmvA=' 'sha256-q3JR1Pd+ny8XTtqPUhSf89nqR8JuHELluF1XDucZ9Hg=' https://www.gstatic.com https://apis.google.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' data: https://cdn.jsdelivr.net; img-src 'self' https: data: blob: http://127.0.0.1:* http://localhost:*; connect-src 'self' blob: https://cdn.jsdelivr.net https://*.googleapis.com https://*.supabase.co wss://*.supabase.co http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*; frame-src https://*.firebaseapp.com https://accounts.google.com; manifest-src 'self' blob:; worker-src 'self'; base-uri 'self'; object-src 'none'; form-action 'self'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' 'sha256-AVSdx90AAaaay3LyFG6mmKvAAFJJSQS7qCSLkmMSjbA=' 'sha256-5nBeOlPWd4ATLDIX4ueiL6iNOTwpoRJ4rA1hCykUmvA=' 'sha256-OexsR8n+wcvrMmcRQ3g4yTfoHzFjLTCU1dlQ8g3ShAU=' https://apis.google.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' data: https://cdn.jsdelivr.net; img-src 'self' https: data: blob: http://127.0.0.1:* http://localhost:*; connect-src 'self' blob: https://cdn.jsdelivr.net https://*.googleapis.com https://*.supabase.co wss://*.supabase.co http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*; frame-src https://*.firebaseapp.com https://accounts.google.com; manifest-src 'self' blob:; worker-src 'self'; base-uri 'self'; object-src 'none'; form-action 'self'">
   <!-- CSP violation reporting, installed BEFORE the first fetch below.
        `report-uri` is header-only and a <meta> CSP ignores it, so on GitHub Pages -- which cannot send
        a header at all -- the policy has no way to ask for reports. The page reports for itself
@@ -261,8 +261,7 @@
       // CDN fallbacks are SRI-pinned (sha384 of the exact npm-package file — jsdelivr /npm/ serves
       // tarball bytes verbatim): a compromised or tampered CDN response fails the integrity check and
       // the script simply doesn't run, instead of executing foreign code with the app's storage/tokens.
-      // Update the hash whenever the pinned version changes. The gstatic/GSI SDKs below can't be
-      // pinned — Google rotates those bundles in place, so an SRI hash there would break auth.
+      // Update the hash whenever the pinned version changes (./update-vendor.sh does).
       await loadScript('/vendor/vue.js').catch(function() { return loadScript('https://cdn.jsdelivr.net/npm/vue@3.5.34/dist/vue.global.prod.js', 'sha384-o/dkigrGbFcEo9IQnKb3UkoDe43ZnvA9D531VRI1eaHuP+QiVLB7YYAxGnIEoe+t'); });
       await loadScript('/vendor/vuetify.js').catch(function() { return loadScript('https://cdn.jsdelivr.net/npm/vuetify@4.0.7/dist/vuetify.min.js', 'sha384-wnK0Mlw0rYYNIBzsFn4aOQ595f/X6hleKb5nrU00buuLaFz5ZPqbwpF4QQTjcDZh'); });
       bootMark('vueLibsLoaded');
@@ -276,14 +275,13 @@
         // Ordered, not serial. Each compat bundle registers itself onto the `firebase` global that
         // app-compat creates, so app MUST execute first -- which loadScriptsOrdered guarantees
         // (async=false keeps insertion-order execution) while letting all four download at once.
-        // Awaited one at a time this was four gstatic round trips deep on the critical path, every
-        // boot, which is the phone's whole blank screen on a slow link.
-        await loadScriptsOrdered([
-          'https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js',
-          'https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js',
-          'https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js',
-          'https://www.gstatic.com/firebasejs/9.23.0/firebase-storage-compat.js'
-        ]);
+        // Vendored like Vue; the fallback is serial, but it is only the path where /vendor is missing.
+        await loadScriptsOrdered(['app', 'auth', 'firestore', 'storage'].map(function(n) { return '/vendor/firebase/firebase-' + n + '-compat.js'; })).catch(function() {
+          return loadScript('https://cdn.jsdelivr.net/npm/firebase@9.23.0/firebase-app-compat.js', 'sha384-ajMUFBUFMCyjh8uxJg6bkGcKe9RTolyjwbxB3yES0QQMenP3Oztj/W9vA2SJPcIh')
+            .then(function() { return loadScript('https://cdn.jsdelivr.net/npm/firebase@9.23.0/firebase-auth-compat.js', 'sha384-xD1t9dGSVKobUztxDkv6xUI0H4AnFz0NxwlgDJJ7FDlblG9xxr1Z9iauCZuJYj6p'); })
+            .then(function() { return loadScript('https://cdn.jsdelivr.net/npm/firebase@9.23.0/firebase-firestore-compat.js', 'sha384-XMIl1b2Ez9tKAM0R5q67/iLdfnlLBl9kfo40X5WMtCPb+3OLplrjnOxZTYCg1SKY'); })
+            .then(function() { return loadScript('https://cdn.jsdelivr.net/npm/firebase@9.23.0/firebase-storage-compat.js', 'sha384-oFrOL1TiREYNET0lsYF3LjQuyi2gL7vhjH1X8vFr+umcmzAdPELopeSgbcrv4uRm'); });
+        });
       }
       if (backendFile === '/backend-supabase.js') {
         await loadScript('/vendor/supabase.js').catch(function() { return loadScript('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0/dist/umd/supabase.js', 'sha384-TcHRA3zBbn+Lexh5n+Oil4guNPOS3rjNDpGRAN46u/s/mB2IZ50ceC6TYDU2yvgK'); });
