@@ -29,6 +29,108 @@ Embedding is free: `embed-view` dispatches on the same classifier, so a new kind
 An entry that is PARTLY built says so in its heading and records what landed inline, rather than being
 split in two: the reasoning for what remains is the same document as the reasoning for what shipped.
 
+### Code review 2026-11-01 — fifteen findings, ranked *(proposed)*
+
+Baseline: 2,313 unit tests pass, typecheck clean. `app-core.js` grew 8,669 → 11,681 lines (804 KB)
+since the last pass, despite its six extractions. 1–3 are defects today; the rest are ranked by risk
+removed per unit of work.
+
+**Defects**
+
+1. **A failed write still says "Saved".** 17 `Writes.*` calls are fire-and-forget — `saveField`,
+   `savePage` and the doc-embed save, row create, archive/restore/delete, reorder, mirror propagation —
+   and nothing listens for `unhandledrejection`. A refused or offline write (Supabase has no offline
+   queue) keeps the optimistic value; `savePage` also closes the editor, so the text is gone on reload.
+   - Fix in the funnel: `Writes.onError(fn)` with one root handler (`msg.save_failed`, refetch the
+     table); `savePage` leaves edit mode only after the write; RSVP's `refused(rollback)` where a
+     revert is needed.
+   - Proof: a rejecting backend stub → notice shown, cell reverts, page stays in edit. Small.
+2. **The live backend's SDK is unpinned.** `index.html` loads `@supabase/supabase-js@2` from jsdelivr:
+   floating major, no SRI, auth session in reach. Vue and Vuetify already go vendor-first with an
+   SRI-pinned fallback.
+   - Fix: `SUPABASE_JS` in `vendor/versions`, vendored like Vue, fallback covered by `test:cdn`. Then
+     the Firebase compat bundles (gstatic 9.23.0, unhashable), which drops `www.gstatic.com` from
+     `script-src`. Pin CI's `npm install -g firebase-tools` too. Small.
+3. **The dev server takes cross-site writes.** `/api/*` checks neither `Host` nor `Origin`,
+   `parseBody` takes JSON under any `Content-Type`, and no `X-User` means `local@dev`. Any page in the
+   same browser can send a `text/plain` POST (no preflight) and write as that user; DNS rebinding also
+   reads. The loopback bind does not stop the browser being the client.
+   - Fix (~10 lines): 403 on a non-loopback `Host`, a present non-loopback `Origin`, or a POST that is
+     not `application/json`. Test in the dev-server suite. Small.
+
+**Security, in depth**
+
+4. **Drop `'unsafe-eval'` by precompiling templates.** `csp.js` names Vue's in-browser compiler as its
+   only reason. Also a boot win: no compile on the phone, and the smaller runtime build.
+   - a. Move the 49 string templates (~650 lines of `'<div …' +` in `app-core.js`) into `ui.html`
+     `<template id>`s beside the other 9: one template source, highlighted by editors.
+   - b. `scripts/compile-templates.mjs` (`@vue/compiler-dom`) emits `templates.js`; the Pages workflow
+     runs it and ships `vue.runtime.global.prod.js`. Dev keeps compiling in the browser.
+   - c. `csp.js` emits the deployed policy without `'unsafe-eval'` (`'wasm-unsafe-eval'` stays for
+     PGlite). Proof: Playwright smoke on the built artifact under that policy. Medium–large.
+5. **Publish an allowlist, not a denylist.** The Pages prune step and `firebase.json` `ignore` each
+   delete known-bad names, so anything new ships: a root `package.json`, a stray `.patch`, an editor's
+   scratch file, one `git add -A` away.
+   - Fix: one manifest of served files, copied into `_site/` by both paths (`"public": "_site"`);
+     `deploy-config.test.js` checks it against `index.html`'s script list. Small–medium; 12 and 13
+     reuse it.
+
+**De-duplication and architecture**
+
+6. **Firebase onto `createKvBackend`.** `backend-firebase.js` repeats the mapping `backend-kv.js` holds
+   once — lists, translations, users, profiles, list links — with `_db.collection(…)` where KV has
+   `S.*`. Only the KV copy runs in the Node contract suite; Firebase's is source-scanned.
+   - Fix: give `storage-firestore.js` `_all/_replace/_merge/getMeta/setMeta`; the Firestore specifics
+     (owner-scoped reads, snapshot `subscribeTable`, the capacity transaction, `arrayUnion`, atomic
+     field delete) become platform hooks. ~500 lines go; the emulator E2E and rules suites hold the
+     behaviour. Medium–large.
+7. **`validateSchema` into a pure module.** 820 lines in `schema-loader.js` over globals.
+   `validate-schema.test.js` tests a hand-copied subset; only Playwright runs the shipped one.
+   - Fix: `schema-validate.js`, `validate(schema, views) → errors`, typechecked, table-driven tests per
+     message; delete the mirror. Medium.
+8. **Retire `app-core-fn.js`.** 32 root members are tested by slicing them out of the source and
+   `eval`ing them, among them security answers (`userFeatures`, `_saveGrants`, `_resolveTableSelection`)
+   and the write paths (`saveField`, `_deleteFromSources`). Each is a seam a test already chose: move its
+   pure part to its module (access → `access-features.js`, row writes → a planner like
+   `Bundle.importPlan`), ranked by the 2026-09-22 rules. A series, done when the helper has no callers.
+9. **Split `app-core.js` by file.** `methods` is 546 members in 7,100 lines, and the file grows ~1,500
+   lines a month. Step 4's decline stands (no injected services for the editing surface): this is a
+   physical split, one file per cluster (calendar + feeds, rsvp/scan, embeds/pages, data load + live
+   sync, cell edit + permissions, ref/list editors, users/profiles/assets, import/export/examples,
+   theme/print), each a methods object merged into the root, its components beside it. Blocks move
+   verbatim; the duplicate-key guard spans the files; 12 makes the extra requests free in production.
+10. **Dead code.** `_calCellsWeek`, `calRotationSources`, `calSourceLabels`, `backgroundHidden`, `_rgb`,
+    `_luminance`, `_chroma` are referenced nowhere; `_calCellsMonth`, `saveViewBackground`,
+    `meValueForList` only by specs. Delete; `app-core-shape.test.js` keeps the count at zero. Tiny.
+11. **Small consolidations.** ~20 copies of `try { localStorage.setItem(k, JSON.stringify(v)) } catch
+    (e) {}` → one `setSetting` beside `getSetting`; the 10 direct `app_mode` reads/writes behind
+    `Databases`, which owns the database choice. Add the pure modules missing from `tsconfig.json`
+    (`stats`, `form`, `brand`, `reorder`, `profiles`, `images`, `bundle`, `undo`, `csp-client`,
+    `databases`, `backend-kv`, `storage-*`). Small.
+
+**Performance**
+
+12. **Minify and concatenate at deploy.** Every boot ships 1.5 MB raw (479 KB gzip) of the app's own
+    JS/HTML, unminified; comments are 315 KB of `app-core.js`'s 803 KB, and the phone parses it all.
+    - Fix: a Pages-workflow step (esbuild, dev dependency) strips, minifies and joins the modules in
+      `index.html` order. Inline scripts stay byte-identical (CSP hashes); dev stays build-free.
+      Proof: 4's artifact smoke job. Medium.
+13. **A service worker that caches.** `sw.js` passes every request to `fetch` and stores nothing: each
+    request pays the hop, and the PGlite mode the README calls offline cannot boot offline.
+    - Fix: precache the shell from 5's manifest with a revision — cache-first for `vendor/` (incl. the
+      17 MB PGlite dist), stale-while-revalidate for app files, network-only for `/api` and backends.
+      Repeat visits download nothing. Medium.
+14. **Per-cell table scans.** `displayValue` filters the whole ref table per cell for a labelled `ref`,
+    and `refRowLabel` loops every schema table per call: O(cells × rows) each render. Index by
+    `(table, valueCol)`, memoised on the cache array (WeakMap, as `columns.js` does). Measure first
+    with a large fixture in the boot-time harness. Small.
+
+**Docs**
+
+15. **Comment and ROADMAP length vs CLAUDE.md.** Comments are 29% of `app-core.js` lines and 48% of
+    `firestore.rules`; this file is 3,868 lines, mostly reasoning for shipped work. Shorten comments per
+    file as it is touched; collapse each Shipped entry to one line + its PR, where the reasoning lives.
+
 ### Code review 2026-09-22 — seven findings, ranked *(all seven landed; 6 as a series of cuts)*
 
 The previous full-repo review was #57 (2026-07-18). This pass found no rot: 1797 unit tests pass, the
@@ -3785,6 +3887,11 @@ Recorded so the roadmap shows what graduated rather than silently shrinking.
   `v-progress-linear` and pulled in nothing — which is the evidence this trade is affordable.
 
 ## Suggested order
+
+**The 2026-11-01 review goes first:** 1–3 (defects: two in production, one on every dev machine), then
+10 and 11 (cheap), 7 and 6 (shipped code under Node tests), then the deploy chain 5 → 12 → 13 → 4,
+which shares one manifest and one artifact smoke job. 8, 9, 14 and 15 are series: do each while that
+area is open anyway.
 
 **The code-review findings come first, and not because they are features.** Three of the six are
 defects rather than proposals — a clipboard button that lies about having copied, a source file that
