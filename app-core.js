@@ -1386,6 +1386,22 @@ function createVueApp() {
         if (configured && codes.indexOf(configured) >= 0) return configured;
         return codes.length ? codes[0] : null;
       },
+      // Each labelled ref column's target rows by key, and its label: a cell finds its row without scanning
+      // the table. Reading dataCache's keys is what recomputes it once tables load (SCHEMA is not reactive).
+      refRowIndex: function() {
+        var cache = this.dataCache, out = {};
+        Object.keys(cache);
+        for (var t in SCHEMA) {
+          var defs = Columns.columnDefs(SCHEMA[t]);
+          for (var c in defs) {
+            if (out[c] || !defs[c] || typeof defs[c] !== 'object' || !Array.isArray(defs[c].label)) continue;
+            var rf = getColumnRef(null, c) || {}, vcol = rf.valueCol || 'id', rows = new Map();
+            (cache[rf.table] || []).forEach(function(r) { if (!rows.has(r[vcol])) rows.set(r[vcol], r); });
+            out[c] = { rows: rows, label: this.refRowLabel(c) };
+          }
+        }
+        return out;
+      },
       refTables: function() {
         var all = Object.keys(SCHEMA).filter(function(k) { return SCHEMA[k].isLookup; });
         var allowed = this.userAllowedTables;
@@ -4643,11 +4659,10 @@ function createVueApp() {
         if (!plain && this.colIsOwner(col)) return this.userLabel(val);
         if (this.colIsDateTime(col)) return this.dateTimeLabel(val);
         // A labelled ref names the row it points at, not its key ("12 months · 15/01/2026", not an id).
-        var lab = !plain && this.colIsRef(col) && this.refRowLabel(col);
-        if (lab) {
-          var rf = this.colRef(col) || {}, vcol = rf.valueCol || 'id';
-          var hit = (this.dataCache[rf.table] || []).filter(function(r) { return r[vcol] === val; })[0];
-          if (hit) return lab(hit);
+        var ix = !plain && this.colIsRef(col) && this.refRowIndex[col];
+        if (ix) {
+          var hit = ix.rows.get(val);
+          if (hit) return ix.label(hit);
         }
         var out = val;
         // Translation namespace: a list column uses its list name; a `ref` column uses its lookup TABLE name,
