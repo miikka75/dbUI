@@ -529,24 +529,12 @@ describe('Grant modes (r / rw) across the three stored shapes', () => {
 
   // REGRESSION: clearing the edit row resolved straight to 'all' before the view row was merged in, so
   // "read the catalogue, write nothing" saved as full access and the view chips vanished. Runs the
-  // shipped updateUserTables -> _resolveTableSelection -> _saveGrants chain on a draft row.
+  // shipped AccessFeatures.grantsAfterEdit -> _saveGrants chain on a draft row.
   describe('updateUserTables: an empty edit row keeps the view-only grants', () => {
     const { appCoreFn } = require('./app-core-fn');
-    const deps = {
-      SCHEMA: schema, VIEWS: views,
-      grantFeatures: () => AF.grantFeatures(schema, views),
-      selectedFeatures: (list) => AF.selectedFeatures(list, schema, views)
-    };
     const save = (tables, selected) => {
       const draft = { key: '_new_1', role: 'editor', tables: tables, draft: true };
-      const ctx = {
-        _userDraft: () => draft,
-        _resolveTableSelection: appCoreFn('_resolveTableSelection', deps),
-        _saveGrants: appCoreFn('_saveGrants', deps),
-        userFeatures: appCoreFn('userFeatures', deps),
-        userViewFeatures: appCoreFn('userViewFeatures', deps)
-      };
-      appCoreFn('updateUserTables', deps).call(ctx, draft, selected);
+      appCoreFn('_saveGrants', {}).call({ _userDraft: () => draft }, draft, AF.grantsAfterEdit(tables, selected, schema, views));
       return draft.tables;
     };
 
@@ -558,6 +546,30 @@ describe('Grant modes (r / rw) across the three stored shapes', () => {
     });
     it("un-ticking 'All' on a full-access user stays on 'all'", () => {
       assert.equal(save('all', []), 'all');
+    });
+  });
+
+  describe('the grant chips, as AccessFeatures computes them', () => {
+    it('a grant reads back as edit and view chips; unrestricted is the All chip', () => {
+      const g = { chores: 'rw', catalogue: 'r' };
+      assert.deepEqual(AF.editFeatures(g, schema, views), ['chores']);
+      assert.deepEqual(AF.viewFeatures(g, schema, views), ['catalogue']);
+      assert.deepEqual(AF.editFeatures('all', schema, views), ['all']);
+      assert.deepEqual(AF.viewFeatures('all', schema, views), []);
+    });
+    it("ticking All unrestricts; ticking a feature beside it narrows again", () => {
+      assert.equal(AF.resolveSelection(['all'], ['chores']), 'all');
+      assert.deepEqual(AF.resolveSelection(['all', 'chores'], ['all']), ['chores']);
+      assert.equal(AF.resolveSelection(['all'], ['all']), 'all');
+      assert.deepEqual(AF.resolveSelection(['chores'], []), ['chores']);
+    });
+    it('the edit row keeps the view row, and the view row keeps the edit row', () => {
+      assert.deepEqual(AF.grantsAfterEdit({ catalogue: 'r' }, ['chores'], schema, views), { catalogue: 'r', chores: 'rw' });
+      assert.deepEqual(AF.grantsAfterViewEdit({ chores: 'rw' }, ['catalogue'], schema, views), { catalogue: 'r', chores: 'rw' });
+    });
+    it('viewing on an unrestricted user narrows the rest to edit; picking nothing writes nothing', () => {
+      assert.equal(AF.grantsAfterViewEdit('all', [], schema, views), null);
+      assert.deepEqual(AF.grantsAfterViewEdit('all', ['catalogue'], schema, views), { catalogue: 'r', chores: 'rw', shopping: 'rw' });
     });
   });
 
