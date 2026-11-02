@@ -190,6 +190,38 @@
     }).map(function(f) { return f.id; });
   }
 
+  // A stored grant's chips: the features it may edit ('all' for unrestricted), and those it may only view.
+  function editFeatures(tables, schema, views) {
+    return tables === 'all' ? ['all'] : selectedFeatures(writableTables(tables) || [], schema, views);
+  }
+  function viewFeatures(tables, schema, views) {
+    if (tables === 'all') return [];
+    var write = editFeatures(tables, schema, views);
+    return selectedFeatures(readableTables(tables) || [], schema, views).filter(function(f) { return write.indexOf(f) < 0; });
+  }
+
+  // The edit chips after a change: ticking 'All' unrestricts; ticking a feature beside it narrows again.
+  function resolveSelection(selected, prev) {
+    if (selected.indexOf('all') >= 0 && prev.indexOf('all') < 0) return 'all';
+    if (selected.indexOf('all') >= 0 && selected.length > 1) return selected.filter(function(s) { return s !== 'all'; });
+    if (selected.indexOf('all') >= 0) return 'all';
+    return selected;
+  }
+
+  // The stored grant after the edit row, or the view row, changed to `selected`. null when there is
+  // nothing to write: an unrestricted user with no view chip picked stays as they are.
+  function grantsAfterEdit(tables, selected, schema, views) {
+    var feats = resolveSelection(selected, editFeatures(tables, schema, views));
+    return feats === 'all' ? 'all' : buildGrants(feats, viewFeatures(tables, schema, views), schema, views);
+  }
+  function grantsAfterViewEdit(tables, selected, schema, views) {
+    if (tables === 'all' && !(selected || []).length) return null;
+    var edit = tables === 'all'
+      ? grantFeatures(schema, views).map(function(f) { return f.id; }).filter(function(id) { return selected.indexOf(id) < 0; })
+      : editFeatures(tables, schema, views);
+    return buildGrants(edit, selected, schema, views);
+  }
+
   var AF = {
     viewRosters: viewRosters, rotationTables: rotationTables, viewComputedHelpers: viewComputedHelpers, viewHelperTables: viewHelperTables,
     viewTables: viewTables, viewImplicitTables: viewImplicitTables,
@@ -197,7 +229,8 @@
     grantFeatures: grantFeatures, featureClosure: featureClosure,
     expandFeatureGrants: expandFeatureGrants, selectedFeatures: selectedFeatures,
     grantMode: grantMode, readableTables: readableTables, writableTables: writableTables,
-    buildGrants: buildGrants
+    buildGrants: buildGrants, editFeatures: editFeatures, viewFeatures: viewFeatures,
+    resolveSelection: resolveSelection, grantsAfterEdit: grantsAfterEdit, grantsAfterViewEdit: grantsAfterViewEdit
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = AF;
   else root.AccessFeatures = AF;

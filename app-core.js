@@ -113,7 +113,6 @@ function satelliteTables() { return AccessFeatures.satelliteTables(SCHEMA, VIEWS
 function grantFeatures() { return AccessFeatures.grantFeatures(SCHEMA, VIEWS); }
 function featureClosure(featureId) { return AccessFeatures.featureClosure(featureId, SCHEMA, VIEWS); }
 function expandFeatureGrants(featureIds) { return AccessFeatures.expandFeatureGrants(featureIds, SCHEMA, VIEWS); }
-function selectedFeatures(tableList) { return AccessFeatures.selectedFeatures(tableList, SCHEMA, VIEWS); }
 
 // --- Folder-config (appConfig) export/import round-trip ---
 // Folder config is exported/imported generically: EVERYTHING is round-tripped EXCEPT the keys in
@@ -7217,53 +7216,19 @@ function createVueApp() {
       // Grants are edited as TWO chip rows — what the user may change, and what they may only look at —
       // which merge into one stored { table: 'r' | 'rw' } map. Each handler re-reads the other row's
       // current selection so editing one never silently drops the other.
-      updateUserTables: function(u, selected) {
-        var prev = u.tables === 'all' ? ['all'] : this.userFeatures(u);
-        var feats = this._resolveTableSelection(selected, prev);   // 'all' or array of FEATURE ids
-        if (feats === 'all') return this._saveGrants(u, 'all');
-        this._saveGrants(u, AccessFeatures.buildGrants(feats, this.userViewFeatures(u), SCHEMA, VIEWS));
-      },
+      updateUserTables: function(u, selected) { this._saveGrants(u, AccessFeatures.grantsAfterEdit(u.tables, selected, SCHEMA, VIEWS)); },
       updateUserViewTables: function(u, selected) {
-        // Marking something view-only on a FULL-ACCESS user has to materialize 'all' into an explicit
-        // map — the sentinel cannot say "everything except this one". Everything not picked here stays
-        // editable, so the Tables column visibly fills with chips: the admin can see what 'all' became.
-        // (Consequence worth knowing: an enumerated grant no longer picks up tables added to the schema
-        // later, whereas 'all' does. Clearing every view chip puts the user back on the sentinel.)
-        if (u.tables === 'all' && !(selected || []).length) return;   // nothing picked -> stay on 'all'
-        var edit = u.tables === 'all'
-          ? grantFeatures().map(function(f) { return f.id; }).filter(function(id) { return selected.indexOf(id) < 0; })
-          : this.userFeatures(u);
-        this._saveGrants(u, AccessFeatures.buildGrants(edit, selected, SCHEMA, VIEWS));
+        var grants = AccessFeatures.grantsAfterViewEdit(u.tables, selected, SCHEMA, VIEWS);
+        if (grants) this._saveGrants(u, grants);
       },
-      // Clearing every chip means "no restriction" (the long-standing behaviour of the single row) —
-      // an empty grant would otherwise lock the user out of an app they were just given access to.
       _saveGrants: function(u, tables) {
         if (tables !== 'all' && !Object.keys(tables).length) tables = 'all';
         var draft = this._userDraft(u.key);
         if (draft) { draft.tables = tables; return Promise.resolve(); }
         return backend_users.setUserRole(u.key, u.role, u.addr, tables).then(this.loadUsers.bind(this));
       },
-      userFeatures: function(u) {
-        // Stored grant -> selected feature ids for the EDIT row (features fully covered at 'rw').
-        if (!u || u.tables === 'all') return ['all'];
-        return selectedFeatures(AccessFeatures.writableTables(u.tables) || []);
-      },
-      userViewFeatures: function(u) {
-        // The VIEW row shows what is readable but NOT writable — otherwise every edit grant would also
-        // light up here and un-ticking it would read as revoking sight, not revoking write.
-        if (!u || u.tables === 'all') return [];
-        var write = selectedFeatures(AccessFeatures.writableTables(u.tables) || []);
-        return selectedFeatures(AccessFeatures.readableTables(u.tables) || [])
-          .filter(function(f) { return write.indexOf(f) < 0; });
-      },
-      _resolveTableSelection: function(selected, prev) {
-        if (selected.indexOf('all') >= 0 && prev.indexOf('all') < 0) return 'all';
-        if (selected.indexOf('all') >= 0 && selected.length > 1) return selected.filter(function(s) { return s !== 'all'; });
-        if (selected.indexOf('all') >= 0) return 'all';
-        // An empty EDIT row is not "unrestricted" by itself: the view row may still hold read-only
-        // grants. _saveGrants falls back to 'all' only when the merged grant is empty.
-        return selected;
-      },
+      userFeatures: function(u) { return u ? AccessFeatures.editFeatures(u.tables, SCHEMA, VIEWS) : ['all']; },
+      userViewFeatures: function(u) { return u ? AccessFeatures.viewFeatures(u.tables, SCHEMA, VIEWS) : []; },
       removeUser: function(uid) {
         var self = this;
         if (this._userDraft(uid)) { this.userDrafts = this.userDrafts.filter(function(d) { return d.key !== uid; }); return; }
