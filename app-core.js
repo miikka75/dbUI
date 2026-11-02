@@ -8390,8 +8390,6 @@ function createVueApp() {
           meta.content = tc;
         } catch (e) {}
       },
-      // (PRINT_CSS is a module-level var defined above createVueApp)
-      _pe: function(s) { return Print.escape(s); },
       // `title` is escaped HERE (callers pass it raw): it comes from t()/displayValue — editor-writable
       // shared data — and document.write renders it, so an unescaped title is stored XSS in the print window.
       _printOpen: function(title, bodyHtml) { var w = window.open('', '_blank'); w.document.write('<html><head><title>' + Print.escape(title) + '</title><style>' + PRINT_CSS + '</style></head><body>' + bodyHtml + '</body></html>'); w.document.close(); w.print(); },
