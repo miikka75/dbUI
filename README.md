@@ -146,8 +146,8 @@ Then fill the database: pick one of the shipped examples on the empty-database s
 Settings → Import from JSON for a bundle of your own.
 
 Both deploys (the Pages workflow and Firebase Hosting's `predeploy`) publish `_site/`, which
-`node scripts/build-site.js --minify` fills with the files the app serves, its own scripts minified.
-Development serves the source as it is.
+`node scripts/build-site.js --compile --minify` fills with the files the app serves: the Vue templates
+precompiled to render functions, the app's own scripts minified. Development serves the source as it is.
 
 ## Sharing & Access
 
@@ -309,7 +309,8 @@ not "don't cache": the browser keeps the bytes and Hosting answers `304` when no
 
 The app ships a CSP built in **`/csp.js`** (one source of truth — rationale documented in the file):
 Firebase-mode origins with multi-database wildcards, hash-allowed inline boot scripts (no
-`'unsafe-inline'` scripts), `'unsafe-eval'` only for Vue's in-browser template compiler, and
+`'unsafe-inline'` scripts), `'unsafe-eval'` only in development for Vue's in-browser template compiler
+(the published page precompiles its templates and drops it), and
 loopback entries so local dev + the Firebase emulators keep working.
 
 One policy, delivered three ways, because the app is deployed three ways:
