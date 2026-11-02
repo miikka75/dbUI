@@ -8797,6 +8797,18 @@ function createVueApp() {
 
   app.use(vuetify);
 
+  // A published build carries every template precompiled (scripts/compile-templates.js), so the page
+  // runs without the in-browser compiler and its CSP needs no 'unsafe-eval'. Development compiles here.
+  if (typeof CompiledTemplates !== 'undefined') {
+    app._component.render = CompiledTemplates['#vue-app'];
+    var registerComponent = app.component.bind(app);
+    app.component = function(name, def) {
+      var render = def && typeof def.template === 'string' && CompiledTemplates[def.template.charAt(0) === '#' ? def.template : name];
+      if (render) { def = Object.assign({}, def, { render: render }); delete def.template; }
+      return registerComponent(name, def);
+    };
+  }
+
   // Shared call-throughs to the root instance. Vue resolves template refs on the component instance, so
   // leaf components must re-expose the root methods their templates call; spread this object into their
   // `methods` (Object.assign) instead of re-declaring identical proxies. Opt-in per component on purpose

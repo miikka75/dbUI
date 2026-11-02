@@ -46,20 +46,31 @@ describe('deploy config — what is published', () => {
   it('Firebase Hosting serves _site, built after vendor/ is fetched', () => {
     assert.equal(cfg.hosting.public, '_site');
     const hooks = [].concat(cfg.hosting.predeploy || []);
-    assert.ok(hooks.indexOf('node scripts/build-site.js --with-config --minify') > hooks.indexOf('node scripts/vendor-fetch.mjs'),
+    assert.ok(hooks.indexOf('node scripts/build-site.js --with-config --compile --minify') > hooks.indexOf('node scripts/vendor-fetch.mjs'),
       'predeploy must fetch vendor/ and then build _site');
   });
 
   it('GitHub Pages uploads _site, built from the same list', () => {
-    assert.match(wf, /run: node scripts\/build-site\.js --minify/);
+    assert.match(wf, /run: node scripts\/build-site\.js --compile --minify/);
     assert.match(wf, /upload-pages-artifact@\S+\s+with:\s+path: _site/);
   });
 
-  // A minifier bug would ship unseen if CI tested the source; it tests the published build instead.
-  it('CI runs the UI suites against the minified published build', () => {
+  // A minifier or template-compile bug would ship unseen if CI tested the source; it tests what ships.
+  it('CI runs the UI suites against the published build', () => {
     const ci = fs.readFileSync(path.join(ROOT, '.github', 'workflows', 'node.js.yml'), 'utf8');
-    assert.match(ci, /build-site\.js --minify/);
+    assert.match(ci, /build-site\.js --compile --minify/);
     assert.match(ci, /run: npx playwright test\s+env:\s+STATIC_DIR: \.\.\/_site/);
+  });
+
+  // The published page has no in-browser compiler to fall back on: a template the build missed would be
+  // compiled at runtime, which its policy refuses.
+  it('the template build finds every registered component template, and every #id it names', () => {
+    const { componentTemplates } = require(path.join(ROOT, 'scripts', 'compile-templates.js'));
+    const found = componentTemplates(ROOT);
+    const src = fs.readFileSync(path.join(ROOT, 'app-core.js'), 'utf8');
+    assert.equal(Object.keys(found).length, (src.match(/\n {2}app\.component\('[\w-]+', \{/g) || []).length, 'a registered component was not harvested');
+    const ui = fs.readFileSync(path.join(ROOT, 'ui.html'), 'utf8');
+    for (const t of Object.values(found).filter((x) => x.charAt(0) === '#')) assert.ok(ui.includes('<template id="' + t.slice(1) + '"'), t + ' is not in ui.html');
   });
 
   const MUST_NOT_PUBLISH = [
