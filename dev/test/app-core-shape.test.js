@@ -191,7 +191,7 @@ describe('app-core.js root component — no dead methods', () => {
     const appFiles = fs.readdirSync(path.join(__dirname, '..', '..')).filter((f) => /\.(js|html)$/.test(f))
       .concat(['dev/dev-client.js', 'dev/backend-local-client.js']);
     const app = appFiles.map((f) => fs.readFileSync(path.join(__dirname, '..', '..', f), 'utf8')).join('\n');
-    const uses = (n) => (app.match(new RegExp('(^|[^\\w$])' + n.replace(/\$/g, '\\$') + '(?![\\w$])', 'g')) || []).length;
+    const uses = (n) => (app.match(new RegExp('(^|[^\\w$])' + n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?![\\w$])', 'g')) || []).length;
     const dead = memberNames(rootBlock('methods')).filter((n) => uses(n) <= 1);
     assert.deepEqual(dead, [], 'root methods with no caller — delete them: ' + dead.join(', '));
   });
