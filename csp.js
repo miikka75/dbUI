@@ -10,7 +10,8 @@
 //   - Multi-database: users connect one URL to ANY Firebase project, so Google origins are
 //     wildcarded (*.googleapis.com, *.firebaseapp.com) rather than pinned to one project.
 //   - img-src allows any https + data: — image cells / schema.icons accept arbitrary URLs by design.
-//   - 'unsafe-eval' is required by Vue's in-browser template compiler (no build step). Inline
+//   - 'unsafe-eval' is required by Vue's in-browser template compiler, in development only: the published
+//     page precompiles its templates and drops it (scripts/build-site.js --compile). Inline
 //     SCRIPTS are NOT allowed: the two static inline blocks in index.html are hash-allowed, and the
 //     loader uses real <script src> elements (the execScript refactor was the prerequisite).
 //   - 'unsafe-inline' styles are required by Vuetify's runtime style injection.

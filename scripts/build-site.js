@@ -3,11 +3,12 @@
 // workflow and Firebase Hosting's predeploy) upload that folder, so a file is public only if it is listed
 // here: a new file in the repo root stays private until someone adds it.
 //
-//   node scripts/build-site.js [--with-config] [--minify] [--root <dir>] [--out <dir>]
+//   node scripts/build-site.js [--with-config] [--compile] [--minify] [--root <dir>] [--out <dir>]
 // --with-config adds firebase-config.json / supabase-config.json, so visitors connect without setup.
 // --minify runs the app's own scripts through esbuild (vendor/ is already minified; index.html is not
 // touched, so the CSP hashes of its inline scripts still hold). Top-level names survive: the modules
 // are classic scripts that share them as globals.
+// --compile precompiles the Vue templates and drops 'unsafe-eval' from the page's policy.
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
@@ -58,6 +59,7 @@ function build(root, outDir, opts) {
     fs.mkdirSync(path.dirname(to), { recursive: true });
     fs.copyFileSync(path.join(root, ...rel.split('/')), to);
   }
+  if (opts.compile) compileTemplates(root, outDir);
   if (opts.minify) minify(outDir, files.filter((rel) => /^[^/]+\.js$/.test(rel) && rel !== 'sw.js'));
   if (files.includes('sw.js')) writeServiceWorker(outDir, files);
   return files;
@@ -89,6 +91,21 @@ function writeServiceWorker(outDir, files) {
   fs.writeFileSync(file, out);
 }
 
+// The templates go into app-core.js as render functions, and the page's policy loses 'unsafe-eval'
+// (only Vue's in-browser compiler needed it). The policy is a <meta> outside any inline script, so the
+// script hashes it lists still match.
+function compileTemplates(root, outDir) {
+  const { compileAll } = require('./compile-templates');
+  fs.appendFileSync(path.join(outDir, 'app-core.js'), compileAll(root).js);
+  // ui.html is the root and the <template id> blocks, all compiled now: only the mount point is left.
+  fs.writeFileSync(path.join(outDir, 'ui.html'), '<div id="vue-app" v-cloak></div>\n');
+  const page = path.join(outDir, 'index.html');
+  const html = fs.readFileSync(page, 'utf8');
+  const out = html.replace(/(<meta http-equiv="Content-Security-Policy" content="[^"]*)'unsafe-eval' /, '$1');
+  if (out === html) throw new Error("build-site: the page's policy has no 'unsafe-eval' to drop");
+  fs.writeFileSync(page, out);
+}
+
 // In place, with a linked source map beside each file (the source is public anyway).
 function minify(outDir, scripts) {
   if (!scripts.length) return;
@@ -103,7 +120,7 @@ if (require.main === module) {
   const arg = (name) => { const i = process.argv.indexOf(name); return i > 0 ? process.argv[i + 1] : null; };
   const root = path.resolve(arg('--root') || path.join(__dirname, '..'));
   const out = path.resolve(arg('--out') || path.join(root, '_site'));
-  const files = build(root, out, { withConfig: process.argv.includes('--with-config'), minify: process.argv.includes('--minify') });
+  const files = build(root, out, { withConfig: process.argv.includes('--with-config'), minify: process.argv.includes('--minify'), compile: process.argv.includes('--compile') });
   if (!files.includes('index.html')) { console.error('build-site: no index.html under ' + root); process.exit(1); }
   console.log('✓ _site — ' + files.length + ' files');
 }
