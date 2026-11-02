@@ -75,7 +75,7 @@ jobs:
 
       # An allowlist, shared with Firebase Hosting: only what scripts/build-site.js lists is published.
       - name: Build the published folder
-        run: node scripts/build-site.js --minify && ls -R _site | head -40
+        run: node scripts/build-site.js --compile --minify && ls -R _site | head -40
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v5

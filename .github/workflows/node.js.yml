@@ -165,9 +165,10 @@ jobs:
     - name: Verify they are actually there (a silent CDN fallback is what this guards)
       run: test -s ../vendor/vue.js && test -s ../vendor/vuetify.js && test -s ../vendor/vuetify.css && test -s ../vendor/mdi.css && test -s ../vendor/pglite/pglite.wasm && test -s ../vendor/pglite/index.js
     - run: npx playwright install --with-deps chromium
-    # The suites run against what the deploys upload: _site, minified (scripts/build-site.js).
+    # The suites run against what the deploys upload: _site, templates precompiled and no 'unsafe-eval',
+    # minified (scripts/build-site.js).
     - name: Build the published folder
-      run: node ../scripts/build-site.js --minify
+      run: node ../scripts/build-site.js --compile --minify
     # Worker count is left to the config's min(8, cores/2), which is 2 on a 4-vCPU runner. Measured on
     # this job: 225s serial, 130s at 2 workers, 104s at 4 -- but at 4 the contention pushes the slowest
     # tests past the suite's 8s per-test timeout (`edit cell saves value` boots the app, sleeps twice
