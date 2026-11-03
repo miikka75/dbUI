@@ -35,164 +35,109 @@ describe('deploy config — function region', () => {
 // the `tables` key -- actual rows -- so publishing one bypasses every rule in firestore.rules at once.
 // Guard both that the exclusions are there and that they don't over-reach onto the JSON the app must
 // actually be able to fetch at runtime.
-describe('deploy config — hosting ignore list', () => {
+describe('deploy config — what is published', () => {
+  // Both publish paths upload _site/, which scripts/build-site.js fills from an allowlist. The old way was
+  // two hand-kept denylists over the repo root, and whatever neither named shipped (ROADMAP.md,
+  // functions/, the Edge Function source were all live).
+  const Site = require(path.join(ROOT, 'scripts', 'build-site.js'));
   const cfg = JSON.parse(fs.readFileSync(path.join(ROOT, 'firebase.json'), 'utf8'));
-  const ignore = cfg.hosting.ignore || [];
-
-  // Minimal gitignore-flavoured glob: `**` spans separators, `*` doesn't, and a pattern with no `/`
-  // matches the basename at any depth. Enough to answer "would firebase deploy skip this path".
-  const matches = (pattern, filePath) => {
-    const rx = pattern.split('**').map((seg) =>
-      seg.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*')
-    ).join('.*');
-    const re = new RegExp('^' + rx + '$');
-    return re.test(filePath) || (!pattern.includes('/') && re.test(path.basename(filePath)));
-  };
-  const isIgnored = (filePath) => ignore.some((p) => matches(p, filePath));
-
-  it('hosting serves the repo root, which is what makes the ignore list load-bearing', () => {
-    assert.equal(cfg.hosting.public, '.');
-  });
-
-  for (const f of [
-    'drive-sync-export-2026-07-31.json',
-    'drive-sync-export-2026-07-31 (1).json',
-    'english-schema-import.json',
-    'english-translations-import.json',
-    'firebase-tehtavat-board-import.json',
-    'some-backup-export.json'
-  ]) {
-    it(`excludes the data bundle ${f}`, () => {
-      assert.ok(isIgnored(f), `${f} would be DEPLOYED PUBLICLY — add a pattern to firebase.json hosting.ignore`);
-    });
-  }
-
-  // Executables are not merely unwanted here, they are REFUSED: Firebase Hosting rejects the whole
-  // deploy on the Spark plan rather than skipping the file --
-  //   "Executable files are forbidden on the Spark billing plan"
-  // -- so a .bat left in the working tree fails the deploy of everything else with it. The list named
-  // `update-vendor.sh` specifically, which covered the one that existed and nothing a contributor
-  // might add next.
-  for (const f of [
-    'update-vendor.sh',
-    'make-supabase-pr.bat',
-    'split-supabase-commits.bat',
-    'deploy.cmd',
-    'Setup.exe',
-    'tools/build.ps1',
-    'scripts/migrate-schema-db.js'
-  ]) {
-    it(`excludes the executable/tooling file ${f}`, () => {
-      assert.ok(isIgnored(f), `${f} would be sent to Hosting — on Spark that FAILS THE WHOLE DEPLOY`);
-    });
-  }
-
-  // Dot-DIRECTORIES, which `**/.*` does not reach: it matches a path whose last segment starts with a
-  // dot, and `.claude/settings.local.json` does not. Editor and tooling directories sitting in the repo
-  // root were therefore being served -- local settings, caches, whatever a contributor's tooling keeps.
-  for (const f of [
-    '.claude/settings.local.json',
-    '.claude/launch.json',
-    '.firebase/hosting..cache',
-    '.vscode/settings.json',
-    'sub/.idea/workspace.xml'
-  ]) {
-    it(`excludes ${f} (inside a dot-directory)`, () => {
-      assert.ok(isIgnored(f), `${f} would be served publicly — a dot-directory is not covered by "**/.*"`);
-    });
-  }
-
-  // The mirror image: an over-broad "*.json" would silently break boot, since these are fetched at
-  // runtime (index.html appUrl + initFirebase/initSupabase) rather than bundled.
-  for (const f of ['manifest.json', 'firebase-config.json', 'supabase-config.json',
-                   'app-core.js', 'sw.js', 'index.html', 'vendor/vue.js', 'icon-512.png']) {
-    it(`still serves ${f} (the app fetches it at runtime)`, () => {
-      assert.ok(!isIgnored(f), `${f} is fetched at boot and must stay deployable`);
-    });
-  }
-
-  it('.gitignore refuses the same bundles, so they never reach history either', () => {
-    const gi = fs.readFileSync(path.join(ROOT, '.gitignore'), 'utf8');
-    for (const p of ['drive-sync-export-*.json', '*-import.json', '*-export.json']) {
-      assert.ok(gi.includes(p), `.gitignore is missing ${p} (keep it in step with firebase.json)`);
-    }
-  });
-
-  // There are TWO publish paths for the repo root — Firebase Hosting (firebase.json `ignore`) and
-  // GitHub Pages (deploy-pages.yml's `rm -f` prune) — each with its own hand-maintained denylist and
-  // no reference to the other. Excluding a file from one only moves the leak to the other.
-  //
-  // This checked three glob STRINGS and called it parity, which is how the two lists drifted: the
-  // hosting side was hardened against executables and dot-directories while Pages -- which deploys on
-  // every push to main -- kept publishing them. So both are now asked about the same FILES, and the
-  // Pages side is answered by running its own prune over a copy of the repo rather than by reading it.
   const wf = fs.readFileSync(path.join(ROOT, '.github', 'workflows', 'deploy-pages.yml'), 'utf8');
 
-  it('the GitHub Pages prune refuses the same bundles as the hosting ignore list', () => {
-    for (const p of ['drive-sync-export-*.json', '*-import.json', '*-export.json']) {
-      assert.ok(wf.includes(p), `deploy-pages.yml does not prune ${p} — Pages would publish it`);
+  it('Firebase Hosting serves _site, built after vendor/ is fetched', () => {
+    assert.equal(cfg.hosting.public, '_site');
+    const hooks = [].concat(cfg.hosting.predeploy || []);
+    assert.ok(hooks.indexOf('node scripts/build-site.js --with-config --compile --minify') > hooks.indexOf('node scripts/vendor-fetch.mjs'),
+      'predeploy must fetch vendor/ and then build _site');
+  });
+
+  it('GitHub Pages uploads _site, built from the same list', () => {
+    assert.match(wf, /run: node scripts\/build-site\.js --compile --minify/);
+    assert.match(wf, /upload-pages-artifact@\S+\s+with:\s+path: _site/);
+  });
+
+  // A minifier or template-compile bug would ship unseen if CI tested the source; it tests what ships.
+  it('CI runs the UI suites against the published build', () => {
+    const ci = fs.readFileSync(path.join(ROOT, '.github', 'workflows', 'node.js.yml'), 'utf8');
+    assert.match(ci, /build-site\.js --compile --minify/);
+    assert.match(ci, /run: npx playwright test\s+env:\s+STATIC_DIR: \.\.\/_site/);
+  });
+
+  // The published page has no in-browser compiler to fall back on: a template the build missed would be
+  // compiled at runtime, which its policy refuses.
+  it('the template build finds every registered component template, and every #id it names', () => {
+    const { componentTemplates } = require(path.join(ROOT, 'scripts', 'compile-templates.js'));
+    const found = componentTemplates(ROOT);
+    const src = fs.readFileSync(path.join(ROOT, 'app-core.js'), 'utf8');
+    assert.equal(Object.keys(found).length, (src.match(/\n {2}app\.component\('[\w-]+', \{/g) || []).length, 'a registered component was not harvested');
+    const ui = fs.readFileSync(path.join(ROOT, 'ui.html'), 'utf8');
+    for (const t of Object.values(found).filter((x) => x.charAt(0) === '#')) assert.ok(ui.includes('<template id="' + t.slice(1) + '"'), t + ' is not in ui.html');
+  });
+
+  const MUST_NOT_PUBLISH = [
+    'ROADMAP.md', 'CLAUDE.md', 'README.md', 'examples/README.md', 'tsconfig.json', 'package.json', 'package-lock.json',
+    'functions/index.js', 'supabase/functions/csp-report/index.ts', 'csp.js', 'storage.rules', 'firebase.json',
+    '0001-some-fix.patch', 'update-vendor.sh', 'make-supabase-pr.bat', 'deploy.cmd', 'Setup.exe', 'tools/build.ps1',
+    'scripts/migrate-schema-db.js', '.claude/settings.local.json', '.vscode/settings.json', '.env',
+    'drive-sync-export-2026-07-31.json', 'english-schema-import.json', 'some-backup-export.json',
+    'docs/features/rsvp.md', 'docs/screenshots/rsvp.png', 'dev/server.js', 'dev/local.db', 'firebase-debug.log',
+    'firebase-config.json', 'supabase-config.json', 'stray.js'
+  ];
+  const MUST_PUBLISH = ['index.html', 'ui.html', 'style.html', 'app-core.js', 'databases.js', 'sw.js', 'manifest.json',
+    'favicon.svg', 'icon-512.png', 'vendor/vue.js', 'vendor/pglite/pglite.wasm', 'examples/chores-schema.json',
+    'examples/chores-favicon.svg', 'supabase-schema.sql', 'firestore.rules', 'schema.schema.json'];
+  const INDEX = "<script>loadScript('/databases.js'); loadScriptsOrdered(['/app-core.js']); register('./sw.js');</script>";
+
+  function buildFixture(opts) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dbui-site-'));
+    for (const f of MUST_NOT_PUBLISH.concat(MUST_PUBLISH)) {
+      const full = path.join(root, ...f.split('/'));
+      fs.mkdirSync(path.dirname(full), { recursive: true });
+      fs.writeFileSync(full, f === 'index.html' ? INDEX : f === 'sw.js' ? fs.readFileSync(path.join(ROOT, 'sw.js')) : 'x');
+    }
+    const out = path.join(root, '_site');
+    const files = Site.build(root, out, opts);
+    files.sw = fs.readFileSync(path.join(out, 'sw.js'), 'utf8');
+    fs.rmSync(root, { recursive: true, force: true });
+    return files;
+  }
+
+  it('publishes the app and nothing else', () => {
+    const files = buildFixture();
+    assert.deepEqual(MUST_NOT_PUBLISH.filter((f) => files.includes(f)), [], 'these would be public');
+    assert.deepEqual(MUST_PUBLISH.filter((f) => !files.includes(f)), [], 'the site needs these');
+  });
+
+  // The source sw.js does nothing (development); the published one caches under the build's revisions.
+  it('the published service worker carries its revisions and a shell of published files', () => {
+    const files = buildFixture();
+    assert.doesNotMatch(files.sw, /'__(APP_REV|VENDOR_REV|SHELL)__'/);
+    const shell = JSON.parse(/SHELL = (\[[^\]]*\])/.exec(files.sw)[1]);
+    assert.ok(shell.includes('index.html') && shell.includes('app-core.js') && shell.includes('vendor/vue.js'), shell.join(', '));
+    assert.deepEqual(shell.filter((f) => !files.includes(f)), [], 'the shell names files the site does not publish');
+    assert.match(fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8'), /var APP_REV = '__APP_REV__'/, 'the source sw.js must keep its placeholders');
+  });
+
+  it('a Firebase-hosted copy also ships its config files, so visitors connect without setup', () => {
+    const files = buildFixture({ withConfig: true });
+    assert.ok(files.includes('firebase-config.json') && files.includes('supabase-config.json'));
+    assert.ok(!files.includes('ROADMAP.md'));
+  });
+
+  it('every script index.html loads is published, and exists', () => {
+    const scripts = Site.scriptsOf(fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8'));
+    const devOnly = ['dev-client.js', 'backend-local-client.js'];   // served by the dev server from dev/
+    for (const s of scripts) {
+      if (devOnly.includes(s)) continue;
+      assert.ok(fs.existsSync(path.join(ROOT, s)), 'index.html loads /' + s + ', which does not exist');
+      assert.ok(Site.isPublished(s, { scripts }), s + ' is loaded but not published');
     }
   });
 
-  // The files both paths must refuse. Named once, asked of both, so hardening one cannot silently
-  // leave the other open -- which is exactly what happened.
-  const MUST_NOT_PUBLISH = [
-    'make-supabase-pr.bat',
-    'split-supabase-commits.bat',
-    'update-vendor.sh',
-    'deploy.cmd',
-    'Setup.exe',
-    'scripts/migrate-schema-db.js',
-    '.claude/settings.local.json',
-    '.vscode/settings.json',
-    'drive-sync-export-2026-07-31.json',
-    'some-backup-export.json',
-    'docs/features/rsvp.md',
-    'docs/screenshots/rsvp.png'
-  ];
-  // What the site needs. An exclusion list that breaks boot is the other way to get this wrong.
-  // supabase-schema.sql is here because the browser-local Postgres backend FETCHES it at boot and
-  // applies it (storage-pglite.js). It used to be pruned by the Pages workflow as a "server-side" file,
-  // which published an app whose "In this browser" mode 404s on its own access policy — a denylist
-  // maintained by hand will eventually delete something the app needs, and this list is the other half.
-  const MUST_PUBLISH = ['index.html', 'app-core.js', 'databases.js', 'sw.js', 'manifest.json', 'favicon.svg',
-                        'icon-512.png', 'vendor/vue.js', 'examples/chores-schema.json',
-                        'supabase-schema.sql', 'backend-kv.js', 'storage-pglite.js'];
-
-  for (const f of MUST_NOT_PUBLISH) {
-    it(`hosting ignores ${f}`, () => {
-      assert.ok(isIgnored(f), `${f} would be served by Firebase Hosting`);
-    });
-  }
-  for (const f of MUST_PUBLISH) {
-    it(`hosting still serves ${f}`, () => {
-      assert.ok(!isIgnored(f), `${f} is needed at runtime and must stay deployable`);
-    });
-  }
-
-  it('the Pages prune removes every file the hosting ignore list refuses', () => {
-    // Run the workflow's OWN prune commands against a throwaway tree containing each file. Reading the
-    // YAML for substrings is what let `split-supabase-commits.bat` look like coverage while
-    // `make-supabase-pr.bat`, added later and right next to it, shipped.
-    const prune = (wf.match(/- name: Prune non-public files\r?\n\s+run: \|\r?\n([\s\S]*?)\r?\n\s+- name:/) || [])[1];
-    assert.ok(prune && prune.includes('rm '), 'could not find the prune step — this test would pass vacuously');
-
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dbui-pages-'));
-    for (const f of MUST_NOT_PUBLISH.concat(MUST_PUBLISH)) {
-      const full = path.join(dir, f);
-      fs.mkdirSync(path.dirname(full), { recursive: true });
-      fs.writeFileSync(full, 'x');
+  it('.gitignore refuses the data bundles too, so they never reach history', () => {
+    const gi = fs.readFileSync(path.join(ROOT, '.gitignore'), 'utf8');
+    for (const p of ['drive-sync-export-*.json', '*-import.json', '*-export.json', '/_site/']) {
+      assert.ok(gi.includes(p), `.gitignore is missing ${p}`);
     }
-    const script = prune.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
-      .filter((l) => !l.startsWith('#')).join('\n');
-    execFileSync('bash', ['-c', script], { cwd: dir, stdio: 'ignore' });
-
-    const left = (f) => fs.existsSync(path.join(dir, f));
-    const leaked = MUST_NOT_PUBLISH.filter(left);
-    const missing = MUST_PUBLISH.filter((f) => !left(f));
-    fs.rmSync(dir, { recursive: true, force: true });
-    assert.deepEqual(leaked, [], 'GitHub Pages would publish these');
-    assert.deepEqual(missing, [], 'the Pages prune deleted files the site needs');
   });
 });
 
@@ -223,12 +168,54 @@ describe('deploy config — the browser-local Postgres backend', () => {
   // Four places materialise vendor/ and they must agree, or the QR encoder is present in one
   // environment and absent in another -- where the label sheet silently prints Code 39 instead, which
   // looks like a design choice rather than a missing file.
-  it('every path that materialises vendor/ knows about the QR encoder', () => {
+  it('every path that materialises vendor/ knows about the QR encoder and the backend SDKs', () => {
     for (const f of [['update-vendor.sh'], ['.claude', 'hooks', 'session-start.sh'],
                      ['.github', 'workflows', 'deploy-pages.yml'], ['scripts', 'vendor-fetch.mjs']]) {
       const src = fs.readFileSync(path.join(ROOT, ...f), 'utf8');
       assert.match(src, /qrcode/, f.join('/') + ' does not materialise vendor/qrcode.js');
+      assert.match(src, /supabase\.js/, f.join('/') + ' does not materialise vendor/supabase.js');
+      assert.match(src, /firebase-\$\{?n\}?-compat\.js|`firebase-\$\{n\}-compat\.js`/, f.join('/') + ' does not materialise vendor/firebase/');
     }
+  });
+
+  // The four compat bundles came from gstatic with no hash; now they are vendored like everything else.
+  it('the Firebase SDK loads from /vendor, with CDN fallbacks pinned to vendor/versions and by SRI', () => {
+    const src = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+    assert.match(src, /\/vendor\/firebase\/firebase-' \+ n \+ '-compat\.js/, 'index.html does not load /vendor/firebase/ first');
+    assert.doesNotMatch(src, /gstatic\.com\/firebasejs/, 'index.html still loads the SDK from gstatic');
+    const pins = [...src.matchAll(/'https:\/\/cdn\.jsdelivr\.net\/npm\/firebase@([0-9.]+)\/(firebase-(\w+)-compat\.js)', '(sha384-[A-Za-z0-9+/=]+)'/g)];
+    assert.deepEqual(pins.map((m) => m[3]), ['app', 'auth', 'firestore', 'storage'], 'the fallbacks must load all four bundles, app first');
+    for (const [, version, file, , sri] of pins) {
+      assert.equal(version, versions.FIREBASE, file + ': the CDN fallback and vendor/versions name different Firebase versions');
+      const local = path.join(ROOT, 'vendor', 'firebase', file);
+      if (!fs.existsSync(local)) continue;
+      const want = 'sha384-' + crypto.createHash('sha384').update(fs.readFileSync(local)).digest('base64');
+      assert.equal(sri, want, 'the SRI hash does not match vendor/firebase/' + file + ' — run ./update-vendor.sh');
+    }
+  });
+
+  it('the policy no longer allows scripts from gstatic', () => {
+    assert.doesNotMatch(require('../../csp').buildPolicy({}), /www\.gstatic\.com/);
+  });
+
+  // The live deploy's SDK: a floating `@2` with no hash ran whatever jsdelivr served next.
+  it('the Supabase SDK loads from /vendor, with a CDN fallback pinned to vendor/versions and by SRI', () => {
+    const src = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+    assert.match(src, /loadScript\('\/vendor\/supabase\.js'\)\.catch/, 'index.html does not load /vendor/supabase.js first');
+    const m = /'https:\/\/cdn\.jsdelivr\.net\/npm\/@supabase\/supabase-js@([0-9.]+)\/dist\/umd\/supabase\.js', '(sha384-[A-Za-z0-9+/=]+)'/.exec(src);
+    assert.ok(m, 'the Supabase CDN fallback is missing, unversioned or carries no SRI hash');
+    assert.equal(m[1], versions.SUPABASE, 'the CDN fallback and vendor/versions name different supabase-js versions');
+    assert.doesNotMatch(src, /supabase-js@\d+'/, 'a floating supabase-js range is still loaded');
+    const file = path.join(ROOT, 'vendor', 'supabase.js');
+    if (!fs.existsSync(file)) return;
+    const want = 'sha384-' + crypto.createHash('sha384').update(fs.readFileSync(file)).digest('base64');
+    assert.equal(m[2], want, 'the SRI hash does not match vendor/supabase.js — run ./update-vendor.sh');
+  });
+
+  // update-vendor.sh rewrites pins inside index.html's inline loader, which changes that script's CSP hash.
+  it('a vendor bump re-syncs the CSP, and the bump PR commits it', () => {
+    assert.match(fs.readFileSync(path.join(ROOT, 'update-vendor.sh'), 'utf8'), /node dev\/sync-csp\.js/);
+    assert.match(fs.readFileSync(path.join(ROOT, '.github', 'workflows', 'vendor-updates.yml'), 'utf8'), /^\s+firebase\.json$/m);
   });
 
   // Same trap the PGlite pin has: bump vendor/versions by hand and the CDN fallback keeps naming the

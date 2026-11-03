@@ -145,6 +145,10 @@ The setup itself is per-provider, and each guide carries it end to end rather th
 Then fill the database: pick one of the shipped examples on the empty-database screen, or
 Settings → Import from JSON for a bundle of your own.
 
+Both deploys (the Pages workflow and Firebase Hosting's `predeploy`) publish `_site/`, which
+`node scripts/build-site.js --compile --minify` fills with the files the app serves: the Vue templates
+precompiled to render functions, the app's own scripts minified. Development serves the source as it is.
+
 ## Sharing & Access
 
 ### Shareable Links (URL params)
@@ -228,8 +232,10 @@ standalone window with no browser address bar.
   app resolves it against the deployment root before it reaches the manifest. `background_color`/`theme_color` follow the current Vuetify theme; a
   dynamic `theme-color` meta tracks the in-app light/dark toggle. The runtime manifest's install
   icons come from **`schema.icons` when set, else the bundled static files** (below).
-- **Service worker** (`sw.js`): minimal pass-through `fetch` (no offline caching) — its purpose
-  is to satisfy the browser installability check so the install prompt appears reliably.
+- **Service worker** (`sw.js`): on the published site it precaches what every boot loads and caches the
+  rest on first use, so a repeat visit downloads nothing and the app opens offline. A deploy changes the
+  app cache; `vendor/` (the 17 MB PGlite dist included) has its own and is kept until it changes. In
+  development it does nothing.
 - **Per-database icons via `schema.icons` (optional).** All three icon surfaces — tab favicon,
   apple-touch tile, and the manifest install icon — are driven from the database schema, so one
   deployment serving several databases gives each its own. The fields, defaults and authoring advice
@@ -303,7 +309,8 @@ not "don't cache": the browser keeps the bytes and Hosting answers `304` when no
 
 The app ships a CSP built in **`/csp.js`** (one source of truth — rationale documented in the file):
 Firebase-mode origins with multi-database wildcards, hash-allowed inline boot scripts (no
-`'unsafe-inline'` scripts), `'unsafe-eval'` only for Vue's in-browser template compiler, and
+`'unsafe-inline'` scripts), `'unsafe-eval'` only in development for Vue's in-browser template compiler
+(the published page precompiles its templates and drops it), and
 loopback entries so local dev + the Firebase emulators keep working.
 
 One policy, delivered three ways, because the app is deployed three ways:
@@ -438,7 +445,7 @@ Point your editor at the meta-schema and it will complete and check the vocabula
 ├────────────────┼─────────────────────────────────┤
 │  backend-*.js  │  demo-schema.json / firebase-cfg │  ← platform + config
 ├────────────────┴─────────────────────────────────┤
-│  backend-kv.js (Supabase + in-browser PGlite)    │  ← one contract, two hosts
+│  backend-kv.js (Supabase, PGlite, Firestore)     │  ← one contract, three hosts
 ├──────────────────────────────────────────────────┤
 │ Supabase │ Firestore │ PGlite (browser / dev)    │
 └──────────────────────────────────────────────────┘
@@ -449,7 +456,9 @@ lives in, what shape it has, which schema-derived facts the schema-blind policie
 `backend-*.js` file above it is the **platform** (who the caller is, whether other clients exist, where an
 uploaded file goes). `backend-supabase.js` and `backend-local-pglite.js` are platforms only — they share
 that one contract, and both run `supabase-schema.sql` underneath it, so a policy question has a single
-answer whether the database is in São Paulo or in the tab.
+answer whether the database is in São Paulo or in the tab. `backend-firebase.js` runs the same contract
+over Firestore documents, overriding only where Firestore differs (rules-provable queries, batches,
+transactions).
 
 **Schema flow:**
 1. Server loads `examples/demo-schema.json` from disk (dev) or the database (Supabase/Firebase)

@@ -60,6 +60,16 @@ var StorageFirestore = (function() {
     setMeta: function(key, value) {
       return _db.collection('_meta').doc(key).set(typeof value === 'object' ? value : { _value: value });
     },
+    // The three backend-kv.js uses: every doc as { key, value }, a whole-doc write, a merge.
+    _all: function(store) {
+      return _col(store).get().then(function(snap) {
+        var out = [];
+        snap.forEach(function(doc) { out.push({ key: doc.id, value: doc.data() }); });
+        return out;
+      });
+    },
+    _replace: function(store, key, value) { return _col(store).doc(key).set(value); },
+    _merge: function(store, key, value) { return _col(store).doc(key).set(value, { merge: true }); },
     // No pending queue needed -- Firestore syncs directly
     getPending: function() { return Promise.resolve([]); },
     addPending: function() { return Promise.resolve(); },

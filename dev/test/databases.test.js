@@ -203,3 +203,30 @@ describe('Databases.manifestIdentity — two databases, two apps', () => {
     assert.deepEqual(Databases.manifestIdentity(base, null), { id: base, start_url: base, scope: base });
   });
 });
+
+describe('Databases.mode — the one owner of app_mode', () => {
+  it('reads, sets and clears the mode', () => {
+    const s = bind({});
+    assert.equal(Databases.mode(), null);
+    Databases.setMode('supabase');
+    assert.equal(Databases.mode(), 'supabase');
+    Databases.setMode(null);
+    assert.equal(s.getItem('app_mode'), null);
+  });
+
+  it('choosing a local backend at setup moves the active database with it', () => {
+    bind({});
+    Databases.remember('firebase', { projectId: 'p', apiKey: 'k' });
+    Databases.remember('pglite');
+    assert.equal(Databases.mode(), 'pglite');
+    assert.equal(Databases.activeKey(), 'pglite', 'app_db must not keep naming the Firebase database');
+  });
+
+  it('no app file but databases.js touches app_mode', () => {
+    const fs = require('node:fs'), path = require('node:path');
+    const ROOT = path.join(__dirname, '..', '..');
+    const files = fs.readdirSync(ROOT).filter((f) => /\.(js|html)$/.test(f) && f !== 'databases.js');
+    const hits = files.filter((f) => fs.readFileSync(path.join(ROOT, f), 'utf8').includes("'app_mode'"));
+    assert.deepEqual(hits, [], 'use Databases.mode() / setMode() instead of the raw key in: ' + hits.join(', '));
+  });
+});

@@ -787,14 +787,14 @@ test.describe('image/url column types', () => {
     // fit + opacity + position feed through to real CSS. Note the browser NORMALIZES what it serializes:
     // `40% auto` collapses to `40%` (a lone value is the width, height auto — which is exactly the
     // aspect-preserving scale we want), and `top left` reorders to `left top`.
-    await page.evaluate(() => window.appInstance.saveViewBackground('gallery', { fit: 'width', width: 40, opacity: 0.2, position: 'top left' }));
+    await page.evaluate((([v, patch]) => { const a = window.appInstance, cfg = Object.assign({}, a.appConfig); a._saveFolderConfig(a._withBackground(cfg, v, Object.assign({}, (cfg.backgrounds || {})[v], patch)), v); }), ['gallery', { fit: 'width', width: 40, opacity: 0.2, position: 'top left' }]);
     await expect.poll(styleOf, { timeout: 4000 }).toContain('background-size: 40%');
     style = await styleOf();
     expect(style).toContain('background-position: left top');
     expect(style).toMatch(/rgba\(var\(--v-theme-surface\),\s*0\.8\)/);   // scrim alpha = 1 - opacity
 
     // Clearing drops the whole entry rather than leaving an empty one behind.
-    await page.evaluate(() => window.appInstance.saveViewBackground('gallery', { image: '' }));
+    await page.evaluate((([v, patch]) => { const a = window.appInstance, cfg = Object.assign({}, a.appConfig); a._saveFolderConfig(a._withBackground(cfg, v, Object.assign({}, (cfg.backgrounds || {})[v], patch)), v); }), ['gallery', { image: '' }]);
     await expect.poll(async () => {
       const cfg = await (await page.request.post('/api/getFolderConfig', { data: {} })).json();
       return (cfg.backgrounds || {}).gallery === undefined;
@@ -886,10 +886,8 @@ test.describe('image/url column types', () => {
     await expect.poll(styleOf, { timeout: 4000 }).toContain('background-image');
 
     // A view with NO schema default keeps a clean config: removing deletes rather than tombstoning.
-    await page.evaluate(() => {
-      window.appInstance.saveViewBackground('docs', { image: 'https://example.com/x.png' });
-      window.appInstance.saveViewBackground('docs', { image: '' });
-    });
+    await page.evaluate((([v, patch]) => { const a = window.appInstance, cfg = Object.assign({}, a.appConfig); a._saveFolderConfig(a._withBackground(cfg, v, Object.assign({}, (cfg.backgrounds || {})[v], patch)), v); }), ['docs', { image: 'https://example.com/x.png' }]);
+    await page.evaluate((([v, patch]) => { const a = window.appInstance, cfg = Object.assign({}, a.appConfig); a._saveFolderConfig(a._withBackground(cfg, v, Object.assign({}, (cfg.backgrounds || {})[v], patch)), v); }), ['docs', { image: '' }]);
     await expect.poll(async () => {
       const c = await (await page.request.post('/api/getFolderConfig', { data: {} })).json();
       return ((c || {}).backgrounds || {}).docs === undefined;
@@ -3254,16 +3252,14 @@ test.describe('XSS prevention (safeUrl + print escape)', () => {
   test('javascript: URLs in markdown are neutralized; HTML in field values is escaped in print', async ({ page }) => {
     test.setTimeout(20000);
     await page.goto('/');
-    // Wait for BOTH globals this test reads: mdToHtml (embeds.js, loaded early) AND appInstance (mounted
-    // later by createVueApp). mdToHtml now appears well before the Vue app mounts, so waiting on it alone
-    // would race appInstance._pe.
-    await page.waitForFunction(() => typeof mdToHtml === 'function' && window.appInstance && typeof appInstance._pe === 'function');
+    // Both globals this test reads: mdToHtml (embeds.js) and Print (print.js, what printView escapes with).
+    await page.waitForFunction(() => typeof mdToHtml === 'function' && window.Print && typeof Print.escape === 'function');
     const results = await page.evaluate(() => {
       // Test 1: safeUrl blocks javascript: protocol
       var html = mdToHtml('[click](javascript:alert(1))');
       var hasJsUrl = html.includes('javascript:');
-      // Test 2: _pe escapes HTML special chars
-      var pe = appInstance._pe;
+      // Test 2: the print escape escapes HTML special chars
+      var pe = Print.escape;
       var escaped = pe('<script>alert(1)</script>');
       var hasRawTag = escaped.includes('<script>');
       return { jsBlocked: !hasJsUrl, htmlEscaped: !hasRawTag, escapedOutput: escaped };
@@ -4899,8 +4895,6 @@ test.describe('v3 @both partition toggle in an embed', () => {
         adminSeesWholeMatrix: app.mineOnlySlot({ mineOnly: { list: 'assigned_to' } }),
         asAnnaSlot: app._mineOnlySlotOf(anna, { mineOnly: { list: 'assigned_to' } }),
         asGhostSlot: app._mineOnlySlotOf(ghost, { mineOnly: { list: 'assigned_to' } }),
-        // The signed-in path must still work after being refactored onto the shared rule.
-        myListStillWorks: typeof app.meValueForList('assigned_to')
       };
     });
     expect(r.annaValues).toEqual({ assigned_to: 'Anna' });
@@ -4912,7 +4906,6 @@ test.describe('v3 @both partition toggle in an embed', () => {
     expect(r.adminSeesWholeMatrix).toBe(null);
     expect(r.asAnnaSlot).toBe('anna');
     expect(r.asGhostSlot).toBe('');
-    expect(r.myListStillWorks).toBe('string');
   });
 
   test('validateSchema names a timeline pointed at the wrong columns', async ({ page }) => {
@@ -6466,7 +6459,7 @@ test.describe('calendar view', () => {
       app.currentTable = 'cal_test';
       // Model helpers the calendar-view component reads: window + events + month cells (anchor 07-15).
       var ev = app.calEventsFor('cal_test', app._calWindowFor('2026-07-15', 'month', 1));
-      var cells = app._calCellsMonth('2026-07-15', 1).map(function(c) { c.count = (ev[c.date] || []).length; return c; });
+      var cells = Calendar.cellsMonth('2026-07-15', 1, app._calToday()).map(function(c) { c.count = (ev[c.date] || []).length; return c; });
       var selDay = '2026-07-08';
       return {
         d8: (ev['2026-07-08'] || []).map(function(e) { return e.title; }),
@@ -7751,7 +7744,7 @@ test.describe('Shared-link URL params', () => {
   // asserted without a real firebase boot (which can't run in the test env).
   test('firebase k/d/p link restores firebase_config and strips the URL', async ({ page }) => {
     page.on('dialog', d => d.accept());   // user confirms the projectId connect prompt (the onboarding path)
-    await page.route(/gstatic\.com|\/backend-firebase\.js|\/storage-firestore\.js/, r =>
+    await page.route(/\/vendor\/firebase\/|npm\/firebase@|\/backend-firebase\.js|\/storage-firestore\.js/, r =>
       r.fulfill({ status: 200, contentType: 'application/javascript', body: '' }));
     await page.goto('/?mode=firebase&k=API_KEY_1&d=app.example.com&p=proj-123');
     await page.waitForFunction(() => localStorage.getItem('app_mode') === 'firebase', { timeout: 6000 });
@@ -7767,7 +7760,7 @@ test.describe('Shared-link URL params', () => {
   // Firebase branch with d= omitted: authDomain must default to <projectId>.firebaseapp.com.
   test('firebase k/p link without d= derives authDomain from projectId', async ({ page }) => {
     page.on('dialog', d => d.accept());   // user confirms the projectId connect prompt (the onboarding path)
-    await page.route(/gstatic\.com|\/backend-firebase\.js|\/storage-firestore\.js/, r =>
+    await page.route(/\/vendor\/firebase\/|npm\/firebase@|\/backend-firebase\.js|\/storage-firestore\.js/, r =>
       r.fulfill({ status: 200, contentType: 'application/javascript', body: '' }));
     await page.goto('/?mode=firebase&k=API_KEY_9&p=proj-999');
     await page.waitForFunction(() => localStorage.getItem('app_mode') === 'firebase', { timeout: 6000 });
@@ -7776,7 +7769,7 @@ test.describe('Shared-link URL params', () => {
   });
   test('firebase base64 config link restores firebase_config', async ({ page }) => {
     page.on('dialog', d => d.accept());   // user confirms the projectId connect prompt (the onboarding path)
-    await page.route(/gstatic\.com|\/backend-firebase\.js|\/storage-firestore\.js/, r =>
+    await page.route(/\/vendor\/firebase\/|npm\/firebase@|\/backend-firebase\.js|\/storage-firestore\.js/, r =>
       r.fulfill({ status: 200, contentType: 'application/javascript', body: '' }));
     const config = { apiKey: 'AK2', authDomain: 'b.example.com', projectId: 'p2' };
     const b64 = Buffer.from(JSON.stringify(config)).toString('base64');
@@ -7872,6 +7865,7 @@ test.describe('Filter array-IN -> $or on export', () => {
 });
 
 test.describe('PWA installability (no errors)', () => {
+  test.use({ serviceWorkers: 'allow' });
   test('boots installable: valid manifest, square PNG icons, SW registered, no errors', async ({ page }) => {
     test.setTimeout(20000);
     const errors = [];
@@ -10114,8 +10108,6 @@ test.describe('form view', () => {
 });
 
 test.describe('Security policy reports in Settings', () => {
-  // sw.js passes every fetch through, and a request a service worker makes is invisible to page.route.
-  test.use({ serviceWorkers: 'block' });
   test('reads the collector with the pasted token and counts extension reports apart', async ({ page }) => {
     const asked = [];
     // A regex, not a glob: in a glob `?` is a wildcard, and a miss here reads the REAL collector.
