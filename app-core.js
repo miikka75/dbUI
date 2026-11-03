@@ -1521,6 +1521,15 @@ function createVueApp() {
       },
 
       notify: function(text) { this.snackText = text; this.snackbar = true; },
+      // Any refused or lost write: the screen shows the optimistic value, so reload what is stored.
+      _writeFailed: function(table, e) {
+        var self = this;
+        console.warn('write to ' + table + ' failed:', e);
+        this.notify(this.t('msg.save_failed'));
+        var loads = [[table, 'active'], [aKey(table), 'archive']].filter(function(k) { return self.dataCache[k[0]]; })
+          .map(function(k) { return self._fetchTable(table, k[1], k[0]); });
+        if (loads.length) Promise.all(loads).then(function() { self._liveRebuild(); });
+      },
       setNavLayout: function(v) { this.navLayoutOverride = v; localStorage.setItem('app_nav_layout', v); },
       setNavDisplay: function(v) { this.navDisplayOverride = v; localStorage.setItem('app_nav_display', v); },
       setNavChoice: function(v) {
@@ -1885,8 +1894,6 @@ function createVueApp() {
       },
       // --- Calendar helpers (used by the calendar view + calendar embeds) ---
       _calToday: function() { return fmtDate(new Date()); },
-      _calCellsMonth: function(anchor, weekStart) { return Calendar.cellsMonth(anchor, weekStart, this._calToday()); },
-      _calCellsWeek: function(anchor, weekStart) { return Calendar.cellsWeek(anchor, weekStart, this._calToday()); },
       // BCP-47 locale for Intl date names: an explicit `language.locale`, else the language CODE itself
       // (a standard code like `en`/`es`/`sv` IS a valid BCP-47 tag — so the calendar follows the SELECTED
       // app language, not the browser). The browser locale is only a last resort when the code is unusable.
@@ -1996,7 +2003,6 @@ function createVueApp() {
         this.currentData.push(viewRow);
         this.notify(this.t('msg.row_added'));
       },
-      calRotationSources: function(name) { return Calendar.rotationSources(VIEWS, name); },
       // Visible grid window {from, toExclusive} for a calendar's anchor+mode (month/list -> month grid,
       // week -> week strip). Bounds rotation generation to what's actually on screen.
       _calWindowFor: function(anchor, mode, weekStart) { return Calendar.windowFor(anchor, mode, weekStart, this._calToday()); },
@@ -2285,11 +2291,6 @@ function createVueApp() {
       dateColumnItems: function(table) {
         var self = this;
         return this.dateColumnsOf(table).map(function(c) { return { title: self.tOr('field.' + c, c), value: c }; });
-      },
-      // The saved definition's table names, for the list row, as labels.
-      calSourceLabels: function(c) {
-        var self = this;
-        return (c.sources || []).map(function(s) { return self.tOr('tab.' + s.table, s.table); }).join(', ');
       },
       dateColumnsOf: function(table) {
         return getColumns(table).filter(function(c) { return Columns.colIsDate(SCHEMA, c) || Columns.colIsDateTime(SCHEMA, c); });
@@ -3738,12 +3739,12 @@ function createVueApp() {
         this._archiveInSources(withMirrors(this.embedSources(type, name)), item.id);
       },
       togglePageEdit: function() { this.pageEditing = !this.pageEditing; if (this.pageEditing) this.pageEditText = (this.currentPage && this.currentPage.markdown) || ''; },
+      // The editor closes only once the body is stored; on a failure it stays open with the text.
       savePage: function() {
-        var name = this.currentTable;
-        this.pageCache[name] = this.pageEditText;
-        if (backend.putRow) Writes.putRow('_pages', { id: name, markdown: this.pageEditText }, 'active');
-        this.pageEditing = false;
-        this.notify(this.t('msg.saved'));
+        var self = this, name = this.currentTable, text = this.pageEditText;
+        var done = function() { self.pageCache[name] = text; self.pageEditing = false; self.notify(self.t('msg.saved')); };
+        if (!backend.putRow) return done();
+        Writes.putRow('_pages', { id: name, markdown: text }, 'active').then(done, function() {});
       },
 
       // Ensure every schema-referenced list exists (both `list` and `listSwitch.list`), then seed
@@ -4251,6 +4252,7 @@ function createVueApp() {
           // One action, so one press takes back the cell AND the mirror rows it cascaded into. The
           // group has to be opened HERE rather than at edit time: propagateMirror runs inside this
           // callback, and an action is a synchronous scope.
+          var put;
           Undo.action('edit', function() {
             Undo.record({
               table: source, part: tab,
@@ -4263,13 +4265,14 @@ function createVueApp() {
                 ? { type: 'delete', id: item.id, row: null }
                 : { type: 'put', id: item.id, row: (function() { var r = { id: item.id }; r[col] = undoWas; return r; })() }
             });
-            Writes.putRow(source, row, tab);
+            put = Writes.putRow(source, row, tab);
             // Propagate to mirror tables if this column is mirrored. This takes the LIVE row, not the
             // payload: `row` is now a partial, and propagateMirror reads every synced column off it —
             // given the partial it would blank each one it couldn't find.
             self.propagateMirror(item.id, source, item);
           });
-          self.notify(self.t('msg.saved'));
+          // A failure is reported by the funnel (_writeFailed).
+          put.then(function() { self.notify(self.t('msg.saved')); }, function() {});
           self._liveFlush();      // the write is out; let anything held during the edit land
         }, 300);
       },
@@ -5854,25 +5857,18 @@ function createVueApp() {
       // as an explicit `{ image: '' }` TOMBSTONE — the override that means "none" — and the entry is only
       // deleted when there is no schema default for it to override (which keeps the config free of
       // tombstones that say nothing). restoreViewBackground deletes it to bring the default back.
-      saveViewBackground: function(viewName, patch) {
-        var cfg = Object.assign({}, this.appConfig || {});
+      // A view's stored background: `bg`, a tombstone hiding the schema's, or no entry at all.
+      _withBackground: function(cfg, viewName, bg) {
         cfg.backgrounds = Object.assign({}, cfg.backgrounds || {});
-        var next = Object.assign({}, cfg.backgrounds[viewName], patch);
-        if (!next.image && !this.schemaBackground(viewName)) delete cfg.backgrounds[viewName];
-        else if (!next.image) cfg.backgrounds[viewName] = { image: '' };   // tombstone: hide the schema default
-        else cfg.backgrounds[viewName] = next;
-        cfg.mode = this.mode;
-        this._saveFolderConfig(cfg, viewName);
+        if (bg && bg.image) cfg.backgrounds[viewName] = bg;
+        else if (this.schemaBackground(viewName)) cfg.backgrounds[viewName] = { image: '' };
+        else delete cfg.backgrounds[viewName];
+        return cfg;
       },
       // The schema's declared background for a view, if any (what a tombstone hides / restore brings back).
       schemaBackground: function(viewName) {
         var v = VIEWS[viewName];
         return (v && v.background && v.background.image) ? v.background : null;
-      },
-      // Is this view's background currently a tombstone hiding a schema default?
-      backgroundHidden: function(viewName) {
-        var ov = ((this.appConfig && this.appConfig.backgrounds) || {})[viewName];
-        return !!(ov && !ov.image && this.schemaBackground(viewName));
       },
       // Drop the override entirely, so the schema-declared background applies again.
       restoreViewBackground: function(viewName) {
@@ -6015,10 +6011,7 @@ function createVueApp() {
           if (menuImage === (item.image || '') && (!menuImage || d.focus === (item.focus || 'center'))) { delete look.image; delete look.focus; }
           else { look.image = menuImage; if (menuImage) look.focus = d.focus; else delete look.focus; }
           if (Object.keys(look).length) cfg.navAppearance[d.id] = look; else delete cfg.navAppearance[d.id];
-          cfg.backgrounds = Object.assign({}, cfg.backgrounds || {});
-          if (bgImage) cfg.backgrounds[d.id] = { image: bgImage, fit: d.fit, width: Number(d.width) || 40, position: d.position, opacity: Number(d.opacity), fixed: !!d.fixed };
-          else if (self.schemaBackground(d.id)) cfg.backgrounds[d.id] = { image: '' };   // tombstone: hide the schema default
-          else delete cfg.backgrounds[d.id];
+          self._withBackground(cfg, d.id, bgImage ? { image: bgImage, fit: d.fit, width: Number(d.width) || 40, position: d.position, opacity: Number(d.opacity), fixed: !!d.fixed } : null);
           cfg.mode = self.mode;
           self._saveFolderConfig(cfg, d.id);
           self.appearanceDraft = null;
@@ -6957,12 +6950,6 @@ function createVueApp() {
         var self = this, cols = this.meFilterColsFor(name);
         return cols.length > 0 && cols.every(function(c) { return !self.meValueFor(c); });
       },
-      // The same identity resolution keyed by LIST rather than by column, for the callers that have no
-      // column to ask about (a rotation view's slots are column NAMES, not cells). meValueFor is the
-      // column-shaped wrapper.
-      meValueForList: function(list) {
-        return this._listValueOf(this._myIdentity(), list);
-      },
       // An IDENTITY is the pair `@me` resolves through: the account's per-list values, and its display
       // name for lists that are not userlink-backed. `myListValues` is this for the signed-in user; a
       // per-person feed needs the same thing for somebody else, and the rule for choosing between the
@@ -7888,12 +7875,12 @@ function createVueApp() {
             chain = chain.then(step('mdi-table-row', (i + 1) + '/' + rowJobs.length + ' · ' + job.table, function() {
               var target = job.table;
               // Delete first to force change detection on re-import.
-              return Writes.deleteRow(target, job.row.id, job.tab).catch(function() {})
+              return Writes.deleteRow(target, job.row.id, job.tab, { quiet: true }).catch(function() {})
                 .then(function() {
                   // A row arriving from a `__archive` key is being MOVED out of that collection, so
                   // clear it there too. Failures are swallowed like the delete above: the row not
                   // being there is the normal case on a fresh import.
-                  return job.clearArchive ? Writes.deleteRow(target, job.row.id, 'archive').catch(function() {}) : null;
+                  return job.clearArchive ? Writes.deleteRow(target, job.row.id, 'archive', { quiet: true }).catch(function() {}) : null;
                 })
                 .then(function() { return Writes.putRow(target, job.row, job.tab); });
             }));
@@ -8349,9 +8336,6 @@ function createVueApp() {
       // Parses the #hex codes, sorts by luminance + chroma, and maps roles: lightest->background,
       // 2nd-lightest->surface, darkest->text(on-surface), most-saturated->primary, next->secondary.
       // (Inverted bg/text for dark mode.) One save for the whole set.
-      _rgb: function(hex) { return Brand.rgb(hex); },
-      _luminance: function(hex) { return Brand.luminance(hex); },
-      _chroma: function(hex) { return Brand.chroma(hex); },
       _parsePalette: function(str) { return Brand.parsePalette(str); },
       // The role mapping itself is Brand.rolesFor (pure, unit-tested). What stays here is the part that
       // is not: which mode is showing, writing each role through setThemeColor so it live-previews, the
@@ -8417,8 +8401,6 @@ function createVueApp() {
           meta.content = tc;
         } catch (e) {}
       },
-      // (PRINT_CSS is a module-level var defined above createVueApp)
-      _pe: function(s) { return Print.escape(s); },
       // `title` is escaped HERE (callers pass it raw): it comes from t()/displayValue — editor-writable
       // shared data — and document.write renders it, so an unescaped title is stored XSS in the print window.
       _printOpen: function(title, bodyHtml) { var w = window.open('', '_blank'); w.document.write('<html><head><title>' + Print.escape(title) + '</title><style>' + PRINT_CSS + '</style></head><body>' + bodyHtml + '</body></html>'); w.document.close(); w.print(); },
@@ -8649,6 +8631,7 @@ function createVueApp() {
       // one place that knows a row was written — and the reason writes.js exists rather than twenty-six
       // call sites. Guarded inside _onWriteRepublish, so a restricted member's write costs nothing.
       if (typeof Writes !== 'undefined' && Writes.onWrite) Writes.onWrite(function(t) { self._onWriteRepublish(t); });
+      if (typeof Writes !== 'undefined' && Writes.onError) Writes.onError(function(t, e) { self._writeFailed(t, e); });
       // A pass when a full-access client opens the app, which is what bounds how long a revocation can
       // take. Write-triggered republishing alone cannot do it: a subscriber unsubscribing is not
       // full-access, so their own write publishes nothing, and if nobody edits a duty afterwards their
@@ -8991,11 +8974,12 @@ function createVueApp() {
           this.docDraft = body != null ? body : ((VIEWS[this.name] && VIEWS[this.name].markdown) || '');
         }
       },
+      // As savePage: the editor closes only once the body is stored.
       saveDoc: function() {
-        appInstance.pageCache[this.name] = this.docDraft;
-        if (backend.putRow) Writes.putRow('_pages', { id: this.name, markdown: this.docDraft }, 'active');
-        this.editing = false;
-        appInstance.notify(appInstance.t('msg.saved'));
+        var self = this, name = this.name, text = this.docDraft;
+        var done = function() { appInstance.pageCache[name] = text; self.editing = false; appInstance.notify(appInstance.t('msg.saved')); };
+        if (!backend.putRow) return done();
+        Writes.putRow('_pages', { id: name, markdown: text }, 'active').then(done, function() {});
       }
     }),
     template: ''
