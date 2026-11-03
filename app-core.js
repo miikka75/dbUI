@@ -218,9 +218,12 @@ var app; // Vue app instance
 var appInstance; // Mounted root component proxy
 var backend; // Set by backend adapter loaded after this file
 
-function getSetting(key, def) {
-  try { var s = JSON.parse(localStorage.getItem('app_settings') || '{}'); return s[key] !== undefined ? s[key] : def; } catch(e) { return def; }
+// A per-viewer preference under its own localStorage key. Blocked or full storage forgets it, never throws.
+function loadPref(key, def) {
+  try { var v = JSON.parse(localStorage.getItem(key)); return v == null ? def : v; } catch (e) { return def; }
 }
+function savePref(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) {} }
+function getSetting(key, def) { var s = loadPref('app_settings', {}); return s[key] !== undefined ? s[key] : def; }
 
 // Privacy: keep the first word, reduce every later word to an initial. "Name Surname" -> "Name S.";
 function obscureName(s) {
@@ -357,7 +360,7 @@ function createVueApp() {
       // (the browser may delete it on its own), true = only the user can.
       localStore: { persisted: null, usage: 0, quota: 0 },
       needsReauth: false,
-      setupStep: (function() { var m = localStorage.getItem('app_mode'); return (m === 'firebase' || m === 'supabase') ? m : null; })(),
+      setupStep: (function() { var m = Databases.mode(); return (m === 'firebase' || m === 'supabase') ? m : null; })(),
       mode: '',
       currentTable: '',
       currentData: [],
@@ -372,7 +375,7 @@ function createVueApp() {
       // Booted signed-out into a database with public tables (see the backends' auth handlers).
       visitorMode: false,
       // This tablet's QR lock: { view, door, hash } -- the screen it reopens into, and the PIN's hash.
-      kioskLock: (function() { try { return JSON.parse(localStorage.getItem('kiosk_lock') || 'null'); } catch (e) { return null; } })(),
+      kioskLock: loadPref('kiosk_lock', null),
       // The sign-in dialog: Google, or an emailed code / link (when the backend offers email sign-in).
       signInOpen: false, authEmail: '', authCode: '', authSent: false, authCodeAllowed: false, authBusy: false, authError: '', authLinkPending: false,
       // A page's `filters` picks, { page: { column: [values] } }, kept per viewer in their browser.
@@ -741,7 +744,7 @@ function createVueApp() {
       pageFilterCols: function() { var v = VIEWS[this.currentTable]; return (v && typeof v.markdown === 'string' && Array.isArray(v.filters)) ? v.filters : []; },
       pagePicked: function() {
         var n = this.currentTable, p = this.pagePicks[n]; if (p) return p;
-        try { return JSON.parse(localStorage.getItem('page_filter:' + n) || '{}') || {}; } catch (e) { return {}; }
+        return loadPref('page_filter:' + n, {});
       },
       // Comparison rows: the page's shared ones (on its _pages doc, edited by canEditPages), then this browser's.
       pageCompareRows: function() {
@@ -751,7 +754,7 @@ function createVueApp() {
       },
       _localCompareRows: function() {
         var n = this.currentTable, r = this.pageCompares[n]; if (r) return r;
-        try { var v = JSON.parse(localStorage.getItem('page_compare:' + n) || '[]'); return Array.isArray(v) ? v : []; } catch (e) { return []; }
+        var v = loadPref('page_compare:' + n, []); return Array.isArray(v) ? v : [];
       },
       // Stats views on the page with whole-set `tiles` (rowTiles already compare).
       pageCompareViews: function() {
@@ -933,7 +936,7 @@ function createVueApp() {
       },
       shareLink: function() {
         var base = location.origin + location.pathname;
-        var mode = localStorage.getItem('app_mode');
+        var mode = Databases.mode();
         if (mode === 'firebase') {
           var c = Databases.config('firebase');
           if (!c) return base;
@@ -1385,6 +1388,22 @@ function createVueApp() {
         if (configured && codes.indexOf(configured) >= 0) return configured;
         return codes.length ? codes[0] : null;
       },
+      // Each labelled ref column's target rows by key, and its label: a cell finds its row without scanning
+      // the table. Reading dataCache's keys is what recomputes it once tables load (SCHEMA is not reactive).
+      refRowIndex: function() {
+        var cache = this.dataCache, out = {};
+        Object.keys(cache);
+        for (var t in SCHEMA) {
+          var defs = Columns.columnDefs(SCHEMA[t]);
+          for (var c in defs) {
+            if (out[c] || !defs[c] || typeof defs[c] !== 'object' || !Array.isArray(defs[c].label)) continue;
+            var rf = getColumnRef(null, c) || {}, vcol = rf.valueCol || 'id', rows = new Map();
+            (cache[rf.table] || []).forEach(function(r) { if (!rows.has(r[vcol])) rows.set(r[vcol], r); });
+            out[c] = { rows: rows, label: this.refRowLabel(c) };
+          }
+        }
+        return out;
+      },
       refTables: function() {
         var all = Object.keys(SCHEMA).filter(function(k) { return SCHEMA[k].isLookup; });
         var allowed = this.userAllowedTables;
@@ -1520,6 +1539,15 @@ function createVueApp() {
       },
 
       notify: function(text) { this.snackText = text; this.snackbar = true; },
+      // Any refused or lost write: the screen shows the optimistic value, so reload what is stored.
+      _writeFailed: function(table, e) {
+        var self = this;
+        console.warn('write to ' + table + ' failed:', e);
+        this.notify(this.t('msg.save_failed'));
+        var loads = [[table, 'active'], [aKey(table), 'archive']].filter(function(k) { return self.dataCache[k[0]]; })
+          .map(function(k) { return self._fetchTable(table, k[1], k[0]); });
+        if (loads.length) Promise.all(loads).then(function() { self._liveRebuild(); });
+      },
       setNavLayout: function(v) { this.navLayoutOverride = v; localStorage.setItem('app_nav_layout', v); },
       setNavDisplay: function(v) { this.navDisplayOverride = v; localStorage.setItem('app_nav_display', v); },
       setNavChoice: function(v) {
@@ -1574,7 +1602,7 @@ function createVueApp() {
       // Setup
       completeLocalSetup: function() {
         localStorage.setItem('app_folder', 'local');
-        localStorage.setItem('app_mode', 'local');
+        Databases.remember('local');
         this.mode = 'local';
         this.showSetup = false;
         this.startApp();
@@ -1587,12 +1615,12 @@ function createVueApp() {
         var email = String(this.pgliteUserInput || '').trim().toLowerCase() || 'you@local';
         localStorage.setItem('pglite_user', email);
         localStorage.setItem('app_folder', 'pglite');
-        localStorage.setItem('app_mode', 'pglite');
+        Databases.remember('pglite');
         location.reload();   // reload so index.html loads storage-pglite + backend-kv for mode=pglite
       },
       backToSetup: function() {
         this.setupStep = null;
-        try { localStorage.removeItem('app_mode'); } catch (e) {}
+        Databases.setMode(null);
       },
 
       // --- Browser-local database: size, and whether the browser may evict it -------------------------
@@ -1843,7 +1871,7 @@ function createVueApp() {
         var self = this;
         return this._kioskHash(pin).then(function(h) {
           self.kioskLock = { view: k.view, door: k.door || '', hash: h };
-          try { localStorage.setItem('kiosk_lock', JSON.stringify(self.kioskLock)); } catch (e) {}
+          savePref('kiosk_lock', self.kioskLock);
         });
       },
       kioskPinOk: function(pin) { var l = this.kioskLock; return l ? this._kioskHash(pin).then(function(h) { return h === l.hash; }) : Promise.resolve(true); },
@@ -1884,8 +1912,6 @@ function createVueApp() {
       },
       // --- Calendar helpers (used by the calendar view + calendar embeds) ---
       _calToday: function() { return fmtDate(new Date()); },
-      _calCellsMonth: function(anchor, weekStart) { return Calendar.cellsMonth(anchor, weekStart, this._calToday()); },
-      _calCellsWeek: function(anchor, weekStart) { return Calendar.cellsWeek(anchor, weekStart, this._calToday()); },
       // BCP-47 locale for Intl date names: an explicit `language.locale`, else the language CODE itself
       // (a standard code like `en`/`es`/`sv` IS a valid BCP-47 tag — so the calendar follows the SELECTED
       // app language, not the browser). The browser locale is only a last resort when the code is unusable.
@@ -1995,7 +2021,6 @@ function createVueApp() {
         this.currentData.push(viewRow);
         this.notify(this.t('msg.row_added'));
       },
-      calRotationSources: function(name) { return Calendar.rotationSources(VIEWS, name); },
       // Visible grid window {from, toExclusive} for a calendar's anchor+mode (month/list -> month grid,
       // week -> week strip). Bounds rotation generation to what's actually on screen.
       _calWindowFor: function(anchor, mode, weekStart) { return Calendar.windowFor(anchor, mode, weekStart, this._calToday()); },
@@ -2284,11 +2309,6 @@ function createVueApp() {
       dateColumnItems: function(table) {
         var self = this;
         return this.dateColumnsOf(table).map(function(c) { return { title: self.tOr('field.' + c, c), value: c }; });
-      },
-      // The saved definition's table names, for the list row, as labels.
-      calSourceLabels: function(c) {
-        var self = this;
-        return (c.sources || []).map(function(s) { return self.tOr('tab.' + s.table, s.table); }).join(', ');
       },
       dateColumnsOf: function(table) {
         return getColumns(table).filter(function(c) { return Columns.colIsDate(SCHEMA, c) || Columns.colIsDateTime(SCHEMA, c); });
@@ -3737,12 +3757,12 @@ function createVueApp() {
         this._archiveInSources(withMirrors(this.embedSources(type, name)), item.id);
       },
       togglePageEdit: function() { this.pageEditing = !this.pageEditing; if (this.pageEditing) this.pageEditText = (this.currentPage && this.currentPage.markdown) || ''; },
+      // The editor closes only once the body is stored; on a failure it stays open with the text.
       savePage: function() {
-        var name = this.currentTable;
-        this.pageCache[name] = this.pageEditText;
-        if (backend.putRow) Writes.putRow('_pages', { id: name, markdown: this.pageEditText }, 'active');
-        this.pageEditing = false;
-        this.notify(this.t('msg.saved'));
+        var self = this, name = this.currentTable, text = this.pageEditText;
+        var done = function() { self.pageCache[name] = text; self.pageEditing = false; self.notify(self.t('msg.saved')); };
+        if (!backend.putRow) return done();
+        Writes.putRow('_pages', { id: name, markdown: text }, 'active').then(done, function() {});
       },
 
       // Ensure every schema-referenced list exists (both `list` and `listSwitch.list`), then seed
@@ -4250,6 +4270,7 @@ function createVueApp() {
           // One action, so one press takes back the cell AND the mirror rows it cascaded into. The
           // group has to be opened HERE rather than at edit time: propagateMirror runs inside this
           // callback, and an action is a synchronous scope.
+          var put;
           Undo.action('edit', function() {
             Undo.record({
               table: source, part: tab,
@@ -4262,13 +4283,14 @@ function createVueApp() {
                 ? { type: 'delete', id: item.id, row: null }
                 : { type: 'put', id: item.id, row: (function() { var r = { id: item.id }; r[col] = undoWas; return r; })() }
             });
-            Writes.putRow(source, row, tab);
+            put = Writes.putRow(source, row, tab);
             // Propagate to mirror tables if this column is mirrored. This takes the LIVE row, not the
             // payload: `row` is now a partial, and propagateMirror reads every synced column off it —
             // given the partial it would blank each one it couldn't find.
             self.propagateMirror(item.id, source, item);
           });
-          self.notify(self.t('msg.saved'));
+          // A failure is reported by the funnel (_writeFailed).
+          put.then(function() { self.notify(self.t('msg.saved')); }, function() {});
           self._liveFlush();      // the write is out; let anything held during the edit land
         }, 300);
       },
@@ -4642,11 +4664,10 @@ function createVueApp() {
         if (!plain && this.colIsOwner(col)) return this.userLabel(val);
         if (this.colIsDateTime(col)) return this.dateTimeLabel(val);
         // A labelled ref names the row it points at, not its key ("12 months · 15/01/2026", not an id).
-        var lab = !plain && this.colIsRef(col) && this.refRowLabel(col);
-        if (lab) {
-          var rf = this.colRef(col) || {}, vcol = rf.valueCol || 'id';
-          var hit = (this.dataCache[rf.table] || []).filter(function(r) { return r[vcol] === val; })[0];
-          if (hit) return lab(hit);
+        var ix = !plain && this.colIsRef(col) && this.refRowIndex[col];
+        if (ix) {
+          var hit = ix.rows.get(val);
+          if (hit) return ix.label(hit);
         }
         var out = val;
         // Translation namespace: a list column uses its list name; a `ref` column uses its lookup TABLE name,
@@ -5853,25 +5874,18 @@ function createVueApp() {
       // as an explicit `{ image: '' }` TOMBSTONE — the override that means "none" — and the entry is only
       // deleted when there is no schema default for it to override (which keeps the config free of
       // tombstones that say nothing). restoreViewBackground deletes it to bring the default back.
-      saveViewBackground: function(viewName, patch) {
-        var cfg = Object.assign({}, this.appConfig || {});
+      // A view's stored background: `bg`, a tombstone hiding the schema's, or no entry at all.
+      _withBackground: function(cfg, viewName, bg) {
         cfg.backgrounds = Object.assign({}, cfg.backgrounds || {});
-        var next = Object.assign({}, cfg.backgrounds[viewName], patch);
-        if (!next.image && !this.schemaBackground(viewName)) delete cfg.backgrounds[viewName];
-        else if (!next.image) cfg.backgrounds[viewName] = { image: '' };   // tombstone: hide the schema default
-        else cfg.backgrounds[viewName] = next;
-        cfg.mode = this.mode;
-        this._saveFolderConfig(cfg, viewName);
+        if (bg && bg.image) cfg.backgrounds[viewName] = bg;
+        else if (this.schemaBackground(viewName)) cfg.backgrounds[viewName] = { image: '' };
+        else delete cfg.backgrounds[viewName];
+        return cfg;
       },
       // The schema's declared background for a view, if any (what a tombstone hides / restore brings back).
       schemaBackground: function(viewName) {
         var v = VIEWS[viewName];
         return (v && v.background && v.background.image) ? v.background : null;
-      },
-      // Is this view's background currently a tombstone hiding a schema default?
-      backgroundHidden: function(viewName) {
-        var ov = ((this.appConfig && this.appConfig.backgrounds) || {})[viewName];
-        return !!(ov && !ov.image && this.schemaBackground(viewName));
       },
       // Drop the override entirely, so the schema-declared background applies again.
       restoreViewBackground: function(viewName) {
@@ -6014,10 +6028,7 @@ function createVueApp() {
           if (menuImage === (item.image || '') && (!menuImage || d.focus === (item.focus || 'center'))) { delete look.image; delete look.focus; }
           else { look.image = menuImage; if (menuImage) look.focus = d.focus; else delete look.focus; }
           if (Object.keys(look).length) cfg.navAppearance[d.id] = look; else delete cfg.navAppearance[d.id];
-          cfg.backgrounds = Object.assign({}, cfg.backgrounds || {});
-          if (bgImage) cfg.backgrounds[d.id] = { image: bgImage, fit: d.fit, width: Number(d.width) || 40, position: d.position, opacity: Number(d.opacity), fixed: !!d.fixed };
-          else if (self.schemaBackground(d.id)) cfg.backgrounds[d.id] = { image: '' };   // tombstone: hide the schema default
-          else delete cfg.backgrounds[d.id];
+          self._withBackground(cfg, d.id, bgImage ? { image: bgImage, fit: d.fit, width: Number(d.width) || 40, position: d.position, opacity: Number(d.opacity), fixed: !!d.fixed } : null);
           cfg.mode = self.mode;
           self._saveFolderConfig(cfg, d.id);
           self.appearanceDraft = null;
@@ -6269,8 +6280,8 @@ function createVueApp() {
 
       // Settings
       saveSetting: function(key, val) {
-        var s = JSON.parse(localStorage.getItem('app_settings') || '{}');
-        s[key] = val; localStorage.setItem('app_settings', JSON.stringify(s));
+        var s = loadPref('app_settings', {});
+        s[key] = val; savePref('app_settings', s);
       },
       resetApp: function() {
         localStorage.clear();
@@ -6956,12 +6967,6 @@ function createVueApp() {
         var self = this, cols = this.meFilterColsFor(name);
         return cols.length > 0 && cols.every(function(c) { return !self.meValueFor(c); });
       },
-      // The same identity resolution keyed by LIST rather than by column, for the callers that have no
-      // column to ask about (a rotation view's slots are column NAMES, not cells). meValueFor is the
-      // column-shaped wrapper.
-      meValueForList: function(list) {
-        return this._listValueOf(this._myIdentity(), list);
-      },
       // An IDENTITY is the pair `@me` resolves through: the account's per-list values, and its display
       // name for lists that are not userlink-backed. `myListValues` is this for the signed-in user; a
       // per-person feed needs the same thing for somebody else, and the rule for choosing between the
@@ -7047,11 +7052,11 @@ function createVueApp() {
       setPagePick: function(col, vals) {
         var n = this.currentTable, p = Object.assign({}, this.pagePicked); p[col] = vals || [];
         var all = Object.assign({}, this.pagePicks); all[n] = p; this.pagePicks = all;
-        try { localStorage.setItem('page_filter:' + n, JSON.stringify(p)); } catch (e) {}
+        savePref('page_filter:' + n, p);
       },
       _setCompareRows: function(rows) {
         var n = this.currentTable, all = Object.assign({}, this.pageCompares); all[n] = rows; this.pageCompares = all;
-        try { localStorage.setItem('page_compare:' + n, JSON.stringify(rows)); } catch (e) {}
+        savePref('page_compare:' + n, rows);
       },
       // Merges into the page's _pages doc, so the body beside it is untouched.
       _setSharedCompare: function(rows) {
@@ -7277,7 +7282,7 @@ function createVueApp() {
       saveFirebaseConfig: function() {
         var input = this.firebaseConfigInput.trim();
         if (!input && this.hasFirebaseConfig) {
-          localStorage.setItem('app_mode', 'firebase');
+          Databases.setMode('firebase');
           location.reload();
           return;
         }
@@ -7853,12 +7858,12 @@ function createVueApp() {
             chain = chain.then(step('mdi-table-row', (i + 1) + '/' + rowJobs.length + ' · ' + job.table, function() {
               var target = job.table;
               // Delete first to force change detection on re-import.
-              return Writes.deleteRow(target, job.row.id, job.tab).catch(function() {})
+              return Writes.deleteRow(target, job.row.id, job.tab, { quiet: true }).catch(function() {})
                 .then(function() {
                   // A row arriving from a `__archive` key is being MOVED out of that collection, so
                   // clear it there too. Failures are swallowed like the delete above: the row not
                   // being there is the normal case on a fresh import.
-                  return job.clearArchive ? Writes.deleteRow(target, job.row.id, 'archive').catch(function() {}) : null;
+                  return job.clearArchive ? Writes.deleteRow(target, job.row.id, 'archive', { quiet: true }).catch(function() {}) : null;
                 })
                 .then(function() { return Writes.putRow(target, job.row, job.tab); });
             }));
@@ -8007,8 +8012,8 @@ function createVueApp() {
       triggerOAuth: function() { if (typeof triggerOAuth === 'function') triggerOAuth(); },
       selectSetupMode: function(mode) {
         this.setupStep = mode || null;
-        if (mode) { localStorage.setItem('app_mode', mode); }
-        else { localStorage.removeItem('app_mode'); location.reload(); return; }
+        Databases.setMode(mode || null);
+        if (!mode) { location.reload(); return; }
         if (mode === 'firebase' && !this.firestoreRules) {
           var self = this;
           fetch(_u('/firestore.rules')).then(function(r) { return r.ok ? r.text() : ''; }).then(function(t) { self.firestoreRules = t; }).catch(function(){});
@@ -8244,7 +8249,7 @@ function createVueApp() {
           if (!this.$vuetify || !this.$vuetify.theme) return;
           var themes = this.$vuetify.theme.themes; themes = (themes && themes.value) ? themes.value : themes;
           var pick = function(name, fp, fb) { var c = (themes[name] && themes[name].colors) || {}; return { p: c.primary || fp, bg: c.background || c.surface || fb }; };
-          localStorage.setItem('brand_splash', JSON.stringify({ light: pick('light', '#1976d2', '#ffffff'), dark: pick('dark', '#90caf9', '#121212') }));
+          savePref('brand_splash', { light: pick('light', '#1976d2', '#ffffff'), dark: pick('dark', '#90caf9', '#121212') });
         } catch (e) {}
       },
 
@@ -8314,9 +8319,6 @@ function createVueApp() {
       // Parses the #hex codes, sorts by luminance + chroma, and maps roles: lightest->background,
       // 2nd-lightest->surface, darkest->text(on-surface), most-saturated->primary, next->secondary.
       // (Inverted bg/text for dark mode.) One save for the whole set.
-      _rgb: function(hex) { return Brand.rgb(hex); },
-      _luminance: function(hex) { return Brand.luminance(hex); },
-      _chroma: function(hex) { return Brand.chroma(hex); },
       _parsePalette: function(str) { return Brand.parsePalette(str); },
       // The role mapping itself is Brand.rolesFor (pure, unit-tested). What stays here is the part that
       // is not: which mode is showing, writing each role through setThemeColor so it live-previews, the
@@ -8382,8 +8384,6 @@ function createVueApp() {
           meta.content = tc;
         } catch (e) {}
       },
-      // (PRINT_CSS is a module-level var defined above createVueApp)
-      _pe: function(s) { return Print.escape(s); },
       // `title` is escaped HERE (callers pass it raw): it comes from t()/displayValue — editor-writable
       // shared data — and document.write renders it, so an unescaped title is stored XSS in the print window.
       _printOpen: function(title, bodyHtml) { var w = window.open('', '_blank'); w.document.write('<html><head><title>' + Print.escape(title) + '</title><style>' + PRINT_CSS + '</style></head><body>' + bodyHtml + '</body></html>'); w.document.close(); w.print(); },
@@ -8614,6 +8614,7 @@ function createVueApp() {
       // one place that knows a row was written — and the reason writes.js exists rather than twenty-six
       // call sites. Guarded inside _onWriteRepublish, so a restricted member's write costs nothing.
       if (typeof Writes !== 'undefined' && Writes.onWrite) Writes.onWrite(function(t) { self._onWriteRepublish(t); });
+      if (typeof Writes !== 'undefined' && Writes.onError) Writes.onError(function(t, e) { self._writeFailed(t, e); });
       // A pass when a full-access client opens the app, which is what bounds how long a revocation can
       // take. Write-triggered republishing alone cannot do it: a subscriber unsubscribing is not
       // full-access, so their own write publishes nothing, and if nobody edits a duty afterwards their
@@ -8682,7 +8683,7 @@ function createVueApp() {
       // Probe local server availability for setup UI — but only when a local dev server could
       // actually be present. On a committed cloud backend (firebase/supabase) there is no /api
       // endpoint, so the probe would just log a spurious 404 to the console on every load.
-      var appMode = (function() { try { return localStorage.getItem('app_mode'); } catch (e) { return null; } })();
+      var appMode = Databases.mode();
       if (appMode !== 'firebase' && appMode !== 'supabase' && appMode !== 'pglite' && _mayLocal()) {
         fetch(_u('/api/validateFolder'), { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{"id":"probe"}' })
           .then(function(r) { if (r.ok) self.hasLocalServer = true; })
@@ -8761,6 +8762,18 @@ function createVueApp() {
   });
 
   app.use(vuetify);
+
+  // A published build carries every template precompiled (scripts/compile-templates.js), so the page
+  // runs without the in-browser compiler and its CSP needs no 'unsafe-eval'. Development compiles here.
+  if (typeof CompiledTemplates !== 'undefined') {
+    app._component.render = CompiledTemplates['#vue-app'];
+    var registerComponent = app.component.bind(app);
+    app.component = function(name, def) {
+      var render = def && typeof def.template === 'string' && CompiledTemplates[def.template.charAt(0) === '#' ? def.template : name];
+      if (render) { def = Object.assign({}, def, { render: render }); delete def.template; }
+      return registerComponent(name, def);
+    };
+  }
 
   // Shared call-throughs to the root instance. Vue resolves template refs on the component instance, so
   // leaf components must re-expose the root methods their templates call; spread this object into their
@@ -8956,11 +8969,12 @@ function createVueApp() {
           this.docDraft = body != null ? body : ((VIEWS[this.name] && VIEWS[this.name].markdown) || '');
         }
       },
+      // As savePage: the editor closes only once the body is stored.
       saveDoc: function() {
-        appInstance.pageCache[this.name] = this.docDraft;
-        if (backend.putRow) Writes.putRow('_pages', { id: this.name, markdown: this.docDraft }, 'active');
-        this.editing = false;
-        appInstance.notify(appInstance.t('msg.saved'));
+        var self = this, name = this.name, text = this.docDraft;
+        var done = function() { appInstance.pageCache[name] = text; self.editing = false; appInstance.notify(appInstance.t('msg.saved')); };
+        if (!backend.putRow) return done();
+        Writes.putRow('_pages', { id: name, markdown: text }, 'active').then(done, function() {});
       }
     }),
     template: ''
@@ -9874,8 +9888,7 @@ function createVueApp() {
       var today = this.calendarHost.today();
       // `picked`: the reader's `filters` choices, { column: [values] }, kept in THIS browser -- a
       // convenience of the viewer's, not a setting of the calendar's.
-      var picked = {};
-      try { picked = JSON.parse(localStorage.getItem('cal_filter:' + this.name) || '{}') || {}; } catch (e) { picked = {}; }
+      var picked = loadPref('cal_filter:' + this.name, {});
       return { mode: this.calendarHost.config(this.name).defaultView || 'month', anchor: today, sel: today, picked: picked };
     },
     computed: {
@@ -9944,7 +9957,7 @@ function createVueApp() {
       selectDay: function(d) { this.sel = d; },
       setPicked: function(col, vals) {
         var p = Object.assign({}, this.picked); p[col] = vals || []; this.picked = p;
-        try { localStorage.setItem('cal_filter:' + this.name, JSON.stringify(p)); } catch (e) {}
+        savePref('cal_filter:' + this.name, p);
       }
     }),
     template: ''
@@ -11061,8 +11074,7 @@ function createVueApp() {
     // Open cards and folded lanes, per viewer in this browser, per board.
     watch: {
       viewName: { immediate: true, handler: function(n) {
-        var f = null;
-        try { f = JSON.parse(localStorage.getItem('board_fold:' + n) || 'null'); } catch (e) {}
+        var f = loadPref('board_fold:' + n, null);
         this.fold = { cards: (f && f.cards) || {}, lanes: (f && f.lanes) || {} };
       } }
     },
@@ -11343,7 +11355,7 @@ function createVueApp() {
       toggleFold: function(kind, key) {
         var m = this.fold[kind];
         if (m[key]) delete m[key]; else m[key] = true;
-        try { localStorage.setItem('board_fold:' + this.viewName, JSON.stringify(this.fold)); } catch (e) {}
+        savePref('board_fold:' + this.viewName, this.fold);
       }
     }),
     template: ''
@@ -11466,8 +11478,7 @@ function createVueApp() {
   app.component('compare-rows', {
     props: { page: String },
     data: function() {
-      var s = {};
-      try { s = JSON.parse(localStorage.getItem('page_compare_sort:' + this.page) || '{}') || {}; } catch (e) {}
+      var s = loadPref('page_compare_sort:' + this.page, {});
       return { sortCol: s.col !== undefined ? s.col : null, sortAsc: s.asc !== false };
     },
     computed: {
@@ -11490,7 +11501,7 @@ function createVueApp() {
       sortAsc: function() { this.saveSort(); }
     },
     methods: Object.assign({
-      saveSort: function() { try { localStorage.setItem('page_compare_sort:' + this.page, JSON.stringify({ col: this.sortCol, asc: this.sortAsc })); } catch (e) {} }
+      saveSort: function() { savePref('page_compare_sort:' + this.page, { col: this.sortCol, asc: this.sortAsc }); }
     }, SORT_UI),
     template: ''
       + '<div class="mt-3 mb-3" data-testid="compare">'
@@ -11607,7 +11618,7 @@ function createVueApp() {
 
 function init() {
   var folder = localStorage.getItem('app_folder');
-  var savedMode = localStorage.getItem('app_mode');
+  var savedMode = Databases.mode();
   var instance = appInstance;
   if (savedMode === 'firebase') {
     instance.mode = 'firebase';

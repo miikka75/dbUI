@@ -22,8 +22,9 @@ Wiring is applied to `index.html` (mode branch, shared-link support, SDK + adapt
 `ui.html` (setup button + step), `app-core.js` (`saveSupabaseConfig`, `shareLink`, setup fields), and the
 `backend-conformance` drift-guard test.
 
-The Supabase SDK loads as a classic UMD script (`https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2`,
-global `window.supabase`), exactly like the Firebase compat SDK — no ES modules, matching this branch.
+The Supabase SDK loads as a classic UMD script (global `window.supabase`), exactly like the Firebase
+compat SDK — no ES modules. It is vendored like Vue: `/vendor/supabase.js` at the version pinned in
+`vendor/versions`, with an SRI-pinned jsdelivr fallback.
 
 ## Supabase project setup
 
@@ -270,8 +271,8 @@ documented degradation to manual refresh and paste-a-URL.
 
 Config lives in `localStorage` (entered once via setup, or shared via `?mode=supabase&url=…&key=…`), so
 no secrets are baked into the deploy. Alternatively commit a `supabase-config.json`
-(`{"url":"…","anonKey":"…"}`) — the anon key is safe to publish; remove it from the workflow's prune list
-if you want it deployed.
+(`{"url":"…","anonKey":"…"}`) — the anon key is safe to publish; run the workflow's `scripts/build-site.js` with
+`--with-config` if you want it deployed.
 
 ### Custom domain
 

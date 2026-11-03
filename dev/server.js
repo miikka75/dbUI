@@ -35,7 +35,8 @@ const DB_PATH = (APP_DB && APP_DB !== ':memory:') ? path.resolve(__dirname, APP_
 let backend = USE_PG ? null : (USE_FS
   ? require('./storage-fs').createFsBackend(path.join(__dirname, 'data'))
   : require('./backend-local').createLocalBackend(APP_DB === ':memory:' ? undefined : (DB_PATH || path.join(__dirname, 'local.db'))));
-const STATIC_DIR = path.join(__dirname, '..');
+// STATIC_DIR=../_site serves the published build instead of the source (CI runs the UI suite against it).
+const STATIC_DIR = process.env.STATIC_DIR ? path.resolve(__dirname, process.env.STATIC_DIR) : path.join(__dirname, '..');
 
 // CSP=1 -> compute the enforced policy once at startup (inline-script hashes come from the real
 // index.html, so an edited inline block is immediately reflected here — and guarded by csp.test.js).
@@ -303,10 +304,24 @@ async function broadcast(store, key, value, priorValue) {
   }
 }
 
+const LOOPBACK_NAME = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i;
+const LOOPBACK_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i;
+// The loopback bind does not stop a browser being the client. A cross-site page's POST carries its
+// Origin; a rebound DNS name arrives under its own Host. Curl, Node and tests send no Origin.
+function crossSite(req) {
+  const origin = req.headers.origin, host = String(req.headers.host || '');
+  if (process.env.ALLOW_INSECURE_HOST !== '1' && !LOOPBACK_NAME.test(host)) return true;
+  return !!origin && !LOOPBACK_ORIGIN.test(origin) && origin.replace(/^https?:\/\//i, '') !== host;
+}
+
 const server = http.createServer(async (req, res) => {
+  if (crossSite(req)) {
+    res.writeHead(403, { 'Content-Type': 'text/plain' });
+    return res.end('cross-site request refused');
+  }
   // CORS: only allow loopback origins (same-origin needs no ACAO). Blocks cross-site drive-by requests.
   const origin = req.headers.origin;
-  const allowOrigin = (origin && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) ? origin : null;
+  const allowOrigin = (origin && LOOPBACK_ORIGIN.test(origin)) ? origin : null;
   if (req.method === 'OPTIONS') {
     const h = { 'Access-Control-Allow-Methods': 'GET,POST,DELETE', 'Access-Control-Allow-Headers': 'Content-Type,X-User' };
     if (allowOrigin) h['Access-Control-Allow-Origin'] = allowOrigin;
