@@ -95,7 +95,7 @@ jobs:
         distribution: temurin
         java-version: '21'
     - run: npm ci
-    - run: npm install -g firebase-tools
+    - run: npm install -g firebase-tools@15.34.2
     - name: Firestore rules tests
       run: npm run test:rules
     - name: Storage rules tests (cross-service registration gate)
@@ -150,7 +150,7 @@ jobs:
         distribution: temurin
         java-version: '21'
     - run: npm ci
-    - run: npm install -g firebase-tools
+    - run: npm install -g firebase-tools@15.34.2
     # /vendor/* is GENERATED, not committed (see .gitignore) — only vendor/versions is, and it pins what
     # to fetch. Without this step the app under test falls back to the SRI-pinned jsdelivr URLs on every
     # page load, which makes this lane network-dependent and slow: the exact opposite of what the comment

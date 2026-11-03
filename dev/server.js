@@ -303,10 +303,24 @@ async function broadcast(store, key, value, priorValue) {
   }
 }
 
+const LOOPBACK_NAME = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i;
+const LOOPBACK_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i;
+// The loopback bind does not stop a browser being the client. A cross-site page's POST carries its
+// Origin; a rebound DNS name arrives under its own Host. Curl, Node and tests send no Origin.
+function crossSite(req) {
+  const origin = req.headers.origin, host = String(req.headers.host || '');
+  if (process.env.ALLOW_INSECURE_HOST !== '1' && !LOOPBACK_NAME.test(host)) return true;
+  return !!origin && !LOOPBACK_ORIGIN.test(origin) && origin.replace(/^https?:\/\//i, '') !== host;
+}
+
 const server = http.createServer(async (req, res) => {
+  if (crossSite(req)) {
+    res.writeHead(403, { 'Content-Type': 'text/plain' });
+    return res.end('cross-site request refused');
+  }
   // CORS: only allow loopback origins (same-origin needs no ACAO). Blocks cross-site drive-by requests.
   const origin = req.headers.origin;
-  const allowOrigin = (origin && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) ? origin : null;
+  const allowOrigin = (origin && LOOPBACK_ORIGIN.test(origin)) ? origin : null;
   if (req.method === 'OPTIONS') {
     const h = { 'Access-Control-Allow-Methods': 'GET,POST,DELETE', 'Access-Control-Allow-Headers': 'Content-Type,X-User' };
     if (allowOrigin) h['Access-Control-Allow-Origin'] = allowOrigin;

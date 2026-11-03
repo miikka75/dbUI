@@ -83,6 +83,9 @@
   }
 
   function activeKey() { return get(ACTIVE) || null; }
+  // The backend this visit loads. Changed alone only by the setup screen; setActive and remember move it with app_db.
+  function mode() { return get('app_mode') || null; }
+  function setMode(m) { if (m) set('app_mode', m); else del('app_mode'); }
 
   // Make `key` the active database. Also restores its MODE, because the mode and the config have to
   // move together -- switching to a Firebase database while `app_mode` still says supabase loads the
@@ -168,7 +171,7 @@
   var D = {
     ACTIVE_KEY: ACTIVE, PREFIX: PREFIX, LEGACY: LEGACY,
     keyFor: keyFor, labelFor: labelFor, list: list, record: record,
-    activeKey: activeKey, setActive: setActive, remember: remember, forget: forget,
+    activeKey: activeKey, mode: mode, setMode: setMode, setActive: setActive, remember: remember, forget: forget,
     config: config, migrate: migrate, manifestIdentity: manifestIdentity,
     // Tests only: point the module at a fake storage.
     _bind: function (s) { store = s; }
