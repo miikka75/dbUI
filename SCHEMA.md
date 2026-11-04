@@ -1,3217 +1,1168 @@
-# Schema Reference — views + nav/layout
+# Schema reference
 
-A schema has three layers. Views are the unit of presentation, and each view has one **`kind`**:
-a **data view** (`sources`/`columns`), a **document** (`markdown`), a **rotationView** (`rotation` — a
-generated rotating-duty-roster table), a **calendar** (`calendar`), a **pivot** (`pivot` — a cross-tab
-grid), an **rsvp** (`rsvp` — a self-service signup sheet), a **board** (`board`), or a **form**
-(`form`). All of these are documented below.
-
-You do not normally write `kind` — the migration chain fills it in from the configuration object the
-view carries, and the loader dispatches on it from then on.
-
-```
-icons   ← optional per-database favicon / apple-touch / install icon (see ## icons)
-title   ← optional document/tab title
-theme   ← optional brand palette (light/dark colors — see ## theme)
-views   ← flat, named components: data views, or views with markdown (documents)
-tables  ← raw data + partitions
-nav     ← navigation tree + layout, references views/tables by name
-```
-
-All together, a schema document looks like this:
+A schema is one JSON document:
 
 ```json
 {
   "$schema": "./schema.schema.json",
-  "title":   "…",
-  "icons":   { "favicon": "./my-icon.svg", "png512": "./my-icon-512.png" },
-  "theme":   { "light": { "primary": "#..." }, "dark": { "primary": "#..." } },
-  "tables":  { "…": { "columns": [ … ], "archivable": true } },
-  "views":   [ { "name": "…", "sources": [ … ], "columns": [ … ] } ],
-  "nav":     { "layout": "drawer", "items": [ … ], "bottomNav": [ … ] }
+  "icons":  { "favicon": "./my-icon.svg", "png512": "./my-icon-512.png" },
+  "theme":  { "light": { "primary": "#…" }, "dark": { "primary": "#…" } },
+  "tables": { "tasks": { "columns": [ … ], "archivable": true } },
+  "views":  [ { "name": "open_tasks", "sources": ["tasks"], "columns": [ … ] } ],
+  "nav":    { "layout": "drawer", "items": [ … ] }
 }
 ```
+
+- `tables` hold the data; `views` present it; `nav` (required) is the menu that references both by name.
+  Views and tables are flat lists: hierarchy lives only in `nav`.
+- A view's kind follows from the object it carries: `sources` (data view), `markdown` (page), `rotation`,
+  `calendar`, `pivot`, `rsvp`, `board`, `form`, `stats`, `timeline` or `scan`. You never write `kind`.
+- Labels are translation keys (`tab.<table>`, `view.<view>`, `field.<column>`, `list.<list>.<value>`),
+  edited in the Languages tab. The browser tab title is the `app.title` key.
+- `validateSchema` checks the document at load and names each mistake it finds.
 
 ## the meta-schema (`schema.schema.json`)
 
-Hand-editing this document is the design, so the vocabulary is also published as a JSON Schema at the
-repo root. Point at it from the top of your schema and your editor does the rest — completion on every
-property, the column-type enum, and a red underline under a key that does nothing:
+Point your editor at it for completion and checking as you type; the app ignores the key:
 
 ```json
-{ "$schema": "./schema.schema.json", "tables": { ... } }
+{ "$schema": "./schema.schema.json", "tables": { … } }
 ```
 
-The app ignores the key; nothing else changes. Adjust the path to wherever the file sits relative to
-your schema (`../schema.schema.json` from `dev/`, and so on).
-
-It exists because two whole classes of mistake are invisible without it. A **column type** that is not
-one of the nine below reads as `"text"` — so `"type": "slect"` renders a perfectly working text column
-and the dropdown simply never appears. And an unrecognised **key** is never read, so `"allowNews": true`
-changes nothing and says nothing. The document stays valid JSON and the app keeps working, which is why
-neither can be found by looking at the result.
-
-The column vocabulary is therefore **closed**, in the editor *and* at load: `validateSchema` rejects an
-unknown column type or property when the schema loads, so the two mistakes above are reported even to an
-author who never opens the meta-schema. Table and view properties are described but not closed — a view's
-kind is still chosen by which field it carries, and closing that list would freeze a vocabulary that is
-mid-restructure.
+The column vocabulary is closed: an unknown column type or property (`"type": "slect"`, `"allowNews"`) is
+an error at load, not a silent text column.
 
 ## icons + title
+
 ```json
-{ "icons": {
-    "favicon":    "./examples/chores-favicon.svg",
-    "appleTouch": "./examples/chores-icon-512.png",
-    "png512":     "./examples/chores-icon-512.png"
-} }
+"icons": { "favicon": "./examples/chores-favicon.svg", "appleTouch": "./examples/chores-icon-512.png",
+           "png512": "./examples/chores-icon-512.png" }
 ```
-`icons` brands the browser tab and the installed app **per database**, so one deployment serving
-several schemas doesn't show the same icon for all of them. Every field is optional and every
-omitted field falls back to the bundled default, which is what lets a schema brand itself without
-any other schema having to opt out:
 
-| field | drives | default |
-|-------|--------|---------|
-| `favicon` | `<link rel="icon">` — the browser tab | `./favicon.svg` |
-| `appleTouch` | `<link rel="apple-touch-icon">` — the iOS home-screen tile | `./icon-512.png` |
-| `png512` | the PWA install/splash icon in the runtime manifest. **Must be a PNG**, square, ≥144px | `./icon-512.png` |
-| `png512Sizes` | declares a differently-sized `png512` accurately (avoids a DevTools size-mismatch warning) | `"512x512"` |
+| Field | Drives | Default |
+|---|---|---|
+| `favicon` | the browser tab | `./favicon.svg` |
+| `appleTouch` | the iOS home-screen tile | `./icon-512.png` |
+| `png512` | the install and splash icon: a square PNG, ≥144 px | `./icon-512.png` |
+| `png512Sizes` | the size of a `png512` that is not 512×512 | `"512x512"` |
 
-- **Relative paths resolve against the deployment root**, so a file shipped alongside the schema works:
-  `examples/chores-schema.json` points at `./examples/chores-favicon.svg`, and Hosting serves the repo
-  root. Absolute URLs are allowed too and may be cross-origin, which is what makes this usable when
-  Firebase is the database and the app is hosted elsewhere.
-- **Prefer a drawn SVG to an emoji.** An emoji favicon is rendered by whatever font the operating
-  system happens to have, so the same schema looks different on every platform — and the
-  apple-touch path rasterizes through canvas, where a missing glyph yields a blank tile.
-- **Keep it self-contained.** An icon that pulls in another origin is subject to the CSP and makes
-  your tab depend on somebody else's uptime.
-- A favicon that 404s fails **silently** — browsers show the default and say nothing. If you point at
-  a file, check it is actually served; `dev/test-ui/example-icons.spec.js` does exactly that for the
-  bundled examples.
-- **Set `png512` too, or the installed app keeps the generic mark.** `favicon` brands the tab; the
-  home-screen icon comes from `png512`. Both defaults (`./favicon.svg`, `./icon-512.png`) are MDI's
-  `database-eye` on a transparent background, so an unbranded database looks like dbUI rather than like
-  whichever schema happened to ship its artwork at the repo root — which is what they used to be.
-- **Transparency is a trade, not a default to accept blindly.** The shipped icons — the app's own and
-  both examples — are transparent, which is right for a browser tab and for the manifest's `any`
-  purpose. But the manifest also declares `maskable`, and an Android launcher applying an
-  adaptive-icon mask composites a transparent icon onto a background of its choosing, so the installed
-  tile varies by device. Point `png512` at a full-bleed **opaque** PNG if you want it identical
-  everywhere.
-- **The install icon must be a real PNG**, square and ≥144px: the manifest declares `image/png`, and a
-  launcher handed an SVG shows nothing. `node dev/make-icon-png.mjs <in.svg> <out.png> 512` renders one
-  from the favicon using the Chromium the E2E suite already ships — full-bleed and inset to the inner
-  80%, because the manifest declares `purpose: "any maskable"` and a round launcher crops to that.
-
-> **`icon` (singular) does nothing.** An older shape documented here set a single value for all three
-> roles; the app reads `icons` and ignores `icon`, and `app.spec.js` pins that. A schema still carrying
-> the old key silently gets the defaults.
-
-- **Browser tab title** — derived from the `app.title` translation key (set in Languages tab), not a schema field. The tab title updates reactively when the translation changes.
-
-`nav` is **required** and defines the sidebar (there is no auto-derived nav). `views` and
-`tables` are flat (no nesting; hierarchy lives in `nav`).
+- Each field is optional and falls back to the default. Relative paths resolve against the site root;
+  absolute URLs may be on another origin.
+- Set `png512` too, or the installed app keeps the generic icon. `node dev/make-icon-png.mjs in.svg
+  out.png 512` renders one.
+- Prefer a drawn SVG to an emoji (emoji differ per platform). A favicon that 404s fails silently.
+- A transparent `png512` looks different on each Android launcher; use an opaque one for a fixed look.
 
 ## tables
+
 ```json
-"tables": { "tasks": { "columns": [...], "archivable": true } }
+"tables": { "tasks": { "columns": [ … ], "archivable": true } }
 ```
-`archivable: true` enables archive/restore for the table. Archiving sets **`_status: "archive"`** on
-the row; the row itself does not move. Omit it for tables that are never archived.
 
-`_status` is a system column like `id`/`created_at`/`updated_at` — never declared, never displayed, and
-absent means `"active"`. It is write-gated in both rule layers to the two partition names, so a row can
-be filed away or restored but `_status` can never be set to anything else. The owner of a self-service
-row may set it (withdrawing your own signup), exactly as they could when archiving was a delete plus a
-create.
-
-Older deployments still hold archived rows in a separate `<table>__archive` collection; both shapes are
-read together, so nothing has to be migrated. To move over, **export and re-import the bundle** —
-import folds a `__archive` key into `_status` and clears the old collection.
-`isLookup: true` marks a reference/lookup table (managed in the Lookup tab, not the sidebar).
+- `id`, `created_at`, `updated_at` and `_status` are implicit; never declare `id`.
+- `archivable: true` adds Archive and Restore. Archiving sets `_status: "archive"`; the row stays where
+  it is. (Older data in a separate `<table>__archive` store is read too; export and re-import to fold it in.)
+- `isLookup: true` makes it a lookup table, edited in the Lookup tab instead of the menu.
 
 ### `hierarchy` — which column of a lookup is the group
 
-A lookup is often two dimensions: an organization and its callings, a phase and its statuses, a person
-and their tasks. Four things read that shape — the Lookup editor (parents with children), a board's
-**2-D ref lane** (group and lane), a `list:` pointing at the table (the group values), and a
-`rosterRef` rotation (the slots) — and `hierarchy` is where the table says it once:
-
 ```json
-"ref_callings": {
-  "isLookup": true,
-  "hierarchy": { "parent": "organization", "value": "calling" },
-  "columns": [ … ]
-}
+"ref_callings": { "isLookup": true, "hierarchy": { "parent": "organization", "value": "calling" }, "columns": [ … ] }
 ```
 
-**Declaring it is what lets a lookup carry a third column.** Left undeclared, the shape is inferred
-from the table having exactly two author-facing columns (everything but `id`, the timestamps and any
-`hidden` column). That inference is kept, so every schema written before this existed keeps its
-hierarchy with no edit — but add one more visible column to such a table, a code or a note, and the
-Lookup editor silently falls back to a flat grid while a board lane goes on grouping. Nothing is
-invalid and nothing is reported: the count was never something anyone declared.
+Declares the two dimensions of a lookup (an organization and its callings) once, for the Lookup editor,
+a board's two-level lanes, a `list:` naming the table, and `rosterRef` rotations.
 
-**`"hierarchy": false` says the table is flat.** Two columns are not always a group and its members —
-`ref_chores` is a chore and its `points`, `ref_rewards` a reward and its `cost`. Nothing in the shape
-distinguishes those from an organization and its callings, so the editor rendered every chore as a
-group whose single child was a number. Only the table can settle it.
-
-**`"by": "id"` — a tree deeper than two.** By default (`by: "value"`, and every lookup written before
-this existed) the parent column holds the group's own VALUE, which makes the table exactly two levels:
-a group is a value its rows carry and has no row of its own. Under `by: "id"` it holds another **row's
-id**, so a parent IS a row and the tree is as deep as the data:
-
-```json
-"teams": {
-  "isLookup": true,
-  "hierarchy": { "parent": "parent_id", "value": "team", "by": "id" },
-  "columns": [ { "name": "team", "type": "text" },
-               { "name": "parent_id", "type": "text", "hidden": true } ]
-}
-```
-
-The demo bundle ships this one. A row with an empty `parent_id` is a root; the Lookup editor renders
-every level and each node takes children of its own.
-
-- **Use it for a NEW table, never by converting one that exists.** In this app a lookup's value is its
-  identity in four places at once — `list.<table>.<value>` translation keys, schema filters that pin
-  values by hand, `select list: <lookup>` columns storing the value, and `rosterRef` rotations — so
-  converting one is a one-way data migration per deployment, not a schema edit. ROADMAP's `tree` entry
-  records what that would cost.
-- **A parent naming no row, a row parented to itself, and a cycle** all resolve the same way: the row
-  becomes a root and the bad edge is cut. A row is never dropped from the tree, and a cycle can never
-  reach the renderer.
-- **Deleting a node that still has children is refused** — whether descendants should cascade or be
-  re-parented is undecided, and either guess loses rows. Empty it first.
-- Ordering arrows and `reorderable` stay on the value model: `position` is one global sequence, which
-  says nothing about a deeper tree.
-
-- `parent` and `value` must both be author-facing columns of that table and must differ —
-  `validateSchema` says so at load, because a parent column that is not there groups nothing and
-  renders as one empty group. Under `by: "id"` the parent column is plumbing rather than something an
-  author types, so it may be `hidden` (and normally is); only `value` must be author-facing.
-- A `rosterRef` rotation's `rosterBy`/`valueCol` must agree with a declared `hierarchy` (also checked at
-  load). The rotation matrix and the Lookup editor read the same rows; grouping them differently is the
-  drift the declaration exists to end, and each screen looks correct on its own.
+- Undeclared, a lookup with exactly two visible columns is read as a hierarchy. Declare it before adding
+  a third column, or the editor falls back to a flat grid.
+- `"hierarchy": false`: the table is flat (a chore and its points).
+- `"by": "id"`: `parent` holds another row's id, so the tree is as deep as the data. Use it for new
+  tables only: converting an existing lookup changes every stored value. A broken or cyclic parent makes
+  the row a root; deleting a node that has children is refused.
+- `parent` and `value` must be different visible columns (under `by: "id"` the parent may be hidden), and
+  a `rosterRef` rotation must agree with them.
 
 ### `public` — readable with no account
 
-`"public": true` on a table makes it readable by anyone who opens the app, signed in or not — a schedule,
-a price list, news. Read-only; writes still need a grant. Once any table is public, a signed-out visitor
-is let in instead of being asked to sign in: they see the views whose tables are public (and pages,
-whose embeds of anything else draw nothing), with a **Sign in** button. A booking control says to sign in.
-
-What becomes readable with no account, in both rules layers: the public tables, the lists their columns
-name, the schema and the translations. Not the config (which can hold a shared feed link), the users,
-page bodies, or any other table. `validateSchema` refuses a public table with an owner column (people's
-own rows) or with a `ref` to a table that is not public (a visitor would see its keys).
+`"public": true` lets anyone read the table, signed in or not (a timetable, a price list). Writing still
+needs a grant. Visitors see the views whose tables are public, and a Sign in button. The lists those
+tables use, the schema and the translations become readable too; nothing else does. A public table may
+not have an owner column, or a `ref` to a table that is not public.
 
 ### A page's `search`
-`search` on a page (`["owner"]`, or `true`) puts a search box above its filters that narrows its embedded
-lists, by stored value and shown label. Stats and lookups are not narrowed.
+
+`"search": true` (or a column list) on a page puts a search box above its filters that narrows its
+embedded lists.
 
 ### `copy` — copy a range of dated rows forward
+
 ```json
 "copy": { "dateColumn": "starts_at", "reset": ["booked", "walk_ins"] }
 ```
-On a data view embedded in a page with `filters`: a **Copy events** button for viewers with a write grant.
-It copies the rows the page shows (archived included) dated from–to, `times` spans on from the target
-date, by whole local days. `reset` columns start at their default; existing copies are skipped.
+
+On a data view embedded in a page with `filters`: a **Copy events** button for users who can write.
+It copies the rows dated from–to onto a target date, by whole days; `reset` columns start at their
+default, and rows already copied are skipped.
 
 ### `archiveAfter` — file finished rows away on their own
+
 ```json
-"chore_log": {
-  "archivable": true,
-  "columns": [ …, { "name": "updated_at", "type": "text", "hidden": true } ],
-  "archiveAfter": { "column": "status", "values": ["approved", "rejected"], "after": "7d" }
-}
+"archiveAfter": { "column": "status", "values": ["approved", "rejected"], "after": "7d" }
 ```
-A row whose `column` holds one of `values` moves to the **archive** partition once it has gone `after`
-without an edit — so a log keeps showing the recent past and settles itself, with nobody filing rows by
-hand. Reversible from the archive tab like any other archived row.
 
-- **The clock is `updated_at`**, which every write stamps. So it means "finished and left alone for N
-  days", not "N days since the status changed": correcting a note restarts the countdown, which is the
-  forgiving reading — a row someone is still touching isn't done with. A row with no `updated_at` is
-  never swept.
-- **The table must DECLARE `updated_at`** (`type: "text"`, `hidden: true`). Columnar backends (dev
-  SQLite, Sheets) store only declared columns, so without it the timestamp is dropped and nothing ever
-  ages out. `validateSchema` rejects the combination rather than letting it fail silently — as it does
-  a missing `archivable`, an unknown `column`, empty `values`, or an `after` that is not a duration.
-- **Client-side and best-effort**: the sweep runs at load, only for someone who could archive by hand
-  anyway (write access to the whole mirror cluster), and does nothing on a read-only grant. There is no
-  server-side scheduler, so rows age out the next time somebody with rights opens the app — a
-  concurrent second run is harmless.
-- **`after`**: `"30min"`, `"2h"`, `"1d"`, `"2w"`, `"1m"` (months), `"1y"`; `"0d"` archives at once.
-- **`dateColumn`**: age from the row's own date instead of `updated_at` (`column`/`values` optional).
-- **A row restored by hand stays active**: the sweep skips it from then on; archive it by hand again.
-- Calendars and lookups still read archived rows.
-- **Mind what totals the table feeds.** Archiving removes a row from every ordinary view, so a
-  leaderboard or balance over the same table needs `includeArchive: true` or it will quietly shed
-  points as rows age out — the chores example turns it on for exactly that reason.
+A row whose `column` holds one of `values` is archived once it has gone `after` without an edit.
 
-> **`id` is implicit** — every table gets an `id` column auto-injected (storage primary key +
-> join/archive match key). Do not declare it in `columns`.
+- `after`: `30min`, `2h`, `1d`, `2w`, `1m`, `1y`; `0d` archives at once.
+- The clock is `updated_at`, so the table must declare it (`{ "name": "updated_at", "type": "text",
+  "hidden": true }`). `dateColumn` ages from the row's own date instead.
+- It runs in the browser at load, for users who could archive by hand. A row restored by hand stays.
+- A total over the table needs `includeArchive: true`, or it loses rows as they age out.
 
 ### column types
-| Type | Description |
-|------|-------------|
-| `text` | Plain text (default) |
-| `number` | Numeric value (used e.g. as a `rotation`/`reorderable` position, and by pivot `sum`) |
-| `date` | Date picker, stored as `YYYY-MM-DD` |
-| `datetime` | A moment: date **and** time, picked and shown in the reader's local time, stored as the UTC instant (`2026-10-13T15:40:00.000Z`, the shape `created_at` has). It sorts as a string and both rules layers can compare it, which is what a deadline the server checks needs. A calendar or rsvp `dateColumn` may be one: the event lands on the **local** day it falls on, and the booking list shows its time |
-| `select` | Dropdown from a named list |
-| `multiselect` | **Legacy spelling of `select` + `multiple: true`.** Still read, and migrated to that form on load (schema v3). |
-| `ref` | Reference to a lookup-table column |
-| `url` | A link — stored as a URL **string**; the cell shows an editable field + an open-in-new-tab icon, and a clickable link in read-only views |
-| `image` | An image — the row stores a **reference** (never the bytes in the row): a URL, or `asset:<id>`. The cell's upload button re-encodes the picked file in the browser, which also drops its metadata (a photo's GPS position included), and stores it where the deployment can: with a **blob store** (Firebase Storage, Supabase Storage) at most 2560px on the long side and under 2 MB, saving the file's URL; without one, or once the store has refused an upload this session, in the database's `_assets` table at most 1600px and under 900 KB, saving `asset:<id>`. Each upload also stores a thumbnail (at most 480px, under 80 KB) in the same place, and the value carries both as `<picture>#thumb=<thumbnail, URI-encoded>`: tiles and cell thumbnails draw the thumbnail, the lightbox the picture. A paste-a-URL field sits beside the button for an external picture. Removing a picture takes two presses |
-| `owner` | Per-row access primitive — **auto-stamped** with the current user's email on create, **read-only** thereafter. Backs the `rsvp` view and owner-scoped Firestore rules (a member may write only their own owner-stamped rows). See `## rsvp` and **Self-service tables** below. |
+
+| Type | Holds |
+|---|---|
+| `text` | text (the default) |
+| `number` | a number |
+| `date` | a date, `YYYY-MM-DD` |
+| `datetime` | a moment, shown in local time, stored as UTC (`2026-10-13T15:40:00.000Z`). A calendar or rsvp event lands on its local day. |
+| `select` | a value from a named list |
+| `multiselect` | old spelling of `select` + `multiple: true`; migrated on load |
+| `ref` | a value from a lookup table |
+| `url` | a link |
+| `image` | a picture reference: a URL or `asset:<id>`, never the bytes. Uploads are resized and stripped of metadata in the browser, then stored in the blob store (≤2560 px, <2 MB) or, without one, in `_assets` (≤1600 px, <900 KB), with a thumbnail. |
+| `owner` | the creating user's email, stamped and read-only. Lets members write their own rows without a grant (see Self-service tables). |
 
 ### column properties
-This list is **closed** — a property not on it is never read, and `validateSchema` says so at load (see **the meta-schema** above).
 
-| Property | Description |
-|----------|-------------|
-| `name` | Column identifier (required) |
-| `type` | Column type (default `"text"`) |
-| `hidden` | Don't display in UI (e.g. `created_at`) |
-| `list` | List name for `select` type |
-| `allowNew` | Allow adding new list values (combobox) |
-| `sorted` | Sort dropdown items alphabetically |
-| `multiple` | Hold **several** values instead of one; stored as an **array** of strings, edited as a chip input. Cardinality is all that ever separated `multiselect` from `select`, so it is a flag rather than a type — which means it also composes with **`ref`**: `{"type": "ref", "table": "ref_chores", "valueCol": "chore", "multiple": true}` is a reference holding several values, which no type name could express. Before this, a schema wanting that had to point a `multiselect` at the lookup table through `list`; the values were right but nothing knew a reference was involved — `filterBy` could not apply, the ref editor did not see it, and the lookup table was invisible to the dependency loader. Ignored with `picker` (a multi-value cell is already chips) |
-| `picker` | **How the value is chosen** — one vocabulary for every choice in the app (an rsvp view's `picker` uses it too): `"dropdown"` (the default; same as omitting it), `"chips"` (selectable chips), `"toggle"` (segmented buttons), `"cards"` (each option's catalogue row as a card showing its other columns — a price, a duration — the chosen one outlined). Every widget but the dropdown lays out the dropdown's own options, so it works on a `list` or a `ref` column alike (and `filterBy` narrows them identically); `cards` needs a catalogue row behind each option, so a `ref` or a `list` naming a lookup table. In a table row `cards` is a dropdown. Pressing the chosen option again clears it. A picker that cannot apply — no options (a text column), `multiple` (already chips), `allowNew` (needs typing), cards over a plain list — is named by `validateSchema` rather than quietly falling back to a dropdown |
-| `syncFrom` | Mirror this column's value from another table |
-| `listSwitch` | An **alternate** list the cell can be toggled to: `{ "label": "External", "list": "external_workers" }`. The label is the toggle's text; the list is auto-seeded like any other |
-| `stamped` | The app fills this column in and **nobody rewrites it** — it binds a grant-holder, not just an owner. Needs `defaultFrom: "@me"` and a `list`; at most one per table, because the rules layers resolve ONE column and cannot loop a map. See **`stamped`** below |
-| `default` | A literal seeded into the cell when a row is **created** (`"default": "logged"`), then freely editable. Use it so a new row starts in a sensible state — a status column that begins blank leaves the row outside every lane and filter that names a value. Prefer an explicit value over "whatever is first in the list": list order is data and can be reordered |
-| `defaultFrom` | Seed the cell when a row is **created**. Tokens: `"@today"` = today's date (a log row dated when it is added, so it stays inside a view filtered to recent days); `"@me"` = the signed-in user's identity, resolved exactly as the `@me` filter does for that column (a `userlink` list's curated value, else the profile display name) (blank when they have none, like the `@me` filter). Takes precedence over `default` if both are set. Unlike `owner`, the value stays editable afterwards — use it so a self-service row is attributed to its author by default without hard-wiring it |
-| `table` | Reference table name (for `ref`) |
-| `valueCol` | Column used as value (for `ref`) |
-| `label` | For a `ref`: the referenced table's columns that NAME a row in its options and cells, instead of the raw value — `"label": ["plan", "start_on"]` reads "12 months · 15/01/2026" where the value is an id |
-| `filterBy` | Filter ref options by another column (for `ref`) |
-| `listFilter` | For a `ref`, or a column whose `list` names a **lookup table**: which of its rows the picker offers, as a condition over the lookup's columns (`"listFilter": { "kind": "position" }`, with `$and`/`$or`). Narrows the **picker only**: a value already stored keeps rendering and sorting, and stays among its own cell's options, so a historical row never blanks. The values it names are **pinned** like a view filter's: the lookup rows carrying them cannot be renamed or deleted in the Lookup tab, since that would silently empty the picker. A column the lookup lacks, or a `list` that is not a lookup, is a load-time error |
-| `enabledWhen` | Which options a picker lets you **choose**, as a condition over each option's catalogue row (a `ref`, or a `list` naming a lookup). Options that fail stay on show, greyed — a reward you cannot afford yet is still worth seeing — and a value already chosen is never greyed. An operand may be `{ "view": "<view>", "field": "<col>" }`, the first row of a view (e.g. *my coins to spend*), or `{ "col": "<col>" }`, another column of the option's row: `"enabledWhen": { "cost": { "lte": { "view": "coin_spendable", "field": "coins" } } }`. Display-level: it stops a choice on screen, not at the server |
+The list is closed: anything else is an error at load.
 
-```json
-"tasks": {
-  "columns": [
-    { "name": "date", "type": "date" },
-    { "name": "status", "type": "select", "list": "status" },
-    { "name": "assigned_to", "type": "select", "list": "assigned_to", "allowNew": true, "sorted": true },
-    { "name": "city", "type": "ref", "table": "cities", "valueCol": "city", "filterBy": {"state": "state"} }
-  ],
-  "archivable": true
-}
-```
-
-### multiselect
-
-`multiselect` extends `select` — same properties (`list`, `allowNew`, `sorted`) — but a cell holds
-**multiple** values:
+| Property | Meaning |
+|---|---|
+| `name` | Required. |
+| `type` | Default `"text"`. |
+| `hidden` | Not shown. |
+| `list` | The list a `select` uses. It may name a lookup table. |
+| `allowNew` | The picker accepts new values, which join the list. |
+| `sorted` | Sort the options alphabetically. |
+| `multiple` | Several values, stored as an array, edited as chips. Works on `select` and `ref`. |
+| `picker` | `"dropdown"` (default), `"chips"`, `"toggle"`, or `"cards"` (each option's catalogue row as a card; needs a `ref` or a lookup list). Not with `multiple` or `allowNew`. |
+| `syncFrom` | Mirror the column from another table. |
+| `listSwitch` | An alternate list the cell can switch to: `{ "label": "External", "list": "external_workers" }`. |
+| `stamped` | Filled by the app and never rewritten (see `stamped` below). Needs `defaultFrom: "@me"` and a `list`; one per table. |
+| `default` | A literal set when a row is created, then editable (`"default": "logged"`). |
+| `defaultFrom` | Set at creation from a token: `"@today"`, or `"@me"` (the user's identity for this column). Wins over `default`; stays editable. |
+| `table`, `valueCol` | For a `ref`: the lookup table and the column stored. |
+| `label` | For a `ref`: columns that name the row in pickers and cells (`["plan", "start_on"]`). |
+| `filterBy` | For a `ref`: narrow options by another column of the row (`{ "state": "state" }`). |
+| `listFilter` | Which lookup rows a picker offers, as a condition (`{ "kind": "position" }`). Stored values keep rendering; the named values cannot be renamed or deleted. |
+| `enabledWhen` | Which options may be chosen, as a condition over each option's row; the rest stay visible, greyed. An operand may be `{ "view": "…", "field": "…" }` (a view's first row) or `{ "col": "…" }`. Display only. |
 
 ```json
-{ "name": "people", "type": "multiselect", "list": "people", "allowNew": true }
+"tasks": { "archivable": true, "columns": [
+  { "name": "date", "type": "date" },
+  { "name": "status", "type": "select", "list": "status", "default": "open" },
+  { "name": "assigned_to", "type": "select", "list": "people", "allowNew": true, "multiple": true },
+  { "name": "city", "type": "ref", "table": "cities", "valueCol": "city", "filterBy": { "state": "state" } }
+] }
 ```
 
-- **Storage**: an array of strings, e.g. `["Alex", "Sam"]` (vs. a scalar string for `select`).
-- **Editor**: chip/tag input (combobox when `allowNew`, autocomplete otherwise).
-- **Display**: comma-joined, list-translated, e.g. `"Alex, Sam"`.
-- **`matchList`/`notMatchList`**: match on **any** array member (array membership, not scalar equality).
-  Works in row `filter`, column `when`, and `filterBy`.
-- **`computed` `fromColumns`**: array-valued source columns are flattened before `matchList` evaluation.
-- **Backends**: every backend stores arrays natively -- Firestore arrays, Postgres `jsonb`, SQLite
-  `json1`. (The encode/decode round-trip this used to describe existed only for Google Sheets.) Concurrent edits to the same cell are
-  whole-array last-writer-wins (no element-level merge).
+A `multiple` cell stores an array; `matchList` / `notMatchList` match any member; concurrent edits to one
+array are last-writer-wins.
 
 ## views (flat)
-Named, reusable. Views are flat — hierarchy lives in `nav` (no `views.views` nesting).
+
 ```json
 "views": [
-  { "name": "combined", "sources": ["tasks","notes"], "mode": "join", "columns": [...] },
-  { "name": "attendance", "sources": ["tasks","notes"], "mode": "union", "groupBy": {...}, "collect": "date", "columns": [...] }
+  { "name": "combined", "sources": ["tasks", "notes"], "mode": "join", "columns": [ … ] },
+  { "name": "attendance", "sources": ["tasks", "notes"], "mode": "union", "groupBy": { … }, "collect": "date", "columns": [ … ] }
 ]
 ```
 
 ### view properties
-| Field | Type | Description |
-|-------|------|-------------|
-| `name` | string | View identifier |
-| `kind` | string | **What this view IS**, and what the loader dispatches on: `data`, `page`, `rotation`, `calendar`, `pivot`, `rsvp`, `board`, `form`, or `group` (a nav folder). Written by migration, so you normally omit it and get one at load — set it only to override. It used to be *inferred* by probing for a `rotation`/`calendar`/… key, in every consumer that needed the answer |
-| `sources` | string[] | Table names to pull data from |
-| `mode` | string | `"union"` (stack rows) or `"join"` (merge by `id`) |
-| `columns` | array | Column names, embeds, conditional/computed columns (below) |
-| `filter` | object | Static row filter (see **filters**) |
-| `readonly` | boolean | Disable editing (report views) |
-| `includeArchive` | boolean | Read the **archive** partition alongside the active one. A view sees only active rows by default, which is right for a worklist and wrong for a TOTAL: with `archiveAfter` in play, a sum that nets one thing against another goes wrong the moment either side ages out. Turn it on for balances, leaderboards and any cross-tab of history. Declaring it is also what makes the app fetch a legacy `__archive` collection at all — a view that does not ask for history never reads one (`preload_archive` remains an opt-out) |
-| `layout` | string | `"table"`, `"card"`, `"list"`, `"gallery"` or `"split"`. **`split` is master-detail**: the rows as a list, each named by its first column with its second beneath (unless that is an image column), beside the selected record's fields, edited in place exactly as a card's are, with its embeds and row actions. The first row is open until another is picked. Each pane scrolls on its own, so the record stays in view down a long list. On a phone the list and the record are two screens: a row opens its record, and the back button or the browser's Back returns to the list. Print view (`printable: "view"`) prints the whole view as a table. **`gallery` is the card layout as a grid of tiles**: one tile per row, the first image column the view shows as the picture (square crop; a row without one gets a placeholder tile, never dropped), and under it the same editable fields a card has, the picture's own field included (upload, remove, or paste an address). With `readonly: true` the picture's field is not drawn, so a read-only view of an image column alone (`"columns": ["photo"]`) is a plain picture wall. A URL picture opens full size; an `asset:` one is not a link. **`list` is a reading layout**: compact single-line rows with values rendered read-only, so a row added there has no editor and must be filled in elsewhere. Add/delete/archive are still offered (a *table* may declare `list` as its only presentation), but use `table`/`card` for any view people actually enter data into |
-| `gallery` | object | Options for `layout: "gallery"`, all optional. `image`: the image column that is the picture (default the first one shown; it need not be in `columns`, and then has no field on the tile). `size`: `small` \| `medium` (default) \| `large`, the tile's minimum width (about 140 / 220 / 320px); the grid fits as many as the space allows, so the size stays relative to the window or the page the gallery is embedded in. `shape`: `square` (default) \| `landscape` (16:9) \| `portrait` (3:4). `fit`: `crop` (default, fill the shape) \| `contain` (the whole picture inside it). Example: `"gallery": { "size": "large", "shape": "landscape", "fit": "contain" }` |
-| `collapsed` | boolean | Cards start collapsed (accordion) |
-| `defaultSort` | string | Default sort column |
-| `defaultSortDesc` | boolean | Sort `defaultSort` descending — newest first, for a log |
-| `requires` | object | A **member-only** view: `{ table, from, to, where }`, the shape rsvp's `requires` has. Shown (in the menu and embedded) only while the person has one of their own rows covering today — an active membership — and gone again when it lapses; their rows are kept. Admins and editors always see it |
-| `filters` | string[] | **A page** (`markdown`): multi-selects above it, one per column (a list or a ref), that narrow every view embedded on it — only the rows that HAVE the column, so a trainer pick leaves visits alone. Kept per viewer in their browser. (A calendar's own `filters` live in `calendar`) |
-| `preview` | number | **Embedded** (`{{view:x}}`): show the first N rows of the view's order, with **Show all (M)** under them to expand and **Show fewer** to fold back. All rows stay in the view — totals and the top-level screen see them all; only the embed's display is folded |
-| `hideEmpty` | boolean | Hide empty columns. **Table** layout drops a column empty across *all* rows; **card / board** layouts drop it per row, so each card shows only the fields it has (edit mode still shows every field, or the one you needed to fill in would be the one missing). Override per column with `{ "name": col, "hideEmpty": false }` |
-| `icon` | string | MDI icon for the sidebar |
-| `printable` | `"view"` \| `"cards"` \| `["view","cards"]` | Opt-in print buttons. `"view"` = view toolbar print only; `"cards"` = per-card buttons only; `["view","cards"]` = both. **Off by default** — omit to hide all print buttons. Note: per-card buttons only render in `card`/`list`/`gallery` layout, so `"cards"` on a `table` layout shows nothing. Applies to views and tables |
-| `markdown` | string | Makes this a **document** view (see below) instead of a data grid |
-| `access` | string[] | **Doc-views only.** Restrict who may **read** the page to users granted at least one of these tables (see "Restricting a page to some users" below). Omit = visible to all registered users. A read boundary only — any *editor* may edit any page |
-| `rotation` | object | Makes this a **rotationView** (third view kind) — a generated rotating-roster table (see below) |
-| `search` | boolean \| string[] | Offer a **runtime search box** over this view's rows: `true` = every column, an array = only those. Narrows what is rendered, never the data. See **search** below |
-| `obscureNames` | boolean \| string[] | Display-only privacy: abbreviate person names to "First L." in this view. `true` = all list/multiselect columns (or all area columns of a rotationView); an array = exactly those columns. Stored data is untouched |
-| `mineOnly` | boolean \| `{list}` | **rotationViews only.** Show a viewer only the slot column that *is* them, so one shared view is the whole matrix for an admin and a single column for a member (see "Per-person views" below). `{ "list": "<listName>" }` resolves identity through that list; `true` uses the profile display name. An object, not a bare string, so it cannot be misread as the column array `obscureNames` takes. Display-only |
-| `fab` | string | object | What the corner button does on this screen: `"add"` (a row here), `"scan"`, `"none"`, or an activity that lives elsewhere — `{ "add": "<view>", "label": "text.add_workout", "icon": "mdi-plus" }` adds a row to that view (a page embedding it), `{ "open": "<view>", "label": "text.buy" }` goes to it. A labelled button shows its words, on a phone too. A button the viewer could not use is not shown. Overrides `nav.fab` (see **nav**) |
-| `background` | object | Background image for this view's card (see **background images** below). Works on **every** view kind |
 
-A view's `columns` may contain, besides plain column names:
-- **Conditional column** `{ "name": "<col>", "when": { <cond> } }` — show the column only on rows
-  matching `when` (the unified condition language; works on plain **and** computed columns).
-  *Legacy shorthand `{ "<col>": { <cond> } }` is auto-canonicalized to the `{ name, when }` form at
-  load (`convertViewFilters`) — prefer the explicit `when` form in new schemas.*
-- **Inline embed** `{ "sources": [...], "filter": {...}, "columns": [...] }` — a filtered sub-table at that position.
-- **Named-view embed** `{ "view": "<name>", "filter": {...}, "hideEmpty": true, "bare": true }` — embed a defined
-  view (reuses its sources/columns/mode), with the entry's `filter`/`hideEmpty`/`bare` overriding.
-  If the named view has `markdown`, its document (header + nested embeds + footer) renders
-  inline at that position; the whole block is hidden when all its embedded tables are empty.
-  `"bare": true` suppresses the box wrapper (background + padding + border-radius) — the embed
-  renders flush with the card content. Applies to both screen and print.
-  > **Markdown columns** must go through a named-view embed: there is **no** inline
-  > `{ "markdown": "..." }` column (it would be treated as a data column named `markdown`).
-  > Define a `{ "name": "x", "markdown": "..." }` doc-view and reference it with `{ "view": "x" }`.
-- **Per-column hideEmpty** `{ "name": "<col>", "hideEmpty": true|false }` — override the view-level
-  `hideEmpty` for a specific column. `false` forces the column to always show (even when empty);
-  `true` hides it when empty even if the view shows empties. Works in both table and card layout.
+| Field | Meaning |
+|---|---|
+| `name` | Identifier. |
+| `sources` | Tables to read. |
+| `mode` | `"union"` stacks rows; `"join"` merges them by `id`. |
+| `columns` | Column names, plus the conditional, computed and embed entries below. |
+| `filter` | A row filter (see **filters**). |
+| `readonly` | No editing. |
+| `includeArchive` | Read archived rows too. Needed for totals, balances and history. |
+| `layout` | `"table"`, `"card"`, `"list"`, `"gallery"` (tiles with a picture) or `"split"` (a list beside the selected record; two screens on a phone). |
+| `gallery` | For `layout: "gallery"`: `image` (column), `size` (`small`/`medium`/`large`), `shape` (`square`/`landscape`/`portrait`), `fit` (`crop`/`contain`). |
+| `collapsed` | Cards start collapsed. |
+| `defaultSort`, `defaultSortDesc` | The initial sort column, and descending for newest first. |
+| `requires` | Member-only: `{ table, from, to, where }`, shown only while the user has their own row covering today (an active membership). Admins and editors always see it. |
+| `filters` | On a page: multi-selects that narrow every view embedded on it, remembered per viewer. |
+| `preview` | Embedded: show the first N rows, with **Show all (M)**. |
+| `hideEmpty` | Hide empty columns: across all rows in a table, per card in cards and boards. Per column: `{ "name": "c", "hideEmpty": false }`. |
+| `icon` | An MDI icon for the menu. |
+| `printable` | Print buttons: `"view"`, `"cards"` (card layouts only) or both. Off by default. |
+| `markdown` | Makes the view a page (see **markdown**). |
+| `access` | Pages only: readable only by users granted one of these tables. |
+| `rotation` | Makes it a rotation view. |
+| `search` | A search box: `true` for every column, or a column list. |
+| `obscureNames` | Show person names as "First L.": `true` for every list column, or a column list. Display only. |
+| `mineOnly` | Rotation views: show a member only their own slot. `{ "list": "…" }` names the identity list. |
+| `fab` | The corner button: `"add"`, `"scan"`, `"none"`, `{ "add": "<view>", "label": "…", "icon": "…" }` or `{ "open": "<view>", "label": "…" }`. Overrides `nav.fab`. |
+| `background` | A background image (see below). |
+
+Besides column names, `columns` may hold:
+
+- **A conditional column** `{ "name": "c", "when": { … } }`: shown only on rows that match.
+- **An inline embed** `{ "sources": [ … ], "filter": { … }, "columns": [ … ] }`: a sub-table at that position.
+- **A view embed** `{ "view": "name", "filter": { … }, "hideEmpty": true, "bare": true }`: another view
+  (a page's whole document, if it has `markdown`); `bare` drops the box around it.
 
 ### background images
 
-Any view kind can carry a background image on its card:
-
 ```json
-{ "name": "frontPage", "markdown": "# Welcome",
-  "background": { "image": "asset:bg_frontPage", "fit": "cover", "position": "top", "opacity": 0.45 } }
+"background": { "image": "asset:bg_frontPage", "fit": "cover", "position": "top", "opacity": 0.45 }
 ```
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `image` | string | **Required.** An `http(s)` URL / raster `data:` URI, `asset:<id>` — a reference to a row in the `_assets` store (see **where the bytes live**) — or `icon:<mdi-name>`, an icon drawn as the image (below) |
-| `fit` | string | `cover` (default, fill and crop), `contain` (fit whole, may letterbox), `tile` (natural size, repeated), or `width` (scale to `width`% of the card, aspect ratio preserved) |
-| `width` | number | 1–100, only with `fit: "width"`: the percentage of the card's width to scale to. Height follows the image's own ratio |
-| `position` | string | `center` (default), `top`, `bottom`, `left`, `right`, or a corner pair (`"top left"`). With `cover` this decides **which part survives the crop** |
-| `opacity` | number | 0–1, default `0.5`. `1` = untouched image, `0` = invisible |
-| `fixed` | boolean | Pin the image to the viewport (parallax). **Unreliable on iOS Safari** — off by default |
+| Field | Meaning |
+|---|---|
+| `image` | Required: an `http(s)` URL, a raster `data:` URI, `asset:<id>`, or `icon:<mdi-name>` (an icon drawn as the picture; bare `icon:` is the menu entry's own). |
+| `fit` | `cover` (default), `contain`, `tile`, or `width` (scaled to `width`% of the card). |
+| `width` | 1–100, with `fit: "width"`. |
+| `position` | `center` (default), `top`, `bottom`, `left`, `right` or a corner (`"top left"`). |
+| `opacity` | 0–1, default 0.5 (a scrim in the theme's surface colour, so text keeps its contrast). |
+| `fixed` | Fixed to the viewport. Unreliable on iOS. |
 
-**`opacity` is emulated, deliberately.** CSS has no `background-image-opacity`, and element `opacity`
-would fade the view's content along with the image. So a translucent scrim is stacked over the image
-inside the same `background-image` list, coloured with the theme's own `surface` token — which means
-the fade follows the light/dark toggle and body text keeps its contrast for free.
-
-**An icon as the background.** `"image": "icon:mdi-broom"` draws that Material Design icon onto a
-canvas in the theme's `primary` colour and uses the result as the image, so every field above applies.
-Bare `"icon:"` means the nav entry's own icon, and follows it when the icon changes. A faint corner mark
-suits it — `{ "image": "icon:", "fit": "width", "width": 25, "position": "bottom right", "opacity": 0.08 }`,
-which is what Settings → Appearance sets when Icon is chosen. It is redrawn when the theme switches, so
-it never goes dark-on-dark the way a photo can.
-
-Backgrounds never print: the print path builds its own HTML rather than cloning the view.
+Backgrounds never print. Settings → Appearance overrides the schema's per database (stored in the app
+config; removing one that the schema sets stores `{ "image": "" }`).
 
 #### Where the bytes live
 
-Three tiers, and only the middle one can be unavailable:
+- **An external URL**: costs nothing, but each viewer's browser contacts that host.
+- **A storage bucket** (Firebase or Supabase Storage): best for many or large pictures. Firebase Storage
+  needs the Blaze plan.
+- **The database**: `asset:<id>`, an `_assets` row holding a data URI of at most 900,000 characters.
+  Works on every backend. Appearance uploads always go here; `image` columns go here when there is no
+  bucket.
 
-1. **An external URL** — put it straight in `image`. Always works, costs nothing, but leaks each
-   viewer's IP/referer to that host and breaks if the host does.
-2. **A storage bucket** (`backend.uploadFile` → Firebase/Supabase Storage, the dev file store).
-   Best for many or large images: CDN-served with real HTTP caching. Firebase Storage requires the
-   **Blaze** plan, so this tier is simply absent on a free project.
-3. **The database** — `asset:<id>`, resolving to an `_assets` row holding a raster `data:` URI.
-   Needs no bucket at all and syncs through whatever transport the deployment already uses. Capped at
-   **900000** characters (below Firestore's 1 MiB document limit) and enforced in every access layer;
-   uploads are downscaled client-side until they fit.
-
-**Transparency is preserved.** An uploaded image is re-encoded to fit the cap, and the format follows
-the source: a transparent PNG becomes WebP (alpha intact, and usually smaller than JPEG for
-graphic-style art), an opaque photo becomes JPEG. So a logo with a transparent background works as a
-`fit: "width"` watermark and lets the card surface show through. SVG is not accepted as an image
-source anywhere — it can carry script.
-
-An upload from **Settings → Appearance** goes to tier 3, so it works on every backend. An `image`
-column prefers tier 2 and falls back to tier 3 — including when Storage is present but *unbilled*,
-where the upload fails at runtime rather than being absent.
-
-Asset ids are deterministic for Appearance uploads — `bg_<entry>` for a background, `tile_<entry>` for
-a menu image, with a group's `grp:` becoming `grp_` — so replacing one overwrites in place rather than
-orphaning the old bytes. The dialog writes them only on Save, so Cancel leaves the stored picture alone.
-
-#### Schema default vs. runtime override
-
-`views[x].background` is the **shipped default**. The Settings editor writes to the synced folder
-config instead (`appConfig.backgrounds[<view>]`, same shape), which is merged over the schema value —
-so swapping a picture never rewrites the schema document. Asset bytes and the config both travel in
-the export bundle, so a background survives an export/import round-trip.
-
-Because the config *overrides* rather than replaces, **removing** a background on a view that declares
-one in the schema stores an explicit `{ "image": "" }` — the override meaning "none". Dropping the
-override entirely (the restore button in Settings) is what brings the schema default back. On a view
-with no schema default the entry is simply deleted, so the config collects no meaningless tombstones.
+Uploads keep transparency (a transparent PNG becomes WebP) and are never SVG, which can carry script.
 
 ### filters
-A `filter` (on a view, an inline/named-view embed, or a conditional column) matches rows:
-- **Flat object** = AND of equality: `{ "status": "open", "city": "X" }` -> `status==open AND city==X`.
-- **Array value** = IN — **retired.** `{ "status": ["open","in_progress"] }` is **auto-upgraded to
-  `$or` at load** (`convertViewFilters`) and on export; the matcher itself no longer accepts raw
-  arrays. **Use `$or`** in new schemas (legacy arrays keep working via the load-time upgrade).
-- **`matchList` (dynamic)** = value must be in a named list: `{ "assignee": { "matchList": "leads" } }`.
-  The list is resolved at runtime from the Lookup tab — adding/removing items in the list
-  immediately changes which rows pass the filter. Use for filters that should stay in sync
-  with user-editable lists.
-- **`notMatchList` (dynamic)** = value must **not** be in a named list:
-  `{ "attendee": { "notMatchList": "leads" } }`. Same dynamic resolution as `matchList`, negated.
-- **`$or` / `$and`** = explicit logical groups, nestable:
-  `{ "$and": [ { "city": "X" }, { "$or": [ {"status":"open"}, {"status":"in_progress"} ] } ] }`.
-- **Value operators** (also usable in column `when` / conditional columns — same engine):
-  `{ "col": { "notEmpty": true } }`, `{ "empty": true }`, `{ "ne": v }`,
-  and the ordered comparisons `{ "lt": v }` / `{ "gt": v }` / `{ "lte": v }` / `{ "gte": v }`.
-  `notEmpty`/`empty` work on **computed** values too. Row filters and column/embed conditions share
-  one matcher (`condMatches`), so **every operator above works in `filter`, `when`, and embed `when`.**
 
-**What a row `filter` can name.** Only the **stored columns of the carrier's own sources** — a view's
-`sources`, an inline embed's own `sources`, the view a `{view:...}` embed names, or the one table a
-calendar source reads. A row filter runs *before* `compute` and *before* grouping, so a **computed**
-column (which the operators above do read in a `when`) can never match in a `filter`, and
-`groupBy.filter` matches the **aggregated key row**, not a source column. A name that is not there is
-refused at load with the column and the sources it was looked for in, because at runtime it fails
-invisibly: no row matches, and the view shows an empty list that reads as "no rows yet".
+A filter is an object of conditions that all must match:
 
-**Static vs Dynamic filtering:**
-| Syntax | When to use |
-|--------|-------------|
-| `"col": "value"` | Fixed filter value known at schema design time |
-| `{ "$or": [ {"col":"a"}, {"col":"b"} ] }` | Fixed set of values (membership; array shorthand retired) |
-| `"col": { "matchList": "listName" }` | Filter should track a user-editable list (Lookup tab) |
-| `"col": "@me"` | Resolves to the signed-in user's identity **for that column**: on a `userlink` list, the curated value linked to their account; otherwise their **profile display name** (see **user profiles**). No identity → matches nothing (fail-closed). Works in `filter`, `groupBy.filter`, calendar `sources[].filter`, rotation `filter`, and embeds. Display-only — never widens server-enforced access. |
-| `"col": { "within": "@month" }` | Date column falls in the current period. Token: `@today`/`@week`/`@month`/`@year`, with an optional **back-offset** (`@month-1` = last month, `@week-2` = two weeks ago). Recomputed from *today* each render, so it **auto-resets** (a `@month` leaderboard rolls to the new month); weeks are Monday-start; unknown tokens match nothing. Ideal for a period-scoped `groupBy.filter` (e.g. this-month leaderboard). |
-| `"col": { "within": { "calendar": "my_calendar" } }` | Date column falls in the period that calendar view **shows** — its week, month or year (List: its month), following the reader's ‹ › and mode. With the calendar not on screen, its `defaultView` around today. Put a calendar and the logs/reports that follow it on one page (`{{view:…}}` each) and the page answers "this week / month / year". A view's `filter` and `groupBy.filter` only; `validateSchema` names a calendar that does not exist |
+```json
+{ "status": "open", "city": "X" }
+{ "$and": [ { "city": "X" }, { "$or": [ { "status": "open" }, { "status": "in_progress" } ] } ] }
+{ "assignee": { "matchList": "leads" } }
+{ "done_on": { "within": "@month" } }
+```
+
+- Each field takes a value (equality) or an operator; see the table under **conditional columns**.
+- `"@me"` is the signed-in user's identity for that column: a `userlink` list's linked value, else the
+  profile name. No identity matches nothing. Display only: it never widens access.
+- `within` takes `@today`, `@week`, `@month`, `@year`, optionally back-offset (`@month-1`), recomputed each
+  render (weeks start Monday); or `{ "calendar": "<view>" }`, the period that calendar shows.
+- `matchList` / `notMatchList` read a list at runtime, so editing the list changes the rows.
+- A row filter names only stored columns of the view's own sources, never computed ones; a wrong name is
+  an error at load. Array values (`{ "status": ["a", "b"] }`) are an old shape, upgraded to `$or` on load.
 
 ### aggregate views (groupBy + collect)
-A view with `groupBy` + `collect` groups rows by person/key and collects a column's values:
+
 ```json
 { "name": "presenters", "sources": ["events"], "mode": "union",
-  "groupBy": { "column": "person", "from": ["slot1","slot2","slot3"] },
+  "groupBy": { "column": "person", "from": ["slot1", "slot2", "slot3"] },
   "collect": "date", "columns": ["person", "latest", "second", "third"] }
 ```
-- `groupBy.column`: output key column; `groupBy.from`: source columns to scan for keys.
-- `collect`: source column whose values are gathered per group (sorted descending).
-- Output columns after `groupBy.column` receive the Nth collected value (most recent first).
-- **`collectWith`** (optional): when set, collected values include the source column name:
-  `"collectWith": "role"` → values render as `"2026-06-01 (slot1)"` instead of just `"2026-06-01"`.
-  Useful for cross-table aggregates where you need to see *which role* produced each entry.
+
+`groupBy.from` names the source columns holding the keys; `collect` gathers a column's values per group,
+newest first, into the output columns after the key. `collectWith: "role"` adds the source column
+("2026-06-01 (slot1)").
 
 #### Leaderboard totals (`aggregate` count/sum/max/min)
 
-`aggregate: { "max": "<col>" }` (or `min`) keeps the largest / smallest value per group instead of a
-total — compared as conditions compare, so `YYYY-MM-DD` dates work: *each member's latest end date*. A group
-with no value gets a blank, not a zero.
-Instead of `collect`, use `aggregate` to produce one **numeric** row per group, ranked highest-first:
 ```json
 { "name": "leaderboard", "sources": ["chore_log"], "mode": "union",
+  "filter": { "done_on": { "within": "@month" } },
   "groupBy": { "column": "person", "from": ["person"] },
   "compute": [ { "name": "points", "computed": { "lookup": { "table": "chores", "match": "chore", "field": "points" } } } ],
   "aggregate": { "sum": "points", "into": "total" },
   "columns": ["person", "total"] }
 ```
-- `aggregate.count: true` → number of rows per group; `aggregate.sum: "<col>"` → numeric total of that
-  column per group. `into` = output column name (default `"total"`).
-- Results are returned **sorted by total descending** (a ranking).
-- **Scoping:** put a **row/date filter** in the top-level `filter` (applied to source rows before
-  grouping — e.g. `"filter": { "done_on": { "within": "@month" } }` for this month's board). Use
-  `groupBy.filter` only to restrict by the **group key** itself (e.g. `{ "person": "@me" }` for just my
-  own row) — a date filter there won't work because `groupBy.filter` matches the key, not source columns.
-- **`groupBy.seed`** (optional, `aggregate` only): take the key set from the **catalogue the group
-  column references** instead of from the rows, so a group with nothing in it still produces a row
-  (`{ id: key, <keyCol>: key, <into>: 0 }`). Without it a chore nobody logged has no group and no row
-  — and on a cadence or a leaderboard that is the row most worth seeing. It reads the column's own
-  `ref` declaration (`{ "type": "ref", "table": "ref_chores", "valueCol": "chore" }`), so the table is
-  never named twice and the two cannot disagree; a group column that is not a `ref` is a load-time
-  error. Off by default, because seeding is not always wanted — a leaderboard over a 400-row roster
-  would grow 400 rows. Seeded keys pass `groupBy.filter` exactly as counted ones do, and an **archived**
-  catalogue row is not seeded back. Pair it with `stats.rowTiles.skipUntargeted` to keep the page to the
-  rows somebody still means to measure.
 
-  ```json
-  "groupBy": { "column": "chore", "from": ["chore"], "seed": true }
-  ```
-- **`period` navigation** (optional): set `"period": "month"` (or `week`/`year`) to show ‹ › controls
-  that step a back-offset into the view's bare `@period` tokens (`@month` → `@month-1` = last month…),
-  letting users browse past periods. Offset resets to the current period when you open the view.
-- **`view.compute`**: an array of computed defs resolved on the **source rows before grouping** — so an
-  aggregate can `sum` a *looked-up* (or otherwise computed) per-row value, not just a stored column.
-  These are preparation-only (not displayed); the displayed columns are `columns`.
-- **Signed totals across two tables** (`source` + `scale` on a compute def): in a **union** view each row
-  is tagged with its origin table, and `"source": "<table>"` restricts a def to those rows while
-  `"scale": -1` negates its result. Two defs writing the **same** output column — one per table, one
-  negated — let a single `aggregate.sum` produce a *balance* (earned minus spent), which one `sum` over
-  one table cannot. Rows no def matched leave the column unset and contribute nothing (not a zero).
-  `scale` is ignored for non-numeric results.
-
-  ```json
-  { "name": "balance", "sources": ["chore_log", "reward_claim"], "mode": "union",
-    "groupBy": { "column": "person", "from": ["person"] },
-    "compute": [
-      { "name": "delta", "source": "chore_log",
-        "computed": { "lookup": { "table": "ref_chores", "match": "chore", "field": "points", "default": 0 } } },
-      { "name": "delta", "source": "reward_claim", "scale": -1,
-        "computed": { "lookup": { "table": "ref_rewards", "match": "reward", "field": "cost", "default": 0 } } }
-    ],
-    "aggregate": { "sum": "delta", "into": "balance" },
-    "columns": ["person", "balance"] }
-  ```
-  The two tables usually have different date/status column names, so scope such a view with `$or`
-  (`{ "$or": [ {"status":"approved"}, {"status":"granted"} ] }`) rather than a flat equality.
-
-##### Worked example — chores with per-chore points → ranked leaderboard
-The demo schema (`examples/demo-schema.json`) wires this up: a `chores` ref table holds each chore's point value,
-`chore_log.chore` is a `ref` into it, and the `leaderboard` view sums the looked-up points per person.
-Structure is in the schema; you add the rows at runtime. Example data:
-
-| `chores` (ref table) | points |
-|---|---|
-| Dishes | 2 |
-| Vacuum | 3 |
-| Mow lawn | 5 |
-
-| `chore_log` | person | chore | done_on |
-|---|---|---|---|
-| | Ann | Dishes | 2026-07-01 |
-| | Ann | Mow lawn | 2026-07-02 |
-| | Ann | Dishes | 2026-07-05 |
-| | Bob | Vacuum | 2026-07-03 |
-
-The `points` lookup resolves each log row (2, 5, 2, 3), then `aggregate.sum` totals per person and ranks:
-
-| Leaderboard | total |
-|---|---|
-| Ann | 9 |
-| Bob | 3 |
-
-Scope it to a period by adding a date `filter` (or, once built, a `{ "done_on": { "within": "@month" } }`
-token); scope to the current user with `groupBy.filter: { person: "@me" }`.
+- `aggregate`: `count: true`, `sum: "<col>"`, `max` or `min` (dates compare correctly), into `into`
+  (default `total`). Sorted highest first.
+- Filter rows with the top-level `filter`; `groupBy.filter` filters the keys (`{ "person": "@me" }`).
+- `compute` derives per-row values before grouping (not displayed). Two defs into one column, scoped by
+  `"source": "<table>"` with `"scale": -1` on one, net two tables into a balance.
+- `groupBy.seed: true` adds a zero row for every catalogue value nobody has a row for (the group column
+  must be a `ref`).
+- `period: "month"` (or `week`, `year`) adds ‹ › to step back through periods.
 
 ### filterBy (per-card master-detail)
-A `{view}` column embed with `filterBy` dynamically filters embed rows per card:
+
 ```json
 { "view": "tasks_view", "filterBy": { "owner": "name" } }
 ```
-- Maps embed column (`owner`) to the current card's column (`name`).
-- Each card shows only rows where `task.owner === card_row.name`.
-- Only works in `card`/`list` layout (one card per row hosts the per-row embed).
-- Combine with `hideEmpty: true` to hide the embed when a card has no matching rows.
-- **`matchList` in filterBy**: `{ "assignee": { "matchList": "leads" } }` — show embed rows
-  where `assignee` value is in the named list (same syntax as in `filter`).
+
+In card and list layouts, an embed shows only rows whose `owner` equals this card's `name`. A value may
+be `{ "matchList": "leads" }`.
 
 ### computed columns
-A column with `computed` derives its value from other columns at render time (not stored).
 
-**On a table** it is said once and every reader sees it — views, lookups, reference paths, forms, rules —
-like a stored column it can never be written to: a new row does not carry it, an owner bound does not
-lock it, a cell does not edit it. Its inputs' tables load with it, through cycles (a membership counts
-its pauses; a pause reads its membership's end). **In a view** (`columns` or `compute`) it is that
-view's alone. The gym's membership:
+A column with `computed` is derived when shown, never stored or edited. On a table, every reader sees
+it (views, lookups, forms, rules); in a view's `columns` or `compute`, only that view.
 
-```json
-{ "name": "pauses_used", "computed": { "count": "pauses", "on": "membership", "where": { "sent": "yes" } } },
-{ "name": "valid_until", "computed": { "dateAdd": { "from": "start_on",
-    "months": { "col": "plan.months" }, "weeks": { "col": "pauses_used" }, "days": -1 } } }
-```
+| Shape | Value |
+|---|---|
+| `{ "lookup": { "table": "chores", "match": "chore", "on": "chore", "field": "points", "default": 0 } }` | A field of the row in another table (or `"view"`) whose `on` equals this row's `match`. |
+| `{ "count": "pauses", "on": "membership", "match": "id", "where": { … } }` | How many rows of a table point here. |
+| `{ "dateAdd": { "from": "start_on", "months": { "col": "plan.months" }, "weeks": 1, "days": -1 } }` | A date moved; months clamp to the month end. |
+| `{ "add": [1, { "col": "lvl" }] }` | A sum; blanks count as 0. |
+| `{ "value": 100 }` | A fixed number. |
+| `{ "daysSince": "needed_by" }` | Whole days from a date to today (negative in the future). |
+| `{ "streakAt": "class_start", "interval": "weekly", "by": "owner", "levels": [1, 3, 8, 26] }` | The run of consecutive periods this row's date ends; with `levels`, how many thresholds it reached. |
+| `{ "fromColumns": ["slot1", "slot2"], "matchList": "leads" }` | The values of those columns that are in the list, joined. |
+| `{ "fromColumn": "person", "matchList": { "members": "Internal", "leads": "External" } }` | A label by which list holds the value. |
 
-**Reference paths.** `"plan.months"` follows the `plan` ref to the row it names and reads `months`
-there, to any depth (`"membership.plan.pause_weeks"`). A path works as a condition key, a `{ "col" }`
-operand and a `dateAdd` amount. A step that is not a ref, or names no row, reads as blank.
-
-Shapes:
-```json
-{ "name": "flagged", "computed": { "fromColumns": ["slot1","slot2","slot3"], "matchList": "leads" } }
-```
-- **Collect from list** (`matchList` as string): gathers values from `fromColumns` that exist
-  in the named list, joins with ", ". Output is empty if no matches.
-- **Categorize by list** (`matchList` as object): checks which list contains the `fromColumn`
-  value, outputs the mapped label:
-  ```json
-  { "name": "type", "computed": { "fromColumn": "person", "matchList": { "members": "Internal", "leads": "External" } } }
-  ```
-- **Lookup a field** (`lookup`): denormalize one field from another (keyed / `ref`) table into the row —
-  or, with `view` in place of `table`, from a VIEW's rows: an aggregate like a balance per member,
-  `{ "lookup": { "view": "coin_balance", "match": "owner", "on": "owner", "field": "coins" } }`. The
-  view's own tables are loaded with it.
-  Matches this row's `lookup.match` column against the target table's `lookup.on` column (defaults to the
-  same name) and copies `lookup.field` (or `lookup.default` when there's no match):
-  ```json
-  { "name": "points", "computed": { "lookup": { "table": "chores", "match": "chore", "field": "points" } } }
-  ```
-  General-purpose — chore→points, member→role/phone, room→capacity, category→colour, etc. Pairs with
-  `view.compute` + `aggregate.sum` to total a looked-up value (see **Leaderboard totals**).
-- **How many rows point here** (`count`): `{ "count": "<table>", "on": "<its ref column>", "match": "id", "where": {…} }` —
-  active rows of that table whose `on` column holds this row's `match` (default `id`), optionally narrowed.
-- **A date moved** (`dateAdd`): `{ "from": "start_on", "months": { "col": "plan_months" }, "weeks": { "col": "paused_weeks" }, "days": -1 }` — whole
-  months, then weeks and days; an amount may name another column, a computed one earlier in the list included. Months
-  clamp to the month end (31 Jan + 1 month = 28 Feb). A blank start, or an amount that is not a number, gives
-  no date. Renders and sorts as a date.
-- **A sum** (`add`): `{ "add": [1, { "col": "lvl" }] }` — numbers and `{ col }` operands added up; a blank counts as 0.
-- **The streak at this row** (`streakAt`): `{ "streakAt": "class_start", "interval": "weekly", "by": "owner", "levels": [1, 3, 8, 26] }` —
-  the run of consecutive periods (`weekly` Monday-start, `daily`, `monthly`) this row's date ends, over the rows
-  of the same `by` value (optionally narrowed by `where`); with `levels`, how many of those thresholds it has
-  reached. It is the streak WHEN the row happened, so a later break never takes a bonus back. Coins per class
-  that grow with the streak, said once on the table: a `streak_level` from `streakAt`, then `coins` =
-  `{ "add": [1, { "col": "streak_level" }] }`; a cost counts against the total with `"scale": -1` on its column.
-- **A fixed amount** (`value`): `{ "value": 100 }` puts the same number on every row — a rate an aggregate
-  sums, such as coins per class attended (`"source"` limits it to one table of a union).
-- **Age of a row** (`daysSince`): whole days from a date column to today, as a **number** (negative for a
-  future date, `""` when the date is blank or unparseable):
-  ```json
-  { "name": "days_late", "computed": { "daysSince": "needed_by" }, "when": { "days_late": { "gt": 0 } } }
-  ```
-  Recomputed every render and never stored, so an "overdue" view re-evaluates as the day rolls over.
-  Pair it with the ordered operators above for due/overdue/stale filters. Note this ages **one row's own
-  date** — "when was this chore last done by anyone" would need a max-per-group, which aggregates don't
-  feed back into a lookup.
-- Computed columns are read-only (no cell editor renders for them).
-- They appear in the view's visible columns and in card/table layout.
+A **reference path** (`"plan.months"`, `"membership.plan.pause_weeks"`) follows `ref` columns to read a
+column of another row; it works as a condition key, a `{ "col" }` operand and a `dateAdd` amount.
 
 ### conditional computed columns (`when`) + condition operators
-Any **named or computed** column may carry a `when` clause that gates its **per-row** visibility
-(card/list: hides the field on that card; table: blanks the cell). Because computed values are
-resolved into the row before visibility is evaluated, a `when` can be driven by a computed column:
-```json
-{ "name": "flagged", "computed": { "fromColumns": ["slot1","slot2"], "matchList": "leads" },
-  "when": { "flagged": { "notEmpty": true } } }
-```
-Conditions (used by `when`, row `filter`s, and embed `when` — all the same engine) match a
-row when **every** field matches. Each field accepts a scalar (equality) or an operator object:
 
-| Form | Meaning |
-|------|---------|
-| `{ "f": "v" }` | `row.f === "v"` (equality) |
-| `{ "f": { "notEmpty": true } }` | `row.f` is truthy (set) |
-| `{ "f": { "empty": true } }` | `row.f` is falsy (blank) |
-| `{ "f": { "ne": v } }` | `row.f !== v` |
-| `{ "f": { "gte": { "col": "g" } } }` | compare to ANOTHER column of the same row (any of `ne`/`lt`/`gt`/`lte`/`gte`): `{ "balance": { "gte": { "col": "cost" } } }` |
-| `{ "f": { "lt": v } }` / `gt` / `lte` / `gte` | ordered comparison. **Numeric** when both sides parse as numbers (`9 < 10`, not `"9" > "10"`), otherwise a string compare — which orders `YYYY-MM-DD` dates correctly, so no separate date operator is needed. Combinable in one object for a range: `{ "gte": 10, "lte": 20 }`. A **blank or missing value is incomparable** and matches *no* ordered filter in either direction (fail-closed — otherwise `Number('') === 0` would quietly pull undated rows into an "overdue" view) |
-| `{ "$or": [...] }` / `{ "$and": [...] }` | logical groups (membership via `$or` of equalities) |
-| `{ "f": { "matchList": "L" } }` / `notMatchList` | value in / not in named list |
+Any column may carry `when`, which shows it only on matching rows (a card hides the field; a table
+blanks the cell). Computed values are resolved first, so `when` may test one. Embeds take `when` too.
 
-`when`/conditional columns and row `filter`s share **one matcher** (`condMatches`), so anything
-valid in a `filter` is valid in a `when` and vice-versa — `$or`/`$and`,
-`matchList`/`notMatchList`, equality, and the operators above. `notEmpty`/`empty` work
-on **computed** values, so you can show a column only when a computed result is present.
-Column `when`/`hideEmpty` are evaluated against the config that *owns* the column, so they apply
-inside a `{{view:x}}` / `{{table:x}}` embed and in an inline embed exactly as they do at top level —
-the embedded view's own entries decide, not the page hosting it.
+| Condition | Matches |
+|---|---|
+| `{ "f": "v" }` | equality |
+| `{ "f": { "notEmpty": true } }`, `{ "empty": true }` | set / blank |
+| `{ "f": { "ne": v } }` | not equal |
+| `{ "f": { "lt": v } }`, `gt`, `lte`, `gte` | ordered: numeric when both are numbers, else as strings (so dates work). Blank never matches. Combine for a range. |
+| `{ "f": { "gte": { "col": "g" } } }` | compared with another column of the row |
+| `{ "f": { "matchList": "L" } }`, `notMatchList` | in / not in a list |
+| `{ "$or": [ … ] }`, `{ "$and": [ … ] }` | groups |
 
-A `when` clause also works on an **embed** (inline, named-view, or markdown prose block) in a
-view's `columns`: the embed renders per-card only when the card's row matches — e.g. a markdown
-prose block placed above a column, shown only when a computed value is present:
-`{ "view": "flagged_heading", "bare": true, "when": { "flagged": { "notEmpty": true } } }`.
+Row filters, `when` and embed conditions share this one matcher.
 
 ### rotation columns (rotating duty rosters)
 
-A rotating duty (e.g. "security", "cleanup crew") cycles through a **pre-authored ordered list of
-groups**, one slot per occurrence, looping when exhausted. The runtime computes only
-*position-in-sequence* — never *who* is in a slot (that is authored data, not arithmetic).
-
-**Storage — one ordinary table per rotation.** No special table concept; it's editable, sortable,
-and archivable like any table. Convention: a `position` number column (manual order) + a `people`
-multiselect column (the group for that slot — variable size, not capped):
+A duty cycles through an ordered list of groups, one per occurrence, looping at the end. The groups are
+an ordinary table: a `position` number and a `people` multiselect (or another column, named by
+`valueCol`). `"reorderable": true` on the table gives it up/down arrows that renumber `position`.
 
 ```json
-"security_rotation": {
-  "columns": [
-    { "name": "position", "type": "number" },
-    { "name": "people", "type": "multiselect", "list": "staff", "allowNew": true }
-  ],
-  "defaultSort": "position"
-}
+"security_rotation": { "reorderable": true, "defaultSort": "position", "columns": [
+  { "name": "position", "type": "number", "hidden": true },
+  { "name": "people", "type": "select", "list": "staff", "multiple": true } ] }
 ```
 
-> The slot's group column defaults to **`people`** — the resolver reads `cells[i].people` unless the
-> spec sets **`valueCol`**, which points it at any other column (for a roster of tasks, shifts, or
-> locations rather than people). Slots are ordered by the `position` column. Set `"reorderable": true` on the
-> table to get **up/down arrow buttons** in the grid that move a slot and auto-renumber `position`
-> (like the Lists tab) — no manual renumbering needed. Set `position` to `hidden: true` to drop it
-> from the grid entirely — only `people` shows and order is controlled **only** by the arrows.
-
-**Resolution — a `computed` column** in an ordinary view that indexes into the rotation table.
-`advanceBy` declares the trigger explicitly (it is never inferred):
+A computed column in a view resolves whose turn it is:
 
 ```json
-{ "name": "security", "computed": {
-    "rotationTable": "security_rotation",
-    "advanceBy": "occurrence",
-    "occurrenceSource": "sessions",
-    "occurrenceSort": "date" } }
-```
-```json
-{ "name": "cleanup", "computed": {
-    "rotationTable": "cleanup_rotation",
-    "advanceBy": "calendar",
-    "interval": "weekly" } }
+{ "name": "security", "computed": { "rotationTable": "security_rotation", "advanceBy": "occurrence",
+                                    "occurrenceSource": "sessions", "occurrenceSort": "date" } }
+{ "name": "cleanup",  "computed": { "rotationTable": "cleanup_rotation", "advanceBy": "calendar", "interval": "weekly" } }
 ```
 
-| `advanceBy` | Position formula | Use when | Extra fields |
-|-------------|------------------|----------|--------------|
-| `"occurrence"` | count of `occurrenceSource` rows at/before the current row (sorted by `occurrenceSort`, `id` tie-break) | the duty exists *because* a row exists (one team per session) | `occurrenceSource`, `occurrenceSort` |
-| `"calendar"` | whole intervals elapsed between the anchor date and the row's date | the duty runs on a fixed schedule regardless of rows (weekly cleanup) | `interval`, anchor (per-view — see below) (+ `dateField`) |
-
-- **Output** is the slot's `people` **array** → renders via the multiselect display-join (`"Alex, Sam"`).
-- **Looping** is automatic (modulo over slot count); negative-safe in calendar mode.
-- **Occurrence mode** ties position to *row count*, not date math — a deleted/cancelled source row
-  leaves **no gap** (every later slot shifts back by one).
-- **Same-date occurrences** are disambiguated by a stable `id` tie-break: when two source rows share
-  the same `occurrenceSort` value (e.g. two meetings on one date), they take **consecutive, distinct**
-  slots — they do *not* get the same group. The order between them follows the rows' opaque `id`
-  (creation order), which is deterministic but not user-controllable; if you need a predictable order,
-  give the rows a secondary sort value (a `time`/`seq` column) and sort by it. The only ways two rows
-  resolve to the *same* group are a single-slot rotation (`index % 1`) or duplicate row `id`s.
-- **Calendar mode, per-row** needs a date source: it reads `dateField` (a date column on the row),
-  falling back to "today" if absent. Calendar mode is primarily intended for `rotation` (below);
-  for per-row computed columns, prefer **occurrence** mode.
-- **`interval`**: a named value — `"daily"`, `"weekly"`, `"monthly"`, `"yearly"` — **or** a compact
-  `"<n><unit>"` form where unit is `d`/`w`/`m`/`y` (e.g. `"3w"` = every 3 weeks, `"2m"`, `"10d"`,
-  `"1y"`). Day/week use uniform arithmetic; month/year use real calendar arithmetic (never days/30),
-  and years normalize to 12 months. Sub-day units (hours) are **not** supported — dates are stored as
-  `YYYY-MM-DD` with no time component. Unknown/typo values are **rejected at load** (no silent weekly
-  fallback). Defaults to weekly when omitted.
-- **Calendar anchor (per-view, DB-backed)**: the anchor is the date of slot position 0 for *this view*.
-  It is stored **per view** in synced folder config under `rotationAnchors[<viewName>]` and edited
-  **inline on the rotation view itself** (a "Start date" field at the top) — so different rotation
-  views (e.g. `duty_rotation` vs `support_rotation`) can have different anchors. It is *not* a schema literal and
-  *not* a per-row column. A literal `anchorDate` on a column overrides the per-view value (handy for a
-  fixed/printable one-off); if neither is set, calendar columns resolve to empty. Occurrence mode
-  ignores the anchor.
-- **Independent lists (R3)**: multiple rotations are separate tables; nothing couples them. Within one
-  view, sharing that view's anchor only fixes which calendar period is index 0 — each list keeps its own length and
-  contents (different-length lists drift relative to each other over time, which is correct).
-- **Dependency preload**: `rotationTable` (and `occurrenceSource`) are auto-loaded into the data cache
-  before resolution — they need not appear in the view's `sources`.
-- **Validation** (load-time): `rotationTable` must exist; `advanceBy` must be `occurrence` or
-  `calendar`; occurrence needs a resolvable `occurrenceSource`; calendar needs a **valid `interval`**;
-  an explicit `valueCol` must be a real column of the `rotationTable`.
-  The anchor is runtime data (global config or a literal `anchorDate`), so it is not statically validated.
+- **`occurrence`**: the nth row of `occurrenceSource` (sorted, ties broken by `id`) gets the nth group.
+  Deleting a row shifts every later one back; archiving does not, so archive past occurrences.
+- **`calendar`**: whole intervals since the view's anchor date. The anchor is set on the rotation view
+  ("Start date") and stored per view in the app config; `anchorDate` on the column overrides it.
+- `interval`: `daily`, `weekly` (default), `monthly`, `yearly`, or `<n><d|w|m|y>` (`3w`). Unknown values
+  are an error.
+- The rotation tables load automatically; they need not be in the view's `sources`.
 
 ## markdown (documents)
-A view with a `markdown` field renders as a **document** instead of a data grid:
+
+A view with `markdown` is a page:
+
 ```json
-{ "name": "home", "markdown": "# Welcome\n\nOpen items:\n\n{{view:combined}}\n\nAll tasks:\n\n{{table:tasks}}" }
+{ "name": "home", "markdown": "# Welcome\n\nOpen items:\n\n{{view:open_tasks?}}\n\n{{table:tasks}}" }
 ```
-- Embed tokens: `{{view:<name>}}` and `{{table:<name>}}` render the live data inline.
-  Embeds are **interactive**: inline cell editing plus add/delete/archive row controls
-  (gated by the same read-only/permission rules as the main grid).
-- **Own grid** `{{self}}` — render *this* view's own data grid at that position. Use it when a
-  view has both `sources`/`columns` and `markdown`, so one view is prose **plus** its own data
-  (no need to name itself in an embed token).
-- **Conditional views**: a view with a `filter` (e.g. `{"status":"open"}`) embeds only its
-  matching rows — embed several filtered views to compose a report.
-- **Hide when empty**: append `?` to a token (`{{view:open?}}`) to skip the embed entirely
-  when its view/table yields 0 rows.
-- **Archived data**: append `@<partition>` to embed a non-active partition, e.g.
-  `{{table:tasks@archive}}` or `{{view:report@archive?}}`. Partitioned embeds are **read-only**.
-  (Declaring `@archive` or `@both` is what makes the app fetch a legacy `__archive` collection for that
-  source; `preload_archive` remains an opt-out.)
-- **Both partitions behind a toggle**: append `@both` (`{{view:chore_mine@both}}`) to render **one**
-  embed with the active/archive tabs the top-level grid has, instead of stacking a live embed and an
-  `@archive` one under two headings. Each half keeps its usual deal: the active tab is fully
-  interactive (edit / add / archive), the archive tab is read-only. The tabs appear **only once the
-  archive actually has rows** — until then the embed renders exactly as an untagged one, so a fresh
-  database shows no empty "Past" tab. `?` still applies (`{{view:x@both?}}`) and counts **both**
-  partitions, since hiding the block would hide the toggle that reveals the archived half. Printing a
-  `@both` embed stacks both partitions (paper has no tabs). Requires an `archivable` source — a
-  `@both` token aimed at a table without an archive partition is a load-time schema error.
-- **Tab labels** come from `btn.show_active` / `btn.show_archived` (the same keys as the top-level
-  archive tabs). Override per view/table with `partitionLabels`, whose values are translation keys —
-  usually the headings the page used before the toggle:
-  ```json
-  { "name": "chore_mine", "sources": ["chore_log"], "partitionLabels": { "archive": "text.mine_past" } }
-  ```
-- Translatable text: `{{t:<key>}}` resolves via the translations store and is collected
-  into the Languages tab as a translation key.
-- Markdown supports headings, bold/italic, lists, links, paragraphs.
-- **Bodies are stored on the server** in a `_pages` collection (one row per view,
-  `{id, markdown}`) — NOT in `schema.json`. Edit in-app via the Edit toggle in the corner →
-  textarea → Save (persists via `putRow`). The view's schema `markdown` acts only as a
-  seed/fallback until first saved.
+
+| Token | Renders |
+|---|---|
+| `{{view:x}}`, `{{table:x}}` | That view or table, live and editable (with the usual permissions). |
+| `{{self}}` | This view's own grid, when the page also has `sources`. |
+| `{{view:x?}}` | Nothing at all when it has no rows. |
+| `{{table:x@archive}}` | The archived rows, read-only. |
+| `{{view:x@both}}` | Active and archived behind a tab toggle (shown once there are archived rows). `partitionLabels` renames the tabs. |
+| `{{t:key}}` | A translated text block (`text.*`), edited in the Languages tab. |
+
+- Markdown covers headings, bold, italic, lists, links and paragraphs.
+- The body is stored in the `_pages` store and edited in the app (the corner Edit toggle). The schema's
+  `markdown` is only the starting text.
 
 ### Restricting a page to some users (`access`)
-
-By default a doc-view is visible to **every registered user** (its embedded tables' rows stay
-gated by their own access, so only the prose is shared). To restrict a page, add an `access` array
-of table names — the page is then visible only to users **granted at least one** of those tables
-(admins and `tables: "all"` users always see it):
 
 ```json
 { "name": "staff_handbook", "markdown": "…", "access": ["hr", "payroll"] }
 ```
 
-- Reuses your existing per-table grants — no new permission type or admin UI. Tag a page with a
-  table only its intended audience can access.
-- **`access: ["all"]`** restricts the page to **full-access users only** (`tables: "all"` + admins).
-  `"all"` is a sentinel, not a table name: no partial-grant user's table list ever contains it, so
-  every enforcement point (`canAccessPage`, dev-server `filterPages`, firestore.rules `pageAllowed`)
-  denies them, while the `tables == "all"` check still admits full-access users. Use it for a section
-  only people who can see everything should read.
-- **Enforced server-side on Firebase**: `saveSchema` mirrors the page→tables map to
-  `_meta/pageAccess`, and the `_pages__active` read rule denies the stored body to users without a
-  listed grant. Supabase enforces it in RLS and the dev server mirrors it from the schema, so every
-  backend gates this on the server; the client-side hiding is a UI hint on top, never the gate.
-- **A READ boundary, not a write one.** `access` decides who may *see* the page. It does not decide who
-  may *change* it: writing a page body is `role() == 'editor'` with no table qualifier, in all three
-  layers alike (`firestore.rules` `_pages__active`, `supabase-schema.sql`, and the dev server running
-  the same policies). So any editor can edit any page, restricted or not. That is deliberate — editors
-  are trusted with content, and the alternative is a second permission model just for pages — but it
-  means `access` is audience-scoping, **not confidentiality against your own editors**.
-- **Protects the stored (edited) body, not the page's existence.** The page name/title and the
-  schema-defined *seed* markdown live in the schema every registered user reads — so a restricted
-  user can learn the page exists and see its seed, just never its edited body. **Don't put secrets
-  in a restricted page's schema `markdown` seed** — put them in the edited (server-stored) body.
-- **Embedding a restricted page inside another page** with `{{view:otherPage}}` respects its
-  `access`: the embed renders the **access-gated server body** (loaded per-page, server-filtered) and
-  is hidden entirely for users who fail `canAccessPage`. This lets one page combine a public section
-  and a restricted one — e.g. a welcome for everyone plus `{{view:sisainen}}` below it that only
-  full-access users see. The restricted page keeps its own `access` and typically drops its nav entry
-  (it shows inline). As always, keep the real content in the embedded page's *body*, not its seed.
+- Readable only by users granted one of these tables (admins and full-access users always).
+  `["all"]` means full-access users only.
+- Enforced by every backend's access policy, embedded or not.
+- It restricts **reading**: any editor may edit any page.
+- It protects the stored body, not the schema's starting text, which every member can read. Keep secrets
+  out of the schema's `markdown`.
 
 ## rotationView (third view kind)
-A view with a `rotation` field renders a rotating roster across a **range of calendar periods**
-at once (e.g. "next 12 weeks of cleanup duty," or a fixed printable schedule). It has **no
-underlying stored rows** — every output row is *generated* by repeated calendar-mode resolver calls
-— so it is neither a data view (`sources`/`columns`) nor a document (`markdown`). It's a distinct,
-read-only third kind. It has **two forms**: the simple **`columns`** form (each area column fixed to
-its own rotation table, below) and the **rotating `areas`+`lists`** form (the list→area assignment
-rotates over time — see "Rotating assignment").
+
+A view with `rotation` generates a table of periods (no stored rows):
 
 ```json
-{
-  "name": "cleanup_schedule",
-  "rotation": {
+{ "name": "cleanup_schedule", "layout": "table", "rotation": {
     "columns": [
       { "name": "zone_a", "rotationTable": "zone_a_rotation", "advanceBy": "calendar", "interval": "weekly" },
-      { "name": "zone_b", "rotationTable": "zone_b_rotation", "advanceBy": "calendar", "interval": "weekly" }
-    ],
-    "range": { "from": "today", "periods": 12 }
-  },
-  "layout": "table"
-}
+      { "name": "zone_b", "rotationTable": "zone_b_rotation", "advanceBy": "calendar", "interval": "weekly" } ],
+    "range": { "from": "today", "periods": 12 } } }
 ```
 
-| Field | Description |
-|-------|-------------|
-| `rotationView.columns` | One entry per rotation, each a **calendar-mode** spec (`name`, `rotationTable`, `advanceBy: "calendar"`, `interval`). The anchor is the **per-view** `rotationAnchors[<viewName>]` (folder config, edited inline on the view); a literal `anchorDate` on a column overrides it. Resolved independently per generated row. |
-| `valueCol` | Which roster column supplies a cell's value. Defaults to **`people`** (roster tables were born holding people). Set it when a roster holds something else — tasks, a location, a shift. Allowed per column here, or once on the `rotation` in the `slots`/`rosters` form. Also accepted on a rotation **computed column**. |
-| `range.from` | `"today"` for a rolling window (recomputed each open) **or** a literal `YYYY-MM-DD` for a fixed window (printing/sharing). |
-| `range.periods` | A **count of intervals** to generate rows for (not an end date) — matches how calendar resolution counts elapsed intervals. |
-| `layout` | `"table"` (minimum supported). |
-
-- Generates `range.periods` rows starting at `range.from`; each row carries the period date plus one
-  resolved column per rotation. The **date axis follows the first column's `interval`**.
-- **Calendar-mode only** — validation rejects `advanceBy: "occurrence"` here. Occurrence-mode
-  rotations render inside an ordinary data view (as a rotation computed column) where each row already
-  has its own date/context, so they don't need this view kind.
-- **Shared anchor** — all columns in a view use that **view's** anchor, so they align at period 0 while
-  keeping independent lengths/contents (different-length lists drift relative to each other — expected).
-- **Read-only & recomputed**: a `rotation` is a pure function of *(rotation-table contents, range)*
-  at render time. There is no snapshot — editing a slot table changes what every past *and* future
-  period resolves to on the next render. This is intended, not a gap.
-- **Who may reshape it**: the generated rows are never editable, but the view's toolbar (start date,
-  window, `rotateEvery`) rewrites the **shared** folder config. That toolbar is gated on **write access
-  to the rosters** — a member holding an `'r'` grant on them sees the schedule and cannot re-aim it.
-  Persisting to the database stays admin-only on top of that.
-- **Dependency preload**: each `rotationTable` is fetched into the data cache before generation.
-- **Nav**: reference it by `name` like any view; it gets a default `mdi-calendar-clock` icon.
-- **Validation** (load-time): each column's `rotationTable` must exist, `advanceBy` may only be
-  `calendar`, and the `interval` must be **valid**. The anchor is runtime data (global config or a
-  literal `anchorDate`), so it is not statically validated.
+- `range.from`: `"today"` (rolling) or a date (fixed, for printing); `range.periods`: how many intervals.
+- Calendar mode only. The rows follow the first column's interval; all columns share the view's anchor.
+- Read-only and recomputed: editing a roster changes past and future periods alike.
+- The toolbar (start date, window) is for users who can write the rosters.
 
 ### Rotating assignment (`slots` + `rosters` + `rotateEvery`)
-Instead of fixing each slot to one roster, you can rotate the **roster→slot assignment** over time — the
-generalization of a 2-roster "swap." Use ordered `slots` (output columns) and ordered `rosters` (rotation
-tables), with one shared `interval`/`advanceBy` and a `rotateEvery`:
+
+Rotates which roster serves which slot:
 
 ```json
-{
-  "name": "duty_rotation",
-  "rotation": {
-    "slots": ["zone_a", "zone_b"],
-    "rosters": ["team_a", "team_b"],
-    "advanceBy": "calendar",
-    "interval": "weekly",
-    "rotateEvery": 1,
-    "range": { "from": "today", "periods": 12 }
-  },
-  "layout": "table"
-}
+"rotation": { "slots": ["zone_a", "zone_b"], "rosters": ["team_a", "team_b"],
+              "interval": "weekly", "rotateEvery": 1, "range": { "from": "today", "periods": 12 } }
 ```
 
-> Naming: a **slot** is an output assignment column (a zone, post, shift, etc.); a
-> **roster** is an ordered pool/table whose members take turns. (These replace the older `areas`/`lists`
-> keys — there is no back-compat alias, schemas must use `slots`/`rosters`.)
+- Each roster advances one member per period on its own length; `rotateEvery` shifts rosters across
+  slots: `n` every n periods, `"cycle"` once per full pass of the first roster. A list sums them
+  (`[1, "cycle"]`); `0` or absent fixes each slot to its roster.
+- Each period is a permutation, so no slot is doubled or empty. Fewer rosters than slots is an error.
+- The anchor fixes the pairing for a date; moving the display window never reshuffles it.
+- With two slots swapping every period (`rotateEvery: 1`), a roster of even length keeps each member on
+  one slot. `"cycle"` alternates them whatever the length.
+- **A person × task matrix**: name the slots after people and give each a roster of their task sets
+  (`valueCol: "tasks"`); one row means fixed tasks, N rows cycle.
 
-**Two independent clocks** drive it:
-1. **Per-roster member rotation** — each roster advances one slot per period on its **own length** (the
-   rosters stay fully independent, can be different lengths, and are maintained separately — R3).
-2. **Roster→slot assignment rotation** — driven by `rotateEvery`, which is a **list of swap sources**
-   summed into one shift. At period `p`: `shift s = (Σ over sources) mod N` (N = number of rosters), and
-   `slot[k] ← roster[(k + s) mod N]` resolved at that roster's member index `p mod len`. Each source is:
-   - a **positive integer `n`** → `floor(p / n) mod N` (rotate one step every `n` periods), or
-   - **`"cycle"`** → `floor((phase + p) / L) mod N`, where `L` = the live length of `rosters[0]` and
-     `phase` anchors the boundary to the global anchor — rotates once per **full roster cycle**, so
-     even-length rosters alternate slots every duty turn (see parity below).
-   A **scalar is shorthand** for a 1-element list (`"rotateEvery": 1` ≡ `[1]`); `0`/omitted = no swap.
-   Sources are summed, so **order doesn't matter** and the result is always a permutation (no double-book).
+### Per-person views (`mineOnly`)
 
-- **Swap is the `N=2`, `rotateEvery:1` case** — slots served `[a,b]`, then `[b,a]`, then `[a,b]`…
-  (exactly the alternating doormen/cleanup pattern).
-- **Each period is a permutation** of rosters across slots (with `N = slots.length`), so **no slot is
-  double-staffed or left empty**. Over `N` assignment-cycles every roster visits every slot.
-- **`rotateEvery: 0` / omitted** = no assignment rotation (each slot fixed to `rosters[k]`) — equivalent
-  to the `columns` form. Useful list values: `[1]` per-period swap (≡ scalar `1`), `["cycle"]` per-cycle
-  swap, `[1, "cycle"]` both. Extra elements just superimpose more swap frequencies (valid but rarely useful).
-- **`skipEmpty`** (`rosterRef` only, default off) leaves a group that carries **nothing** — no rows, or
-  every row blank in `valueCol` — out of the swap ring, and pins its slot to that empty group forever.
-  For a roster that doubles as a roll-call, where a member with no duties is a row that exists to say
-  they are a member; without it their empty group circulates and hands somebody a free period each
-  cycle. Off by default because in the `slots` + `rosters` form an empty roster is a *declared*
-  shortage ("three areas, two crews") that the ring shares out on purpose — which is why the flag is
-  rejected on that form and on the `columns` form, which has no ring at all.
-- **Anchor / interval**: the per-view `rotationAnchors[<viewName>]` (or a literal `anchorDate` on the
-  `rotation`) anchors period 0; `interval` accepts the same values as elsewhere.
-- **Display window is assignment-invariant**: `range.from` selects only *which* periods are shown — it
-  never changes who is assigned. Both swap sources index off the absolute period count from the
-  **anchor** (`abs = wholeIntervalsBetween(anchor, from) + i`), so scrolling the window (or a rolling
-  `"today"` start, or a per-view DB range override) yields the same roster→slot pairing for any given
-  date. (Earlier a numeric `rotateEvery` counted from `from`, which reshuffled assignments when the
-  window moved — fixed 2026-07.)
-- **N rosters vs M slots**: `N = M` → clean permutation (recommended). `N > M` → round-robin where
-  `N − M` rosters "rest" each period and everyone eventually serves every slot. `N < M` → **rejected at
-  load** (some slots would be unstaffed/double-booked).
-- **Validation**: every `rosters` table must exist; `advanceBy` (if set) must be `calendar`; `interval`
-  must be valid; `rosters.length` must be `>= slots.length`; every `rotateEvery` element must be a
-  non-negative integer or `"cycle"` (checked on **both** roster shapes — it belongs to the rotation, not
-  to one form); `skipEmpty` must be boolean and needs `rosterRef`; an explicit `valueCol` must be a real
-  column of every roster table.
-- **Embedding**: a data view can embed a rotationView via a `{ "view": "<rotationViewName>" }` column —
-  it renders the generated period table inline (date + slot columns), e.g. a cleaning schedule shown
-  inside a program view.
-
-#### The transpose: a person × task matrix (`slots` as people, `valueCol`)
-A slot is just an output column, so nothing requires it to be a place. Name the **slots after the
-people** and point each at a roster holding **that person's task sets**, and the same engine produces
-the transpose of a duty rota: rows are periods, columns are people, and each cell is that person's
-list of tasks for the period. Cells are already lists (a roster's value column is normally a
-`multiselect`), so "several tasks each" needs nothing extra.
-
-```json
-{
-  "name": "duty_matrix",
-  "mineOnly": { "list": "members" },
-  "rotation": {
-    "slots":   ["ann", "bob", "cara"],
-    "rosters": ["tasks_ann", "tasks_bob", "tasks_cara"],
-    "valueCol": "tasks",
-    "interval": "weekly",
-    "range": { "from": "today", "periods": 8 }
-  },
-  "layout": "table"
-}
-```
-
-Each roster is an ordinary `reorderable` table of `position` + a `tasks` multiselect, one row per
-rotation step. The **row count is the cadence**:
-- **1 row** → that person's tasks never change (the member clock mods by 1).
-- **N rows** → their tasks cycle through the N sets, one step per period.
-- Rosters keep independent lengths, so one person can be on a fixed chore while another alternates.
-- Adding `rotateEvery` on top hands whole task *sets* from one person to the next each period — the
-  cross-person rotation. Name the rosters for the **sets** rather than the people when you do, since
-  `tasks_ann` no longer stays Ann's.
-
-Note that `slots` are schema literals: each person is a `slots` entry plus a `field.<slot>` translation
-key, so adding a member is a schema edit, not a data edit. Slot columns that are empty in every period
-can be dropped with the view-level `hideEmpty`.
-
-#### Per-person views (`mineOnly`)
-`mineOnly` on a rotationView narrows its slot columns to the **one that is the viewer**, so a single
-view serves both audiences: an **admin / unrestricted** viewer is exempt and sees the whole matrix,
-while a member sees only their own column.
-- `mineOnly: { "list": "<listName>" }` resolves identity the same way the `@me` filter token does — on a
-  `userlink` list, the curated value linked to their account; otherwise their profile display name.
-  `mineOnly: true` skips the list and always uses the profile display name. The list form is an
-  OBJECT deliberately: `obscureNames` sits in the same config and takes an array of COLUMNS, so a bare
-  string or array here would read as columns to anyone who learned that one. Load-time validation says
-  so rather than guessing.
-- Slot names are matched against that identity **case-insensitively**, so a `bob` slot matches a
-  member-list value of `"Bob"`.
-- **Fails closed**: a viewer whose identity can't be resolved (not linked to a list value yet) sees no
-  slot columns rather than all of them.
-- Applies wherever the rotation renders — the view itself, a `{{view:x}}` embed, the print output, and
-  the generated duty events a calendar picks up via `rotationSources`.
-- **A viewer who holds no slot sees no matrix.** The narrowing can leave nothing — `mineOnly` on
-  somebody who is a member of the household but not of the roster (a parent who does chores but is not
-  in the rotation), `hideEmpty` on a roster with nothing in it — and the view then has **no columns at
-  all**, not a lone date column. Mark the embed `{{view:<rota>?}}` and the section disappears for that
-  viewer while everyone else still sees theirs; a rotation's `?` counts its **slots**, since its periods
-  are generated rather than stored. The heading above it still renders, as it does for every optional
-  embed.
-- **Display-only**, exactly like `@me` and `obscureNames`: the rosters are still fetched and the
-  periods still generated client-side. Real secrecy is a per-roster-table grant (each person's roster
-  as its own table, granted only to them) — `mineOnly` is about a legible view, not a security boundary.
-
-#### Per-person slot coverage — roster length (L) vs rotation cadence (R)
-The two clocks can **alias**, which decides whether a given person eventually works *every* slot or
-stays **locked** to one. For a person at position `p` in a roster of length **`L`**, with swap cadence
-`rotateEvery` = **`R`** and `N` rosters/slots:
-- They return to duty every `L` periods (member clock); the slot they get is set by the assignment
-  shift `s = floor(period / R) mod N` (swap clock, full cycle = `N·R` periods).
-- They cover **all slots** iff their duty subsequence isn't stuck on one `s` value — i.e. iff `L` and
-  the swap cycle don't share a common factor that pins them. They stay **locked to one slot** iff `L`
-  divides evenly into the swap rhythm.
-
-For the common two-team case (**`N=2`, `R=1`**, swap period = 2):
-- **Odd `L`** → period parity flips on each return → **alternates slots every turn** (everyone serves
-  both slots; back to the start slot every 2nd turn). ✅
-- **Even `L`** → period parity is constant on each return → **locked**: even positions always slot 0,
-  odd positions always slot 1. ⚠️
-
-This app can use `rotateEvery: [1]` and **rely on odd-length lists**, OR — the clean fix for **any**
-length — add the **`"cycle"`** source. `"cycle"` swaps once per full roster pass (cadence = live `L`),
-so every person flips slot on each successive duty turn regardless of parity, with no manual `R = L`
-bookkeeping when a roster grows or shrinks:
-- **`rotateEvery: ["cycle"]`** — per-cycle swap only; even-length rosters alternate slots every turn. ✅
-- **`rotateEvery: [1, "cycle"]`** — per-period spread **and** per-cycle alternation, summed.
-
-For equal-length lists the older `R = L` trick still works; `"cycle"` generalizes it to the live length.
-With **unequal, independently-maintained** lengths only "eventually covers both" is achievable (per-turn
-balance drifts), so equal lengths remains the requirement for a strict per-turn guarantee.
+`mineOnly: { "list": "members" }` on a rotation view shows a member only the slot that is them (matched
+case-insensitively to their identity in that list; `true` uses the profile name). Admins see everything;
+an unresolved identity sees no slots. Embed it as `{{view:rota?}}` so the section disappears for someone
+with no slot. Display only.
 
 ### `rosterRef` — one 2-D lookup instead of a table per slot
 
-`slots` + `rosters` names the slots in the schema and gives each its own table, so the schema encodes
-the roster **count**: a fifth person means a fifth table, a fifth `slots` entry, a fifth `rosters` entry,
-a nav item and its translations — five edits, none of which can be made from inside the app.
-
-`rosterRef` puts the whole roster in **one two-column lookup** instead:
-
 ```json
-"duty_matrix": {
-  "kind": "rotation",
-  "rotation": {
-    "rosterRef": "ref_duties",   // a lookup whose two visible columns are the two dimensions
-    "rosterBy": "person",        // parent: its distinct values ARE the slots
-    "valueCol": "tasks",         // child: what lands in the cell
-    "interval": "weekly"
-  }
-}
+"rotation": { "rosterRef": "ref_duties", "rosterBy": "person", "valueCol": "tasks", "interval": "weekly" }
 ```
 
-```json
-"ref_duties": {
-  "isLookup": true, "reorderable": true, "defaultSort": "position",
-  "columns": [
-    { "name": "position", "type": "number", "hidden": true },
-    { "name": "person", "type": "select", "list": "members", "sorted": true },
-    { "name": "tasks", "type": "select", "list": "ref_chores", "sorted": true, "multiple": true }
-  ]
-}
-```
+The whole roster is one lookup: the distinct `rosterBy` values are the slots, in `position` order, and
+each slot's rows are its sequence. Adding a person is a row typed in the app, not a schema edit.
 
-Two visible columns make it a **hierarchical ref**, which the Lookup editor already renders as parents
-with children and reorders within a group (a roster that grows a third column should say so with
-`hierarchy` — see above — and `rosterBy` must then name the same parent). So **adding a person is a row**, typed in the app — no table,
-no schema edit, no deploy, no untranslated key. Removing one is deleting their rows.
-
-- **Slot order is `position` order**, first appearance wins. It has to be stable and data-driven,
-  because the rotation assigns slot *k* ← group *(k+s) mod N*: a reshuffle would silently reassign
-  everyone's duties. That is the same order the Lookup editor shows, so what you drag is what you get.
-- **A row with a blank `rosterBy` belongs to no slot** — it is parked, not silently added to the first.
-- **Slot headers** render through the lookup's own `list.<table>.<value>` namespace (the 2-D ref-lane
-  keys), falling back to the raw value. **Cell values** resolve through `valueCol`'s own list — so a
-  translated duty vocabulary reaches the matrix, which it could not before: the slot column is not a
-  schema column, so a cell had no list to look itself up in. `obscureNames` still keys on the slot,
-  because it asks "does this column hold names?" — a question about the column, not the value's origin. Personal names usually want no translation at all, which is why
-  the shipped chores example leaves `ref_duties` out of `translatableLists`, exactly as it leaves
-  `members` out.
-- `rotateEvery`, `cycle`, `interval`, `range`, `mineOnly` and `anchorDate` behave identically — this is a
-  resolver swap, not a second rotation engine. `dev/test/rotation.test.js` asserts the two shapes produce
-  the same matrix from the same duties.
-- **A member who is not in the rotation**: give them a row with a blank `valueCol` and set
-  `"skipEmpty": true` on the rotation plus `"hideEmpty": true` on the view. The row makes them a slot
-  (and a value of the lookup, so they stay pickable everywhere the lookup backs a `list:`), `skipEmpty`
-  keeps their empty group out of the swap ring so nobody loses a turn to it, and `hideEmpty` drops the
-  always-empty column from the header. The two flags are deliberately separate: `hideEmpty` is evaluated
-  against the generated rows, so folding them together would make it decide its own input.
-- **`rosterRef` and `slots`+`rosters` are mutually exclusive**; declaring both is a load-time error. The
-  older shape is unchanged and still supported.
-
-**One thing that genuinely changes.** With a table per person, "Ann may edit only her own list" was a
-table grant. Collapsed into one lookup it is a lookup the Lookup editor gates as a whole, so per-person
-editing has to come from the row instead — an `owner` column with `ownerWritable`, the machinery `rsvp`
-and the chores log already use. Worth deciding before migrating a deployment that relied on those grants.
-
-### Worked example (occurrence + calendar end-to-end)
-An event needs **security** (one team per session — occurrence-driven) and a two-zone **cleanup**
-rota (every week regardless of sessions — calendar-driven). Three rotation tables, one data view with
-an occurrence-mode computed column, and one `rotation` for the calendar rota:
-
-```json
-{
-  "tables": {
-    "sessions": {
-      "columns": [
-        { "name": "date", "type": "date" },
-        { "name": "topic", "type": "text" }
-      ],
-      "archivable": true
-    },
-
-    "security_rotation": {
-      "columns": [
-        { "name": "position", "type": "number" },
-        { "name": "people", "type": "multiselect", "list": "staff", "allowNew": true }
-      ],
-      "defaultSort": "position"
-    },
-    "zone_a_rotation": {
-      "columns": [
-        { "name": "position", "type": "number" },
-        { "name": "people", "type": "multiselect", "list": "staff", "allowNew": true }
-      ],
-      "defaultSort": "position"
-    },
-    "zone_b_rotation": {
-      "columns": [
-        { "name": "position", "type": "number" },
-        { "name": "people", "type": "multiselect", "list": "staff", "allowNew": true }
-      ],
-      "defaultSort": "position"
-    }
-  },
-
-  "views": [
-    {
-      "name": "session_schedule",
-      "sources": ["sessions"],
-      "layout": "table",
-      "defaultSort": "date",
-      "columns": [
-        "date",
-        "topic",
-        { "name": "security", "computed": {
-            "rotationTable": "security_rotation",
-            "advanceBy": "occurrence",
-            "occurrenceSource": "sessions",
-            "occurrenceSort": "date" } }
-      ]
-    },
-    {
-      "name": "cleanup_schedule",
-      "rotation": {
-        "columns": [
-          { "name": "zone_a", "rotationTable": "zone_a_rotation", "advanceBy": "calendar", "interval": "weekly" },
-          { "name": "zone_b", "rotationTable": "zone_b_rotation", "advanceBy": "calendar", "interval": "weekly" }
-        ],
-        "range": { "from": "today", "periods": 12 }
-      },
-      "layout": "table"
-    }
-  ],
-
-  "nav": {
-    "items": [
-      { "view": "session_schedule", "icon": "mdi-shield-account" },
-      { "view": "cleanup_schedule" },
-      { "group": "Rotations", "icon": "mdi-rotate-3d-variant", "items": [
-        { "table": "security_rotation" },
-        { "table": "zone_a_rotation" },
-        { "table": "zone_b_rotation" }
-      ] }
-    ]
-  }
-}
-```
-
-**How it resolves.** Say the slot tables are authored as:
-
-| table | position 1 | position 2 | position 3 |
-|-------|-----------|-----------|-----------|
-| `security_rotation` | `["Alex"]` | `["Sam","Jordan"]` | `["Riley"]` |
-| `zone_a_rotation` | `["Alex"]` | `["Sam"]` | — |
-| `zone_b_rotation` | `["Riley"]` | `["Jordan"]` | `["Casey"]` |
-
-(The view's anchor `rotationAnchors["cleanup_schedule"]` — set inline on the view, e.g. `2026-01-01` — fixes period 0 for both zone
-columns; `security_rotation` is occurrence-mode and ignores the anchor entirely.)
-
-- **`session_schedule`** (occurrence): sessions sorted by `date`; the 1st session → `security` =
-  `"Alex"`, 2nd → `"Sam, Jordan"`, 3rd → `"Riley"`, **4th loops** → `"Alex"`. Deleting the 2nd
-  session shifts every later session back one slot (no gap).
-- **`cleanup_schedule`** (calendar `rotation`): 12 weekly rows from today. The global
-  `rotationAnchor` fixes period 0 for both columns — but they keep independent lengths, so `zone_a`
-  (2 slots) loops every 2 weeks while `zone_b` (3 slots) loops every 3 weeks, drifting against each
-  other (expected).
-- The slot tables stay directly editable in the **Rotations** nav group; both schedules recompute on
-  next render.
+- Slot headers translate through `list.<lookup>.<value>`; cells through `valueCol`'s list.
+- `rotateEvery`, `cycle`, `range`, `mineOnly` and `anchorDate` work the same. Not combinable with
+  `slots` + `rosters`.
+- A member outside the rotation: a row with a blank `valueCol`, plus `skipEmpty: true` (their empty
+  group never takes a turn) and the view's `hideEmpty`.
+- Per-person editing comes from an `owner` column with `ownerWritable`, not from table grants.
 
 ## calendar (fourth view kind)
 
-A view with a `calendar` field renders its source rows on a compact **month / week / list**
-calendar, bucketed by a date column — like a lightweight Google Calendar. It has **no stored rows
-of its own**: it's a *presentation* of existing table rows (and generated rotation duties).
-Distinct from data views, documents, and rotationViews.
+A view with `calendar` shows rows of one or more tables (and generated rotation duties) on a year, month,
+week or list calendar, by a date column. It stores nothing of its own.
 
-### Layout
-- **Month**: compact grid (day number + a single **neutral-accent count badge** on days with
-  events — NOT one chip per event). Clicking a day opens that day's events in a **selected-day panel
-  below the grid** (a one-day agenda slice; it does NOT switch to List mode).
-- **Week**: a 7-day strip (day number + count badge); click fills the same panel.
-- **List / agenda**: a flat multi-day list (date subheading + event rows), plus an **Undated**
-  section for rows with an empty date. A phone shows the mode picked, Month included.
-- Event dots in the panel/list are coloured by **event type** (the `label`, or the source table's
-  translated `tab.<table>` name). The month/week count badge is always the neutral accent.
+- **Month** and **week** show a count per day; a click lists that day's events below the grid. **Year**
+  is twelve small months. **List** is an agenda with an **Undated** section for rows with no date.
+- An event's dot is coloured by its type: the source's `label`, or the table's `tab.<table>` name.
 
-### Single source
 ```json
-{ "name": "chore_calendar",
-  "calendar": {
-    "source": "chore_log",        // REQUIRED (or `sources`) — one table
-    "dateColumn": "done_on",       // REQUIRED — a date column of `source` (YYYY-MM-DD)
-    "titleColumns": ["chore", "person"], // OPTIONAL — joined with " — " for the event label
-    "defaultView": "month",        // OPTIONAL — "year" | "month" | "week" | "list" (default "month"); "year" is twelve small months, a day with events shaded
-    "weekStart": 1                 // OPTIONAL — 0=Sun, 1=Mon (default 1)
-  }
-}
+"calendar": { "source": "chore_log", "dateColumn": "done_on", "titleColumns": ["chore", "person"],
+              "defaultView": "month", "weekStart": 1 }
 ```
 
-### Multi source ("all events")
-Use `sources` (instead of `source`) to merge several tables into one calendar. Each source declares
-its own date + title; the **same table may appear twice** with different `dateColumn`s (e.g. an
-appointment date and an expiry date):
-```json
-"calendar": {
-  "sources": [
-    { "table": "meetings",     "dateColumn": "date",   "titleColumns": ["topic"],  "label": "Meeting" },
-    { "table": "appointments", "dateColumn": "starts", "titleColumns": ["person"], "label": "Appointment" },
-    { "table": "appointments", "dateColumn": "ends",   "titleColumns": ["person"], "label": "Expiry" }
-  ],
-  "defaultView": "month"
-}
-```
-Per-source fields: `table` (req), `dateColumn` (req), `titleColumns` (opt), `filter` (opt, data-view
-grammar), `label` (opt — the type tag + colour key; defaults to the table's translated `tab.<table>`),
-`endColumn` (opt — a row that lasts, such as a pause week, shows on every day from `dateColumn` to it,
-with its range; capped at 92 days; may be a computed column), `durationColumn` (opt — minutes a timed
-event lasts, a column or a reference path like `class.class_type.duration_min`; it sets the end time in
-an `.ics`), `feed: false` (opt — shown on screen, left out of a published feed; such a source needs no
-`@me` on a per-person feed).
+Several tables, or one table twice with different dates:
 
-On the calendar itself, `"export": false` removes the download button — a public timetable has nothing
-of the reader's to take away.
+```json
+"calendar": { "sources": [
+  { "table": "meetings",     "dateColumn": "date",   "titleColumns": ["topic"],  "label": "Meeting" },
+  { "table": "appointments", "dateColumn": "starts", "titleColumns": ["person"], "label": "Appointment" },
+  { "table": "appointments", "dateColumn": "ends",   "titleColumns": ["person"], "label": "Expiry" } ] }
+```
+
+| Per-source field | Meaning |
+|---|---|
+| `table`, `dateColumn` | Required. |
+| `titleColumns` | Joined with " — " for the title. |
+| `filter` | A row filter. |
+| `label` | The type tag and colour key. |
+| `endColumn` | The row lasts until this date (a pause week); shown on every day, up to 92. May be computed. |
+| `durationColumn` | Minutes a timed event lasts (a column or a reference path); sets the end in an `.ics`. |
+| `feed: false` | Shown on screen, left out of a published feed. |
+| `respond` | An rsvp view over this table: each event carries its booking control and places left, under the same rules as the booking list. |
+
+`"export": false` on the calendar removes the download button.
+
+A member's own bookings on a calendar need no feature: give the responses table a computed column that
+looks up its event's date and use it as the `dateColumn`.
 
 ### Filters the reader picks (`filters`)
 
-`"filters": ["gym"]` on a calendar puts a multi-select per column above it; the reader picks values and the
-events narrow to those. The options are the column's own (a ref's catalogue, a list's values). A filter only
-narrows events whose row HAS the column, so a calendar of classes and workouts filtered by gym keeps the
-workouts. The picks are kept in the reader's browser, per calendar — a convenience, not a setting.
-`validateSchema` names a filter column no source has, or one with no options.
+`"filters": ["gym"]` puts a multi-select per column above the calendar; the options are the column's own.
+A filter narrows only events whose row has the column. Picks are remembered per reader and calendar.
 
-On a **page** with `filters` that embeds a stats view with `tiles`, **Add to comparison** saves the current
-picks as a row of a table under the stats: one line per row, one column per tile, sortable. An admin's or
-editor's rows belong to the page (its stored `_pages` doc, under the page's own read access) and everyone
-sees them; anyone else's stay in their browser, listed after the page's.
-
-### Booking from the calendar (`respond`)
-
-A source may name an rsvp view over its own table — `{ "table": "classes", "dateColumn": "starts_at", "respond":
-"class_booking" }` — and each event then carries that view's booking control and places left, under the same
-rules as the booking list (full, `closeBefore`, frozen once attendance is marked). A past event, which the
-rsvp view no longer lists, gets none. The rules are the root's (`rsvpLocked` & co.), shared by both screens;
-an organizer of walk-in events gets no booking control.
-
-The other half — a member's bookings on their own calendar — needs no calendar feature: a booking has no
-date of its own, so give the responses table a computed column that reads its event's, and use it as the
-`dateColumn` (`{ "name": "class_start", "type": "datetime", "computed": { "lookup": { "table": "classes",
-"match": "class", "on": "id", "field": "starts_at" } } }`). Calendar sources read a table's computed columns.
+On a page with `filters` embedding a stats view with `tiles`, **Add to comparison** saves the picks as a
+row of a table under the stats. An editor's rows are stored with the page and seen by everyone; anyone
+else's stay in their browser.
 
 ### Adding on a day (`addTo`)
-Clicking a day and pressing **+** creates a row with that day prefilled in the source's `dateColumn`,
-then lands on a grid so it can be filled in. With one source that source is the target; with several,
-name it:
-```json
-"calendar": { "sources": [ … ], "addTo": "chore_log" }
-```
-Without `addTo` a multi-source calendar offers no **+**, rather than guessing which table the click
-meant. A name that isn't one of the sources is a load-time error. Offered to anyone who could add to
-that table by hand — including a member relying on **self-service**, who has no grant at all.
+
+**+** on a selected day creates a row with that date and opens it. With several sources, `"addTo":
+"<table>"` names the target; without it there is no **+**. Offered to anyone who can add to that table,
+including through self-service.
 
 ### Rotation duties (`rotationSources`)
-Overlay a **rotation view's** generated duties (e.g. `duty_rotation` turns) onto the calendar as
-**read-only** events. Rotation rows aren't stored — they're generated per date from the rosters +
-anchor — so the calendar generates them on demand for the visible window and drops any outside it.
+
 ```json
-"calendar": {
-  "sources": [ { "table": "meetings", "dateColumn": "date", "titleColumns": ["topic"], "label": "Meeting" } ],
-  "rotationSources": [ { "view": "duty_rotation", "label": "Duty" } ],
-  "defaultView": "month"
-}
+"rotationSources": [ { "view": "duty_rotation", "label": "Duty" } ]
 ```
-- `view` (req) — names an existing **rotation** view (`v.rotation`); each populated slot on a
-  generated period becomes one event titled `<slotLabel>: <people>` (e.g. `"Zone A: Alex, Sam"`).
-- `label` (opt) — the type tag + dot colour key (defaults to the rotation view's `tab.<view>` name).
-- **Single source of truth**: generation reuses the rotation view's own **anchor**, **range start**,
-  and **rotateEvery**, so the calendar shows the *same* assignments as the rotation view. Duties land
-  on their true duty date (e.g. weekly rotations on the anchor's weekday), not the grid boundary.
-- **Read-only**: rotation events carry `table: null` / `readOnly: true` (no stored row to open) and
-  render with a `(read-only)` tag in the panel/list.
-- **Per-roster access (fail-closed)**: a rotation source is included only if the signed-in user can
-  read **≥1** of its rosters; otherwise it contributes no events.
-- Duties only exist from the rotation's start date onward (grid cells before it stay empty).
 
-### Access & i18n
-- **Fail-closed per source**: a source whose table the signed-in user cannot read contributes no
-  events. A restricted user sees only the event types they're permitted.
-- **Nav visibility**: the calendar itself appears for a user who can reach **≥1** of its sources —
-  including via **self-service** (an `owner`-column table they hold no grant on), which is what keeps
-  an `addTo` calendar in a grantless member's menu. Reachable by none of them, it is hidden rather
-  than offered as a tab that could only render empty. The same ANY-of rule covers every view kind that
-  names its inputs outside `sources` (rotation rosters, `pivot.source`, `rsvp.events`/`responses`).
-- **Labels**: chrome uses `cal.*` translation keys (`cal.today`/`cal.month`/`cal.week`/`cal.list`/
-  `cal.undated`/`cal.no_events`/`cal.items`), and period navigation uses `period.*` — like every other
-  string these show the **key** until translated (no built-in English), so define them per language (the
-  demo bundle does). Event tags default to `tab.<table>`; titles use `field.*` + list-value translations.
-  **Weekday/month names** come from `Intl` using the active language's **`code`** as the BCP-47 locale
-  (e.g. selecting a language with code `"fi"` yields Finnish names automatically), overridable with an
-  explicit per-language `locale`; the browser locale is only a last resort for an unusable code.
+A rotation view's duties as read-only events (`Zone A: Alex, Sam`), generated with the view's own anchor
+and settings, so they match it. Included only if the user can read one of its rosters.
 
-### Embedding
-A calendar can be **embedded in a markdown/document page** via `{{view:calendarName}}` (renders as a
-compact calendar with its own state) — e.g. a "Home" dashboard page with prose + the month calendar.
-A view is still one kind at top level; the document *hosts* the calendar via the embed.
+### Access and labels
 
-### Notes / limits
-- Events are **single-day** (point events). Multi-day spans are not modelled yet.
-- Rows with an empty `dateColumn` go to the **Undated** list bucket (not lost).
-- Data-view `{view:cal}` inline embeds are deferred (use a markdown-page `{{view:cal}}` embed).
+- A source the user cannot read contributes nothing. The calendar is in the menu while the user can reach
+  any source (self-service included); the same any-of rule applies to every kind that names its inputs
+  outside `sources`.
+- Its texts are `cal.*` and `period.*` keys. Day and month names come from `Intl`, with the language's
+  `code` as the locale (or its `locale`).
+- Embed it in a page with `{{view:<calendar>}}`.
 
 ## pivot (fifth view kind)
 
-A view with a `pivot` field renders a **cross-tab grid**: rows = distinct values of one column,
-columns = distinct values of a second, each cell = an aggregate of a third. It's the two-dimensional
-counterpart to an aggregate view (attendance grids, duty rosters, chore heatmaps). Like calendar, it
-has **no stored rows of its own** — it's a live presentation of a source table (engine: `pivot.js`).
+A cross-tab: rows are the values of one column, columns the values of another, each cell an aggregate.
 
 ```json
-{ "name": "chore_heatmap",
-  "pivot": {
-    "source": "chore_log",   // REQUIRED — the table to cross-tabulate
-    "row": "person",          // REQUIRED — column whose distinct values become grid ROWS
-    "column": "chore",        // REQUIRED — column whose distinct values become grid COLUMNS
-    "cell": "minutes",        // OPTIONAL — column that fills each cell (omit for a pure count grid)
-    "aggregate": "count",     // OPTIONAL — how to combine rows in one cell (see below)
-    "totals": "count"         // OPTIONAL — marginal totals (per-row, per-column, grand). null = none
-  }
-}
+"pivot": { "source": "chore_log", "row": "person", "column": "chore",
+           "cell": "minutes", "aggregate": "sum", "totals": "sum" }
 ```
-- **`aggregate`**: `"count"` (default when no `cell`) · `"sum"` (numeric `cell`) · `"first"` (default
-  *with* a `cell` — first non-empty value) · `"list"` (distinct values joined with `, `).
-- **`totals`**: `"count"` (source rows) · `"sum"` (numeric `cell`) · `{ "eq": <value> }` (count of cells
-  equal to a value, e.g. `{ "eq": "coming" }`). Renders a totals row/column + grand total.
-- **`colOrder`** (string[], optional): explicit column order; keys not present in the data still render
-  as empty columns (e.g. a fixed roster). Otherwise columns/rows are sorted — override with
-  **`colSort`** / **`rowSort`** (`"asc"` default | `"desc"`).
-- **Array-valued cells** (from a `multiselect` row/column) are **expanded**: a value of `["a","b"]`
-  contributes to both the `a` and `b` buckets. Blank row/column keys are skipped.
+
+- `aggregate`: `count` (the default without `cell`), `sum`, `first` (the default with `cell`), `list`.
+- `totals`: `count`, `sum` or `{ "eq": "coming" }` (cells equal to a value): adds a totals row, column and
+  grand total.
+- `colOrder` fixes the columns, empty ones included; otherwise `colSort` / `rowSort` (`asc`, `desc`).
+- A multiple value counts in each of its buckets; blank keys are skipped.
 
 ## rsvp (sixth view kind)
 
-A view with an `rsvp` field renders a **self-service signup / attendance sheet**: each upcoming event
-gets an inline status toggle bound to the current user's **own** response row. Unlike the presentation
-views, rsvp is **read-write** — but a participant writes only their own `owner`-stamped row (enforced by
-`firestore.rules`; the `owner` column type is the primitive). Engine: `rsvp.js`.
+A sign-up sheet: each upcoming event has a status control bound to the user's own response row.
 
-The events live in one table; responses in another that has an **`owner` column** (auto-stamped), a
-**`ref` column pointing at the events table** (the response↔event link), and a status column:
 ```json
-{ "name": "my_rsvp",
-  "rsvp": {
-    "events": "practices",          // REQUIRED — the events table
-    "dateColumn": "date",            // REQUIRED — a date or datetime column: upcoming filter, today + sort
-    "titleColumns": ["title", "opponent"], // OPTIONAL — joined with " — " for the event title
-    "responses": "rsvps",           // REQUIRED — response table: needs an `owner` column + a `ref` to `events`
-    "statusColumn": "response",      // REQUIRED — response column holding the status value
-    "statuses": ["coming", "maybe", "out"], // OPTIONAL — inline options; omit to use the statusColumn's list
-    "statusList": "rsvp_status",     // OPTIONAL — label translation namespace override (see below)
-    "picker": "toggle",              // OPTIONAL — status control: "dropdown" (default) | "toggle" | "chips"
-    "showCounts": true,              // OPTIONAL — show a per-event count of each response
-    "rosterVisibility": "all",       // OPTIONAL — who sees the participant roster (see below)
-    "ahead": "3d",                    // OPTIONAL — show today and the next days only, with Show more (see below)
-    "closeBefore": "30min",           // OPTIONAL — how long before the start when booking from anywhere stops (see below)
-    "release": "10min",              // OPTIONAL — a no-show's place comes back before the start (see below)
-    "blockedBy": { … }               // OPTIONAL — days of the member's own periods (a pause) when booking is refused
-  }
-}
+"rsvp": {
+  "events": "practices", "dateColumn": "date", "titleColumns": ["title"],
+  "responses": "rsvps", "statusColumn": "response",
+  "picker": "toggle", "showCounts": true, "rosterVisibility": "all" }
 ```
-- **The response↔event link is a `ref` column (required, not configured):** the responses table must
-  have a `ref` column pointing at the `events` table, targeting its **`id`** — e.g. `rsvps.practice`:
-  `{ "type": "ref", "table": "practices", "valueCol": "id" }`. The view uses that column as the link and
-  its `valueCol` as the key each response matches (default `id`). **Link by `id`, not a data column like
-  `date`** — `id` is the only unique key, so two events on the same date stay separate (a `date` link would
-  merge their responses). `dateColumn` is only for the upcoming filter + sort, never the link. So there is
-  **no `linkColumn`/`eventKey`** — you get a validated, collision-free relationship plus a ref-picker when
-  editing responses. (Load-time validation errors if the responses table has no such ref.)
-- **`statuses`** vs a **real list** (recommended): the cleanest setup is to make `statusColumn` a
-  `select` with its own `list` (e.g. a `response` column `{ "type": "select", "list": "rsvp_status" }`)
-  and **omit `statuses`** — the options then come from that list, which is **editable in the Lookup tab**.
-  The demo does this. (An inline `statuses` array still works when you don't want a Lookup list.)
-- **Labels are translated** via `list.<statusList || statusColumn's-list || statusColumn>.<value>`
-  (falling back to the raw value). With a real list you get `list.rsvp_status.coming` etc. for free — no
-  `statusList` needed. Set **`statusList`** only when the response column's *name* would resolve to
-  another table's list under the per-column-name resolver (e.g. a column literally named `status`), to
-  point the labels at a distinct namespace.
-- **`picker`** — the status control's UI element: `"dropdown"` (`v-select`, **default** — same default as
-  the column-level `picker`) · `"toggle"` (segmented buttons, best for a few single-choice options) ·
-  `"chips"` (selectable chips). Deselecting the current choice removes the vote in every variant.
-- **`rosterVisibility`** (UI gate): `"all"` (everyone sees who responded) · `"admins"` (only organizers/
-  admins) · `"counts"` (counts only, no names). This is **only the display gate** — the real read control
-  is the Firestore rule.
-- **Roster visibility is denormalized per response table**: set `"privateRoster": true` on the
-  *responses* table to make each response readable only by its owner + organizers; otherwise the app
-  stamps `rosterPublic: true` on each row so everyone can read it. Rules are schema-blind, so this flag
-  must be carried on the rows — the `rosterVisibility` view option alone does not restrict reads.
-  What the rules enforce is the **flag**, not the table's policy; see
-  [What `privateRoster` actually guarantees](#what-privateroster-actually-guarantees) for the limit
-  that puts on it.
-- With owner-scoped reads a non-organizer receives only their own response from the backend, so the
-  rendered tally/roster reflects exactly what that user is permitted to see.
-- **Registering at the venue.** An organizer has a **QR code for this page** button (top-level only). The
-  QR carries `?view=<this view>`, so a member's phone camera opens the page in the app, signed in as
-  themselves, and they register as usual. Put it on a tablet or print it. A plain `?view=` link works for
-  any view: it opens that screen if the reader's nav reaches it, and otherwise the app opens as usual, so
-  a link cannot show a screen the reader is not granted. A view kept out of `nav` therefore cannot be
-  opened this way.
 
-### `ahead` — the next few days, and Show more
-`"ahead": "3d"` lists today and the next two days; **Show more (N)** adds another span. Without it, every
-upcoming event.
+| Key | Meaning |
+|---|---|
+| `events`, `dateColumn` | Required: the events table and its date or datetime (filters upcoming, sorts). |
+| `responses`, `statusColumn` | Required: a table with an `owner` column and a `ref` to the events table by `id`, and its status column. |
+| `statuses` | Inline options. Better: make `statusColumn` a `select` with a list, editable in the Lookup tab. |
+| `statusList` | The translation namespace for the labels, when the column's own name would clash. |
+| `picker` | `dropdown` (default), `toggle` or `chips`. Deselecting removes the response. |
+| `showCounts` | A count of each status per event. |
+| `rosterVisibility` | Who sees names: `all`, `admins` or `counts`. Display only. |
+| `ahead` | `"3d"`: today and the next two days, with **Show more**. |
+
+- The link is the responses table's `ref` column by `id`; two events on one date stay separate.
+- **Who can read responses** is set on the responses table: `"privateRoster": true` makes each readable
+  only by its owner and organizers; otherwise rows carry `rosterPublic: true`. See
+  [What `privateRoster` actually guarantees](#what-privateroster-actually-guarantees).
+- An organizer has a **QR code for this page** (`?view=<view>`): a member's camera opens it signed in as
+  themselves. A `?view=` link opens a screen only if the reader's nav reaches it.
 
 ### `closeBefore` — booking from home stops before the start
 
-With a **datetime** `dateColumn`, `closeBefore: "30min"` (a duration: `min`, `h`, `d`) stops joining an event from anywhere 30 minutes before
-it starts; the row says *Book at the gym*. From then until the start it is open only to a member **at the
-venue**: one who opened the check-in link (`?view=…&scan=…`) or has already checked in today. Once it
-has started, nobody joins or leaves (with a datetime `dateColumn`, with or without `closeBefore`), and the
-calendar list moves past it. Before that, leaving is never closed. With `checkin.link: "submit"`, booking at the venue
-checks the member in to it at once.
-
-It is a screen rule, not a rule the server holds: the server cannot tell "at the venue" from a typed
-code, because the real code is stored nowhere (see `checkin`). What a member gains by going round it is
-a booking that was never checked in, and the organizer's list shows it as such.
+With a datetime `dateColumn`, `"closeBefore": "30min"` (`min`, `h`, `d`) closes booking from anywhere 30
+minutes before the start; until the start it stays open at the venue (after opening the check-in link or
+checking in today). Once an event has started nobody joins or leaves. A screen rule, not a server one.
 
 ### `release` — a no-show's place comes back before the start
 
-`"release": "10min"` (a duration: `min`, `h`, `d`): from 10 minutes before the start until the start, a booking that
-holds a place and has not checked in (does not carry `checkin.set`) loses it; its status is cleared, so
-the place is free for someone at the door. The row stays, and its owner may book again while places
-are left.
-
-- It runs in the organizer's **check-in pass**, right after stamping: the open QR (every 15 s) or the
-  *Check in* press. A member who claimed the code is marked before they could be released. With no
-  check-in screen open, nothing is released.
-- The write is the organizer's, so both servers' capacity counts follow it as they follow any other.
-- Needs a datetime `dateColumn` and `checkin` with `set`.
+`"release": "10min"`: from then until the start, a booking not checked in loses its place (its status is
+cleared). It runs in the organizer's check-in pass (the open QR or **Check in**), so needs a datetime
+`dateColumn` and `checkin.set`.
 
 ### `blockedBy` — refused during the member's own periods
 
 ```json
-"rsvp": { …, "blockedBy": { "table": "pauses", "from": "starts_on", "to": "pause_until",
-                       "where": { "sent": "yes" }, "message": "text.paused" } }
+"blockedBy": { "table": "pauses", "from": "starts_on", "to": "pause_until", "where": { "sent": "yes" }, "message": "text.paused" }
 ```
 
-A day inside one of the caller's **own** rows of `table` (its `owner` column) — from `from` to `to`
-(default: the same day), filtered by `where` — cannot be booked or checked in to; the row shows `message`
-(a translation key or text). `to` may be a computed column. The same key on a `scan` view refuses the scan
-on such a day with that message. Like `closeBefore`, it is a screen rule.
+A day inside one of the caller's own rows of `table` (from–to, filtered by `where`) cannot be booked or
+checked in to; `message` is shown. `to` may be computed. On a `scan` view it refuses the scan.
 
 ### `requires` — allowed only inside the member's own periods
 
-```json
-"rsvp": { …, "requires": { "table": "memberships", "from": "start_on", "to": "valid_until",
-                      "where": { "membership_status": "active" }, "message": "text.no_membership" } }
-```
-
-The opposite of `blockedBy`, in the same shape: a day must fall inside one of the caller's **own** rows of
-`table`, or booking and the shared-code check-in are refused with `message` — a valid membership, a
-signed waiver, a paid term. A row with no `to` covers its `from` day only (a single visit). On a `scan`
-view it refuses the scan. Staff — whoever may write the responses table, or confirms a door code — are
-not held to either. A screen rule, like `closeBefore`.
+The opposite, same shape: a day must fall inside one of the caller's own rows (an active membership). A
+row with no `to` covers one day. Staff are held to neither. Both are screen rules.
 
 ### `checkin` — self check-in with a shared code
 
-With `rotateMinutes`, the organizer's screen has only the QR button: while the QR is open it confirms
-matching claims every 15 seconds and once more when it closes, so there is no Check in button to press.
-A typed code keeps the box and the button.
-
 ```json
-"rsvp": { …, "checkin": { "codeColumn": "checkin_code", "set": { "attendance": "attended" }, "rotateMinutes": 5 } }
+"checkin": { "codeColumn": "checkin_code", "set": { "attendance": "attended" }, "rotateMinutes": 5 }
 ```
 
-On a day with events, the RSVP view offers one **Check-in code** box above the list. **The code is the
-day's, not one event's.** A member who reserved at least one of today's events types the code shown at
-the venue (on a slide, a poster, at the door), and it is saved into `codeColumn` of **every** response
-they have for today. An organizer (anyone who may write the responses table outright, rather than
-through self-service) sees a box of their own instead: they type the real code and press **Check in**,
-which writes `set` onto every row of today's events whose code matches. Case and surrounding spaces are
-ignored, rows already marked are skipped, and the press is one undo. Press again later in the day for
-people who arrive after it.
-
-- **One scan covers every class of the day**, which is the point for a gym: a member doing two classes
-  checks in once. The flip side is that they are marked for both, even if they leave after the first.
-
-- **The real code is stored nowhere.** Kept on the event row, every member could read it from home.
-  What this buys is that being marked present takes being told the code.
-- **The organizer can show the code as a QR** (the icon beside their box). It carries a link,
-  `?view=<this view>&scan=<code>`, so a phone's own camera app opens the app on this
-  view with the member's box already filled. Nothing is saved until the member presses the check mark
-  (unless `link` below says otherwise), because a link is something anyone can send. The QR is drawn on
-  the organizer's screen from what they typed; the code is still stored nowhere. A member who scans
-  with nothing reserved today sees the code, disabled, above **today's events only**; reserving one
-  there carries the code onto it, and the full list returns.
-- **`link`** (optional, `"arm"` or `"submit"`, default `"arm"`): what a code that arrives by the QR's link
-  does. `"arm"` fills the member's box and waits for the check mark, because a link is something anyone
-  can send. `"submit"` saves it with no press, which is the gym's room QR: scanning IS checking in. It is
-  the same trade as a scan view's `link`, and is safe to pair with `rotateMinutes`, where a forwarded
-  link carries a code that is dead within two periods.
-- **`rotateMinutes`** (optional, a positive number): the code changes by itself. The organizer types
-  nothing; opening the QR shows a random five-character code (no look-alikes such as 0/O or 1/I/L) that
-  is replaced every `rotateMinutes`. While the QR is open it stamps by itself every 15 seconds, accepting
-  the **current and the previous** code, so a code is good for between one and two periods and a member
-  who scans as it changes is still marked. It keeps the screen on where the browser allows. If the tablet
-  sleeps, nobody is marked until it wakes; a claim on a code older than the previous one must be made
-  again. **Check in** still stamps by hand with the current and previous code.
-- **The claim and the verdict are separate columns.** `codeColumn` must be in `ownerWritable`, and every
-  `set` column must not be, or a member can mark themselves present without any code. `validateSchema`
-  refuses both, and a responses table with no `ownerWritable` at all.
-- **It does not stop relaying.** Someone at the event can text the code to someone who is not. Pair it
-  with *Verified attendance* (`ownerWritableWhile` on the verdict) so a marked response is frozen.
+- A member who booked today types the code shown at the venue; it is saved on **every** response they
+  have today. One code covers the day's classes.
+- An organizer types the real code and presses **Check in**: rows with a matching code get `set`. The
+  real code is stored nowhere.
+- The organizer can show the code as a QR linking `?view=<view>&scan=<code>`. `link`: `"arm"` (default)
+  fills the box and waits for the member's press; `"submit"` saves at once.
+- `rotateMinutes`: the code is random and changes on its own. While the QR is open it confirms every
+  15 seconds, accepting the current and previous code.
+- `codeColumn` must be `ownerWritable` and the `set` columns must not be; `validateSchema` checks.
+- A code can still be relayed. Pair it with verified attendance (`ownerWritableWhile`) to freeze marked
+  responses.
+- With `checkin.set`, staff can tap a booked person's chip to mark them (someone with no phone).
 
 ### `capacity` — places, and the booking refused when they are gone
 
-A **table** property of the responses table, not a view key, because it is enforced by the server
-whichever screen writes the row:
+A property of the responses table, enforced by the server:
 
 ```json
-"bookings": {
-  "columns": [ …, { "name": "class", "type": "ref", "table": "classes", "valueCol": "id" },
-                  { "name": "booking", "type": "select", "list": "booking_status" } ],
-  "capacity": { "link": "class", "status": "booking", "column": "capacity", "count": "booked", "holds": ["booked"] }
-}
+"capacity": { "link": "class", "status": "booking", "column": "capacity", "count": "booked", "holds": ["booked"] }
 ```
 
 | Key | Meaning |
-|-----|---------|
-| `link` | The ref column naming the event, by `id` |
-| `status` | The response column |
-| `column` | The events table's `number` column holding the limit. Blank = no limit |
-| `count` | The events table's `number` column the **server** keeps the count in. Leave it to the server |
-| `holds` | The statuses that take a place (optional; default: any non-empty one). `maybe` usually should not |
-| `reserved` | The events table's `number` column of places taken that are **not** responses — walk-ins signed in at the desk (optional). Both servers add it to the count before refusing a booking, and *Places left* subtracts it. Staff (whoever may write the responses table) see it in the booking list as a **− n +** stepper where their own response would be |
-| `waitlist` | `{ "status": "waitlisted", "start": "starts_at", "until": "10min" }` (optional; **Supabase and the dev server only**). A full event offers `status` instead of the statuses that hold; it takes no place. When a place is freed, the server books the longest-waiting response (`holds[0]`), until `until` (a duration, default the start) before `start`, a datetime column of the events table. `until` may equal `release`, so from then on a freed place goes to whoever is at the door. Firestore has no server code to promote, so the app does not offer it there |
+|---|---|
+| `link` | The ref column naming the event by `id`. |
+| `status` | The response column. |
+| `column` | The events table's limit (a number; blank = no limit). |
+| `count` | The events table's number column the server keeps the count in. |
+| `holds` | Statuses that take a place (default: any non-empty one). |
+| `reserved` | Places taken outside responses (walk-ins); staff set it with a − n + stepper. |
+| `waitlist` | `{ "status": "waitlisted", "start": "starts_at", "until": "10min" }` (Supabase and dev server only): a full event offers this status; a freed place goes to the longest waiting until `until` before `start`. |
 
-With `checkin.set`, staff see each booked person in the roster as a chip: a tap stamps `set` on that response
-(arrived, for someone with no phone), a second tap returns those columns to their defaults.
-
-The booking list shows *Places left: N* under each event, or *Full*. A full event cannot be joined, but a
-member who holds a place in it can still give it up. Booking the last place on a stale screen is refused
-by the server, the row is taken back, and the member is told it was full.
-
-- **Why the count lives on the event row.** A private roster means a member reads only their own
-  responses, so no client can count anyone else's. The count is the server's, and the same mechanism
-  that shows *Places left* is what refuses the booking after the last one.
-- **Postgres (Supabase, the dev server)**: a trigger (`app_capacity_trg`) recounts the event's holding
-  responses after every write, with the event row locked so two members taking the last place are
-  served one at a time, and refuses the write that would take a place past the limit. Recounted, not
-  incremented, so the count cannot drift, whoever wrote the rows.
-- **Firestore**: rules cannot count, so the client writes the count in the same transaction as the
-  response, and the rules check both sides: a response that takes or gives up a place must come with
-  the event's count moved by exactly one, naming it; and a member, who holds no grant on the events
-  table, may change only that count, by one, for their own response. An organizer's writes are not
-  bound (the app keeps their count right).
-- **The link may not move** on a member's own response: that would take a place in one event and free
-  one in another, which one count cannot express. Respond to the other event instead.
-- Only the `active` partition holds places. The config is mirrored as the `capacity` field of
-  `_meta/ownerTables`, which the owner-write path already reads: Firestore allows ten document reads per
-  write, and a mirror document of its own was the one too many.
-- `validateSchema` names a `link` that is not a ref to the events table by id, a `status`, `column` or
-  `count` that does not exist or is not a number, an empty `holds`, two response tables capping one events
-  table, and a `waitlist` whose status holds a place, whose `start` is not a datetime, or whose `until` is
-  not a duration.
-- **Queue order is the server's** `updated_at` (a trigger stamps it on every write), so it cannot be
-  backdated. Editing a waiting response moves it to the back.
+- The list shows *Places left: N* or *Full*. Booking the last place on a stale screen is refused and
+  rolled back.
+- The count lives on the event row because a private roster lets no client count others' responses.
+- Postgres recounts in a trigger with the event row locked. Firestore rules make the client move the
+  count by exactly one in the same transaction.
+- A member's response cannot change its event; queue order is the server's `updated_at`.
 
 ## search — a box the reader types in
 
-`filter` is **authored**: it decides what a view *is*. `search` is the other kind — what the person
-looking at it wants to see right now.
-
-```json
-{ "name": "ohjelma", "sources": ["kokoukset"], "search": true }
-{ "name": "puheet",  "sources": ["kokoukset"], "search": ["jäsen", "teema"] }
-"tables": { "seurakuntalaiset": { "search": true, "columns": [ … ] } }
-```
+`filter` decides what a view is; `search` is what the reader wants now. On a data or board view, or a table:
 
 | Value | Meaning |
-|-------|---------|
-| absent / `false` | **no search box.** The default — a box on every screen is noise on the ones with six rows |
-| `true` | search every column the row carries, minus bookkeeping (`id`, `created_at`, `updated_at`, `owner`, `rosterPublic`, `_status`, `_source`) |
-| `["col", …]` | search only these. Naming a bookkeeping column here *does* search it — the skip list is a default for "everything", not a prohibition |
+|---|---|
+| absent / `false` | No box (the default). |
+| `true` | Every column except bookkeeping (`id`, `created_at`, `updated_at`, `owner`, `rosterPublic`, `_status`, `_source`). |
+| `["col", …]` | Only these. |
 
-Same boolean-or-array shape as `obscureNames`, for the same reason: `true` is the common case and
-naming columns is the exception. It sits on a **view** or on a **table** (bare-table screens read their
-config from the table definition), and applies to the **data** and **board** kinds.
-
-- **Every token must match somewhere in the row**, not all in one column — so `kati tup` finds
-  *Kati Tuppurainen*, and `kati usko` finds a row whose name and theme match separately. That is how
-  people type a name they half remember; a single substring over the whole term would find neither.
-- **Diacritics fold both ways**: `saestaja` finds *säestäjä* and `hameen` finds *Hämeen*. Without it a
-  Finnish name is findable only by someone who can type the diacritic, which on a phone keyboard is
-  most of the point of searching.
-- **It matches what the screen SHOWS as well as what the row stores.** A linked account's name
-  (`userlink-name`), a translated list value and a `ref`'s label are all produced by the renderer, not
-  held on the row, so a raw-value search finds none of them: a reader looking at *Hyväksytty* would
-  have to know the row stores `approved`. Both are folded into the haystack, so the stored key stays
-  findable too and a term may even span the pair (`cara caroline` matches the one row that is both).
-  This deliberately leaves `obscureNames` where it was — a full name still matches a cell abbreviated
-  on screen. That is display-only privacy over rows the viewer has already been served, not an access
-  boundary, and closing it here would cost every stored-key match to buy nothing.
-- **It narrows the VIEW, never the data.** `currentData` is what everything that writes reads — add,
-  archive, the mirror cascade — so those never operate on the filtered list.
-- **The term is cleared when you navigate.** A term belongs to the list it was typed over; carrying it
-  would hide rows for a reason no longer on screen.
-- **Reordering is withdrawn while a term is active** (`reorderable` tables). Reorder moves a row
-  relative to its neighbours in the rendered list; with rows hidden that list is not the real order,
-  and the arrows would renumber around rows nobody can see.
-- The count beside the box reads `shown / total` — a filtered list with no count looks like a list
-  that has lost rows, and a bare number gives no way to tell matches from misses.
+- Every word must match somewhere in the row (`kati tup`), and diacritics fold both ways (`hameen` finds
+  *Hämeen*).
+- It matches what the screen shows (translated values, ref labels, linked names) as well as what is
+  stored.
+- It narrows the view, never the data that writes read. Navigating clears it; reordering is off while it
+  is active. The count reads `shown / total`.
 
 ## board (seventh view kind)
 
-A view with a `board` field renders a **kanban board**: a single table's rows grouped into vertical
-**lanes** by one `select` column, with each row shown as a card. Dragging a card between lanes (or using
-the card's move-menu) **writes that column** back to the row. It is the one-dimensional, *writable*
-cousin of the pivot — where a pivot aggregates to read-only numbers, a board keeps whole editable rows.
-Engine: `board.js`. A board is essentially a single-source **data view** plus a `lane` column, so it
-reuses the data-view load path (filters, `compute`, `defaultSort` all apply) and the standard
-`saveField` write.
+A kanban board: one table's rows as cards in lanes by one column; dragging a card (or its move menu)
+writes that column. It is a data view plus a lane, so `filter`, `compute` and `defaultSort` apply.
 
 ```json
-{ "name": "tickets_board",
-  "sources": ["tickets"],            // REQUIRED — exactly ONE table (the drag-write target must be unambiguous)
-  "mode": "join",
-  "defaultSort": "title",            // card order within each lane (a `reorderable` table orders by `position`)
-  "board": {
-    "lane": "status",                // REQUIRED — a `select` column on the source table; its value places the card
-    "lanes": ["open", "in_progress", "done"], // OPTIONAL — explicit lane order; keys here render even when empty.
-                                     //            Omit -> order from the column's list, else first-seen in the data.
-    "hiddenLanes": ["cancelled"],   // OPTIONAL — lane keys to drop from the board
-    "laneGroups": [                  // OPTIONAL — fold lanes under collapsible phase headers (tames many lanes)
-      { "label": "Active", "lanes": ["open", "in_progress"] },
-      { "label": "Closed", "lanes": ["done"], "collapsed": true }
-    ],
-    "title": "title",                // OPTIONAL — card heading column (default: first entry of `columns`)
-    "color": "assignee",             // OPTIONAL — column whose value tints each card's left border (hashed)
-    "addInLane": true,               // OPTIONAL — per-lane "+" adds a row pre-stamped with that lane value
-    "laneWhen": { "done": { … } },  // OPTIONAL — a card may enter that lane only while its row matches
-    "summary": ["assignee"]          // OPTIONAL — a closed card shows these on one line; other fields fold
-  },
-  "columns": ["title", "assignee"]   // card-face columns (the lane/title columns are shown separately)
-}
+{ "name": "tickets_board", "sources": ["tickets"], "mode": "join", "columns": ["title", "assignee"],
+  "board": { "lane": "status", "lanes": ["open", "in_progress", "done"], "hiddenLanes": ["cancelled"],
+             "laneGroups": [ { "label": "Closed", "lanes": ["done"], "collapsed": true } ],
+             "title": "title", "color": "assignee", "addInLane": true, "summary": ["assignee"],
+             "laneWhen": { "done": { … } } } }
 ```
 
-**`laneWhen`** gates a lane on the card's row, computed columns included: the gym's reward board hands a
-claim over only while `{ "balance": { "gte": { "col": "cost" } } }` — the member's balance (a `lookup.view`
-of a per-member balance view) covers the reward's price. A drop that fails is refused with a word, and
-the move menu greys the lane. It is the board's rule, not the server's: an admin editing the row elsewhere
-is not stopped by it.
+| Key | Meaning |
+|---|---|
+| `lane` | Required: a `select` or `ref` column of the single source. |
+| `lanes` | Lane order; listed lanes show even when empty. Default: the list's order, else first seen. |
+| `hiddenLanes` | Lanes left off. |
+| `laneGroups` | Lanes folded under phase headers (`board.group.<label>` translates). |
+| `title` | The card heading (default: the first of `columns`). |
+| `color` | A column whose value tints the card's edge. |
+| `addInLane` | A **+** per lane adding a row with that lane value. |
+| `summary` | Cards start closed, showing these on one line; the chevron opens a card for editing. |
+| `laneWhen` | A card may enter that lane only while its row matches (`{ "balance": { "gte": { "col": "cost" } } }`). A screen rule. |
 
-- **Ordering cards by hand.** On a `reorderable` table each lane follows `position`: a card dropped on another
-  goes before it (after it on its lower half), on the lane's empty space to the end, and each card has
-  up/down arrows. A move is one undo entry. Not on a self-service table, in the archive, or while a search is active.
-  Another view or embed of the table lists rows in the board's order with `"defaultSort": "position"`.
-- **Compact cards (`summary`).** Cards start closed: the title, with the `summary` columns beneath as one line.
-  The chevron on the title opens a card in edit mode, every field editable (no pencil); a viewer who cannot edit
-  sees the values. Archive and delete sit under the fields, so a closed card's header holds only its title, arrows
-  and move menu. An open card is not draggable; close it or use its arrows. Without `summary` nothing
-  folds. A lane folds by the chevron on its heading, on every board. Both are kept per viewer, in this browser.
-- **One source, one lane column.** The source must be **exactly one** table and `lane` must be a `select`
-  **or a `ref`** column on it (load-time validation enforces both) — a drag writes one column on one table,
-  so a union/join or an unsupported lane type would be ambiguous. This mirrors why a mirror-**detail** table
-  (one whose columns `syncFrom` a master) yields a **read-only** board: such rows are mutated only via their
-  master, so the board offers no drag/add (same `hasMaster` gate as the data view's add button). Board a
-  **standalone** table (like a status/workflow table).
-- **Lane order & labels.** `lanes` fixes the order and materializes empty lanes; otherwise lanes come from
-  the `select` column's list (authored order), else first-seen in the data. Lane headers and card values
-  are translated through the same `list.<list>.<value>` / `field.<col>` keys the grid uses — no board-only
-  i18n. The blank/unassigned lane uses the `board.unassigned` label (default `—`).
-- **2-D ref lane (grouping from data, no `laneGroups`).** If `lane` is a **`ref` to a 2-column lookup**, the
-  lookup's two dimensions *are* the board: the **parent** column is the phase/group, the **child** column
-  (`valueCol`) is the lane value (what the row stores). Lane order, group order, and grouping all come from
-  the lookup **rows** — so adding / renaming / reordering states or phases is plain data entry in that
-  lookup, with nothing duplicated in the schema (`laneGroups`/`hiddenLanes` aren't needed). A ref lane's
-  values **and** its group labels localize through `list.<lookupTable>.<value>` keys — the same namespace as
-  list values, so they appear in the Languages editor's **Lists** section when the lookup table is named in
-  `translatableLists`. A plain 1-D `select` lane stays flat (or grouped via `laneGroups`); a 2-column ref
-  lane is grouped. Drag/move writes the child value exactly like a select lane, so filters and existing data
-  keep matching.
-- **Writes.** Dropping a card (desktop HTML5 drag) or picking a lane from the card's **move-menu**
-  (touch / keyboard / a11y fallback) calls the same debounced `saveField` as inline grid editing, so it
-  flows to every backend and updates the cache immediately. Gated on write access (`canMutateRows`); a
-  read-only user gets a static board.
-- **Many lanes → `laneGroups`.** For long lifecycles (e.g. a calling-status column with a dozen states),
-  group lanes into named phases; a group marked `"collapsed": true` starts folded. Lanes not named in any
-  group fall into a trailing implicit group. Each phase `label` is translatable through a
-  `board.group.<label>` key (seeded into the translation editor), falling back to the literal `label`.
-- **Card row controls.** Each card carries the same per-row actions as the grid, gated on write access: a
-  **pencil** flips the card into edit mode (every field except the lane becomes the shared `data-cell`
-  editor — same widgets and `saveField` persistence as the grid — with dragging disabled while editing); an
-  **archive** button (when the source table is `archivable`) files the card away by stamping `_status`
-  (reversible via restore); and a **delete** button uses the grid's arm-then-confirm (first click swaps the
-  icon, the second removes the row). The lane itself is changed by drag or the card's **move-menu** (⋮).
-- **Integration.** Because a board only writes an existing column, moving cards feeds any other view that
-  filters on that column (e.g. a program/agenda view filtering `status: "approved"`), with no extra wiring.
+- A `ref` lane into a two-level lookup groups by the lookup's parent; adding or reordering lanes is then
+  data entry in the lookup.
+- On a `reorderable` table, cards order by `position` within a lane and can be dragged or moved with
+  arrows (not on self-service tables, in the archive or while searching).
+- Cards have the grid's row actions (edit, archive, delete) for users who can write; a table whose
+  columns `syncFrom` a master gives a read-only board.
 
 ## form (eighth view kind)
 
-A view with a `form` field renders **one record, filled in properly** — labels above fields, grouped
-into sections, with required-field validation — instead of a row edited in a grid. Engine: `form.js`.
-
-It is the self-service shape `rsvp` already had, loosened. Underneath it is the same machinery: an
-**owner-stamped row the member writes themselves**, gated by `ownerWritable` / `ownerWritableWhile` in
-both rule layers. A form record therefore needs **no new access rules at all**. What `rsvp` cannot
-express is a record with several fields, grouped, where some are required and the thing is submitted
-once rather than toggled — surveys, applications, intake, feedback.
+One record filled in with labels, sections and required fields: a survey, an application, feedback. The
+record is the member's own `owner` row, so no new access rules are needed.
 
 ```json
-{
-  "name": "palaute",
-  "form": {
-    "table": "palautteet",
-    "sections": [
-      { "title": "field.perustiedot", "columns": ["nimi", "email"] },
-      { "title": "field.viesti",      "columns": ["aihe", "viesti"] }
-    ],
-    "required": ["aihe", "viesti"],
-    "submitColumn": "tila",
-    "submitValue": "submitted"
-  }
-}
+"form": { "table": "palautteet",
+          "sections": [ { "title": "field.perustiedot", "columns": ["nimi", "email"] },
+                        { "title": "field.viesti", "columns": ["aihe", "viesti"] } ],
+          "required": ["aihe", "viesti"], "submitColumn": "tila", "submitValue": "submitted" }
 ```
 
 | Key | Meaning |
-|-----|---------|
-| `table` | Where the record is written. **Must declare an `owner` column** — that is what makes the record the member's own, and what the rules gate on |
-| `sections` | `[{ title?, columns }]`. `title` is a translation key (falls back to the literal). Omit and use `columns` for a single untitled section |
-| `columns` | The fields, when no `sections` are declared |
-| `required` | Columns that must be answered before the form may be submitted. A name that is not one of the form's columns is ignored — otherwise the form could never be completed and nothing on screen would say why |
-| `once` | `true` (default) = one record per person, reopened for editing. `false` = a fresh blank record each time: the one being filled in is the person's latest not yet submitted, so it needs `submitColumn` |
-| `submitColumn` / `submitValue` | Optional. On submit, stamp this column (default value `"submitted"`). Pair it with `ownerWritableWhile` to make submission final — see below |
-| `compute` | Computed columns over the record (the same shapes a view's use): naming one in `columns` shows it read-only — an end date as the start and plan are chosen |
-| `rules` | `[{ "require": <condition>, "message": "<key>" }]` — conditions the record, computed columns included, must meet before it can be submitted. Once the required fields are in, each failing rule shows its message and the submit button waits |
-| `intro` / `done` | Optional markdown shown above the form, and in place of it once the record is locked. `{{t:key}}` works |
-| `startLabel` / `submitLabel` | Optional translation keys for the two buttons |
+|---|---|
+| `table` | Where the record is written; must have an `owner` column. |
+| `sections` / `columns` | Titled groups of fields, or one untitled group. |
+| `required` | Must be answered (an empty array is unanswered; `0` and `false` are answers) before submitting. |
+| `once` | `true` (default): one record per person, reopened. `false`: a new record each time (needs `submitColumn`). |
+| `submitColumn`, `submitValue` | Stamped on submit (default `"submitted"`). |
+| `compute` | Computed columns shown read-only (an end date from a start and a plan). |
+| `rules` | `[{ "require": <condition>, "message": "<key>" }]`: must hold before submitting. |
+| `intro`, `done` | Markdown above the form, and in its place once locked. |
+| `startLabel`, `submitLabel` | Button labels. |
 
-- **Fields save as they are edited**, through the same `data-cell` editor the grid uses — so every
-  column type, widget, `list`, `listSwitch` and translation works here with no second implementation,
-  and a half-finished form survives a reload. **Submit** does not write the answers; it marks the
-  record done, and is the only moment `required` is enforced.
-- **Nothing is created until the person starts.** Opening the page writes no row: every row in the
-  table is somebody's answer, and a table full of blank ones is worse than an empty one.
-- **Making submission final**: give the table `"ownerWritableWhile": { "tila": "luonnos" }` and set
-  `submitColumn: "tila"`. The owner may edit while the record is a draft; once submitted the rules stop
-  accepting their writes, and the form says so instead of offering an editor that would fail on save.
-- An empty **array** counts as unanswered for `required` — a multi-value column with nothing chosen is
-  as blank as an empty text box. `false` and `0` count as answered.
-- Signed-out visitors are told to sign in. A form record is identified by its owner, so there is no
-  anonymous submission: without an identity there is nothing to stamp, and matching blank owners would
-  hand one visitor another's draft.
+- Fields save as they change; **Submit** only marks the record done. No row exists until the person starts.
+- To make submission final, add `"ownerWritableWhile": { "tila": "luonnos" }` to the table.
+- Signed-out visitors are asked to sign in.
 
 ## stats (ninth view kind)
 
-A view with a `stats` field renders its rows as **headline numbers** — optionally each measured against
-a goal and drawn as a progress bar — instead of a table. Engine: `stats.js`.
-
-It is the **zero-dimensional** member of the aggregate family: `groupBy`/`aggregate` collapses rows to a
-list (one row per group), `pivot` to a grid (two axes), and `stats` to single numbers.
-
-The important part is what it does **not** do. A stats view is an ordinary data view — same `sources`,
-`mode`, `filter`, `compute`, `groupBy`, `aggregate`, `period`, `includeArchive` — with a different
-renderer bolted on the end. It reads no tables of its own and re-implements no filtering. So an existing
-leaderboard becomes bars by **adding three lines to it**, not by writing a second view:
+Headline numbers, each optionally a bar towards a goal. A stats view is an ordinary data view (`sources`,
+`filter`, `compute`, `groupBy`, `aggregate`, `period`) with another renderer, so a leaderboard becomes bars
+by adding `stats`:
 
 ```json
-{
-  "name": "chore_points_week",
-  "sources": ["chore_log"], "mode": "union",
-  "groupBy": { "column": "person" },
-  "compute": [{ "name": "points", "computed": { "lookup": { "table": "ref_chores", "match": "chore", "on": "chore", "field": "points", "default": 0 } } }],
-  "aggregate": { "sum": "points", "into": "total" },
-  "filter": { "status": "approved", "done_on": { "within": "@week" } },
-  "period": "week",
-  "includeArchive": true,
-
-  "kind": "stats",
-  "stats": { "rowTiles": { "label": "person", "value": "total" }, "goal": "max" }
-}
+{ "name": "chore_points_week", "sources": ["chore_log"], "mode": "union",
+  "groupBy": { "column": "person" }, "aggregate": { "sum": "points", "into": "total" },
+  "filter": { "done_on": { "within": "@week" } }, "period": "week", "includeArchive": true,
+  "stats": { "rowTiles": { "label": "person", "value": "total" }, "goal": "max" } }
 ```
 
-### Two modes
-
-**`rowTiles`** — one tile per row, for a view that has already aggregated. `label` and `value` name the
-columns holding the caption and the number, so a `person -> total` leaderboard renders as a column of
-labelled bars. `label` is run through the same display path a cell uses, so list values, translations
-and linked-user avatars all appear.
-
-**`tiles`** — explicit tiles over the whole row set, for a scorecard. Each names an aggregate:
+- **`rowTiles`** `{ label, value, goal?, order?, limit?, skipUntargeted? }`: a tile per row of an aggregated view.
+- **`tiles`**: a scorecard over all rows. Not both.
 
 ```json
 "stats": { "tiles": [
-  { "label": "text.pulse_awaiting",  "agg": "count", "when": { "status": "logged" } },
-  { "label": "text.pulse_today",     "agg": "count", "when": { "done_on": { "within": "@today" } } },
-  { "label": "Points this month",    "agg": "sum", "column": "points", "goal": 60 }
-]}
+  { "label": "text.pulse_awaiting", "agg": "count", "when": { "status": "logged" } },
+  { "label": "Points this month", "agg": "sum", "column": "points", "goal": 60 } ] }
 ```
 
-The two are mutually exclusive; declaring both is a load-time error.
+| Tile key | Meaning |
+|---|---|
+| `agg` | `count`, `distinct`, `sum`, `avg`, `min`, `max`, `latest`, `streak`. All but `count` need `column`. |
+| `when` | A condition narrowing this tile's rows. |
+| `plus` | `[{ agg, column, when }]` added to the value. |
+| `divide`, `decimals` | Show in a bigger unit (`60`: minutes → hours). Only `avg` and divided values are rounded. |
+| `display` | `bar` (default) or `number`; per tile or view-wide. |
+| `icons` | `[{ "at": 3, "icon": "mdi-fire" }, …]`: the icon of the highest rung reached. |
+| `goal` | A number, `"max"` (the largest tile), a ladder (below), or `{ "column": "target" }` (per row, `rowTiles` only). No goal, no bar. |
 
-| Key | Meaning |
-|-----|---------|
-| `tiles` | Explicit tiles. Each: `{ label, agg, column, when, goal, display, decimals, divide, plus }`; `agg: "distinct"` counts different values (people, not visits). `plus: [{ agg, column, when }]` adds more counts or sums, each over its own rows. `divide` shows the number in a bigger unit — `"divide": 60` turns minutes into hours — rounded to `decimals` (default 1) |
-| `rowTiles` | `{ label, value, goal?, order?, skipUntargeted? }` — one tile per row instead |
-| `goal` | Default bar target for every tile: a positive number, `"max"` (scale to the largest tile), a **ladder** of levels (below), or `{ "column": "<col>" }` to read the target off each row (`rowTiles` only). No goal = no bar, just a number |
-| `display` | `"bar"` (default) or `"number"`. Per-tile, or view-wide as a default |
-| `limit` | `rowTiles` only: cap the tile count. Applied after `order`, so it is the first N of the order asked for |
-| `rowTiles.skipUntargeted` | Drop a tile that resolved no goal — the gate that keeps a seeded key set (`groupBy.seed`) to the rows still being measured |
-
-**Aggregates**: `count` (needs no `column`), `sum`, `avg`, `min`, `max`, `latest`. And `streak`, below. Everything but
-`count` requires a `column`, and says so at load rather than showing an em dash forever.
-
-### A goal each row carries
-
-Every shape above measures each tile against the same target. `{ "column": "<col>" }` reads it off the
-row instead, so one view can hold targets that differ per row — bedding once a month, bins once a week:
-
-```json
-"stats": { "rowTiles": { "label": "chore", "value": "done", "goal": { "column": "target" } } }
-```
-
-`target` is an ordinary column of the view's rows. On an aggregate view that means a `computed.lookup`
-declared in `columns`, which resolves AFTER grouping — so it is one lookup per group, not per source
-row. The shipped `chore_cadence` view is exactly this, reading `ref_chores.target_per_month`:
-
-```json
-"groupBy": { "column": "chore" },
-"aggregate": { "count": true, "into": "done" },
-"columns": ["chore", "done",
-  { "name": "target", "computed": { "lookup":
-      { "table": "ref_chores", "match": "chore", "on": "chore", "field": "target_per_month", "default": 0 } } }]
-```
-
-- **It is an object, not a bare column name.** `goal: "target"` could not be told apart from a
-  misspelling of the literal `"max"`, so the column form says which it is.
-- **`rowTiles` only.** An explicit tile is an aggregate over many rows and has no row to read, so a
-  `{ column }` goal there is a load-time error rather than a tile that silently draws no bar.
-- **A row whose target is blank or non-numeric gets no bar**, and shows its number alone — the same
-  thing every other unusable goal does. A chore with no cadence set has no bar to be short of.
-- **A group with no rows still gets a tile**, as long as the view asks for one: `groupBy.seed` takes
-  the key set from the catalogue the group column references (see **Leaderboard totals**), so a chore
-  nobody logged is an empty bar rather than no bar — which is the one most worth seeing. `chore_cadence`
-  turns it on, and the never-done chores lead its `order: "behind"` list.
-- **`skipUntargeted: true`** drops a tile whose goal resolved to nothing, which is what keeps a seeded
-  key set honest: a catalogue row with no target is not on a cadence and gets no tile. That makes the
-  set **self-maintaining** — retiring a chore means clearing its target in the Lookup tab, with no
-  schema edit — and it is under its own name rather than implied by seeding, because a tile with a
-  value and no goal is legitimate elsewhere (a `display: "number"` scorecard is exactly that). With no
-  `goal` declared anywhere it would drop every tile, so that combination is a load-time error.
-
-### Streaks, and an icon that grows with the number
-
-`agg: "streak"` counts **periods**, not rows: how many `interval`s in a row (`daily`, `weekly` — the
-default — or `monthly`), ending now, have at least one row dated in them by `column` (a date or datetime;
-a computed `lookup` works, which is how a booking is dated by its class). Weeks start on Monday, as
-`within: "@week"` does, and days are the reader's local days.
-
-```json
-{ "label": "text.streak_gym", "agg": "streak", "column": "visited_on", "interval": "weekly",
-  "icons": [{ "at": 1, "icon": "mdi-sprout" }, { "at": 3, "icon": "mdi-fire" }, { "at": 8, "icon": "mdi-trophy" }] }
-```
-
-- **The current period does not break it.** A streak counts this week when it already has a row, and
-  when it does not yet, it counts back from last week: a week is not missed until it is over, and a
-  streak that read 0 every Monday morning would be measuring the calendar.
-- **`icons`** (any tile): the icon of the highest rung the value has reached, beside the number; none
-  below the first. Rungs ascend, like a goal ladder.
+- Blank cells are skipped, not read as 0. A value over its goal fills the bar and shows the real number.
+- `streak` counts consecutive `interval`s (`daily`, `weekly`, `monthly`) with a row dated by `column`; the
+  current period does not break it until it is over.
+- `order: "behind"` sorts `rowTiles` by the share of their own goal reached, lowest first; tiles with no goal
+  last. `skipUntargeted: true` drops tiles with no goal, so a `groupBy.seed` catalogue is measured only where
+  a target is set.
+- `period` ‹ › works at top level only; an embedded stats view shows the current period.
 
 ### A tile per period (`series`)
 
-`series` turns one tile into one per period: the last `count` (1–60) `interval`s (`daily`, `weekly` —
-the default — or `monthly`), ending now, oldest first. Each tile aggregates the rows whose `series.column`
-date falls in its period, and is captioned by that period in the reader's locale.
-
 ```json
-{ "agg": "sum", "column": "minutes", "goal": "max",
-  "series": { "column": "done_on", "interval": "weekly", "count": 6 } }
+{ "agg": "sum", "column": "minutes", "goal": "max", "series": { "column": "done_on", "interval": "weekly", "count": 6 } }
 ```
 
-- `when`, `plus`, `divide` and `goal` apply to each period; `goal: "max"` scales them against the busiest.
-- Anchored at today, not at the view's `period` navigation. Not with `agg: "streak"`, which already counts periods.
-- On a page with `filters`, each period is its own comparison column.
-
-### Which end of the board is the point (`order`)
-
-`rowTiles` arrives ranked highest-first, because an aggregate view returns a ranking. That answers
-*who is winning*. `order: "behind"` answers the other question — *what is neglected* — by sorting on
-how much of its **own** goal each tile reached:
-
-```json
-"rowTiles": { "label": "chore", "value": "done", "goal": { "column": "target" }, "order": "behind" }
-```
-
-| Value | Order |
-|-------|-------|
-| `"rank"` | Highest value first (the default; what an aggregate view already produces) |
-| `"behind"` | Least of its own goal first. Needs a `goal`, and says so at load |
-
-- **It is the ratio, not the shortfall.** `goal - value` is dominated by whichever row has the biggest
-  goal — wash-up 28 short beats bedding 1 short however complete the bedding is — which puts every row
-  back on one scale, the thing a per-row goal exists to escape.
-- **A tile with no goal sorts last.** Absent means unmeasured, not zero; floating it to the top would
-  read as the most neglected thing on the page. Same rule a missing `position` follows in a roster.
-- **Ties keep the order they arrived in**, so the incoming ranking breaks them and there is no second
-  rule to disagree with.
-- It sorts the built tiles, so it applies identically top-level and embedded — unlike `defaultSort`,
-  which the top-level stats path does not consult.
+One tile per period, the last `count` (1–60) ending now, oldest first. `when`, `plus`, `divide` and `goal`
+apply to each; on a page with `filters` each period is a comparison column. Not with `streak`.
 
 ### Tiered goals (bronze / silver / gold)
 
-A fixed `goal` stops saying anything the moment it is met. A **ladder** re-targets the bar at the next
-level instead:
-
 ```json
-"stats": {
-  "rowTiles": { "label": "person", "value": "total" },
-  "goal": [
-    { "at": 10, "label": "text.tier_bronze" },
-    { "at": 20, "label": "text.tier_silver" },
-    { "at": 30, "label": "text.tier_gold" }
-  ]
-}
+"goal": [ { "at": 10, "label": "text.tier_bronze" }, { "at": 20, "label": "text.tier_silver" }, { "at": 30, "label": "text.tier_gold" } ]
 ```
 
-Bare numbers work too — `"goal": [10, 20, 30]` — and the level then shows its threshold as its own name.
-Labels are translation keys, falling back to the literal, like tile labels.
-
-At 19 points that tile reads **19 / 20** with a *Bronze* badge and a 95% bar; crossing 20 re-targets it
-at 30 and the badge becomes *Silver*.
-
-- **Levels must ascend.** The level being worked toward is found by scanning, so an out-of-order list
-  would pick a nonsense one. It is a load-time error (the engine sorts defensively anyway).
-- **The bar runs from zero to the next level, not within the band.** At 250 of 100/200/300 it is 83% of
-  the way up the whole scheme, not 50% through one band. Measuring within the band is the other
-  defensible reading and is deliberately not what this does.
-- **Past the top level the goal stays there**, so the bar reads full and `over` carries the overshoot —
-  the same contract a plain numeric goal has.
-- **On `rowTiles`, each row is measured against the level IT is working toward.** That makes the bars
-  answer *"how close am I to the next level"*, and it means two rows can have different scales — Ann at
-  19/20 beside Cara at 6/10. `goal: "max"` is the one that answers *"how do I compare"* by putting
-  everyone on one scale. Pick per view according to which question the page is asking; the shipped
-  chores scoreboard has one of each, deliberately.
-
-- **`when`** narrows the rows for **one tile**, using the same condition language as `filter`. This is
-  what lets "awaiting approval" and "approved this week" be two tiles over one view instead of two views.
-- **Blank cells are skipped, not read as zero** — matching aggregate views. An average over a column
-  half the rows never filled in would otherwise be dragged toward zero, which reads as a real decline
-  rather than as missing data.
-- **Only `avg` is rounded** (to `decimals`, default 1). It is the one aggregate that manufactures digits
-  the data never had. Rounding a `sum` or a `min` would corrupt a decimal quantity to make it tidier.
-- **A tile label may be a translation key.** It falls back to the literal, so plain prose works too.
-- **Exceeding a goal fills the bar and keeps the real number**: the bar is clamped to 100% and the tile
-  still reads `138 / 120`, rather than overflowing its track or pretending the goal was met exactly.
-- **`period` works** when the view is opened at TOP LEVEL: the rows come from the same pipeline a data
-  view uses, so the ‹ › navigation moves the tiles. It does **not** appear on an EMBEDDED stats view —
-  `hasPeriodNav()` tests the view currently open, which for `{{view:x}}` inside a document is the
-  document, and a page has no `period`. This is not specific to stats (an embedded aggregate table has
-  never had the arrows either), but it is worth knowing before relying on it: a period-filtered stats
-  view embedded in a page shows the CURRENT period and offers no way to move off it. If readers need to
-  browse back, put the view in `nav` as well.
-- **A period filter can leave it legitimately empty.** `within: "@week"` over seed data written weeks
-  ago matches nothing, and an empty stats view renders the `stats.empty` message rather than a header
-  row — so it looks more "missing" than an empty table does. Check the data's dates before concluding
-  the view is broken.
-- **Embedding**: `{{view:x}}` in any document renders the tiles, like every other kind.
+The bar targets the next level and the badge names the level reached: 19 reads **19 / 20**, *Bronze*.
+Levels must ascend; bare numbers work (`[10, 20, 30]`). Past the top the bar stays full. On `rowTiles` each
+row is measured against its own next level; use `"max"` to compare rows on one scale.
 
 ### Calendars built in the app, not the schema
 
-A calendar can also be created at runtime from **Settings → Your own calendars**: name it, pick a
-table, its date column, and the columns that form each event's title. Repeat per table for a calendar
-that draws from several.
+**Settings → Your own calendars** creates a calendar from tables, a date column, title columns and
+rotation overlays, with an optional **Publish** switch. It is stored in the app config and loaded as an
+ordinary calendar view (rendering, download, embeds, feeds).
 
-They are stored in the **folder config**, beside the other per-view runtime settings (a rotation's
-anchor, a calendar's `ics` window, a feed's URL) — not in the schema document, and not in a system
-store of their own. Both alternatives cost more than they buy: a schema editor is explicitly not the
-design, and a new underscore-prefixed store would need its own block in `firestore.rules`, the mirror
-in the Supabase RLS, and the dev server, to guard a list of view definitions that nothing enforces
-access on anyway.
-
-They merge into `VIEWS` at load as ordinary calendar views, so everything downstream is inherited
-unchanged: rendering, the `.ics` download, the window and language settings, `{{view:x}}` embeds, and
-the Settings calendar list — which enumerates views rather than the nav, so one appears there with a
-download button **without any nav entry existing**. Putting one in the sidebar is still a schema
-concern (`nav.items`).
-
-**Creating one reveals nothing.** Every source is gated by `canReachTable` when the events are built,
-so a calendar cannot show anyone rows they could not already open — the same fail-closed rule that lets
-a shared calendar sit in a restricted member's nav. That is what makes this safe to offer at runtime.
-
-**A schema view of the same name wins.** The schema is the more deliberate statement, and silently
-shadowing one from a config row is how a calendar starts disagreeing with the file it appears to come
-from.
-
-The same checks `validateSchema` makes of a schema calendar are made on save — a real table, a real
-**date** column, real title columns — because each of them otherwise produces a calendar that is valid,
-renders, and is permanently empty. The folder config is also reachable by import, so the check lives on
-the save path rather than only in the form.
-
-The shipped bishopric example deliberately declares NO calendar, for this reason: a calendar is a
-saved question over tables that already exist, so shipping one makes the example carry a decision that
-belongs to whoever installs it. Its dated tables are exportable the moment someone builds a calendar
-here.
-
-Duty **rotations** can be overlaid on one too, picked from the same form. Their duties are generated
-rather than stored, so they are overlays rather than sources — and they render through the rotation's
-own resolvers, which is what carries its `obscureNames` across without the calendar repeating it. A
-calendar made only of overlays is valid.
-
-**Publishing is offered here too**, as a switch on the form — so a subscription no longer needs a
-schema edit. It sets the same `feed` flag a schema calendar carries, so `Feeds.isFeed`, the
-write-triggered republish and the Settings feed controls treat the two identically. The switch appears
-only where a blob store exists, mirroring the export button rather than promising something that would
-fail on save.
-
-Turning it OFF, or deleting the calendar, **retires the address**: the file is overwritten with an
-empty calendar first. Stopping at "no longer refreshed" would leave a URL already sitting in people's
-calendar apps serving the last snapshot for ever — and deleting the definition is the worse half of the
-two, since nothing in the app would then list the URL that is still live.
+- Every source is gated by the user's own access, so creating one reveals nothing.
+- A schema view of the same name wins. Saving checks the tables and columns exist.
+- To put one in the menu, add it to `nav`.
+- Unpublishing or deleting it first overwrites the published file with an empty calendar.
 
 ### What a calendar's `.ics` contains (`calendar.ics`)
 
-Both the download button and a published feed generate the same file, from one setting: how far `back`
-and `forward` it reaches, and which `lang` it is written in.
+The download and the published feed write the same file:
 
 ```json
-{ "calendar": { "source": "events", "dateColumn": "on",
-                "ics": { "back": "3m", "forward": "1y", "lang": "fi" } } }
+"calendar": { "source": "events", "dateColumn": "on", "ics": { "back": "3m", "forward": "1y", "lang": "fi" } }
 ```
 
-`back` / `forward` take the period vocabulary a rotation uses (`daily`/`weekly`/`monthly`/`yearly`, or
-`"<n><d|w|m|y>"`). Defaults are `3m` and `1y`. Everyone with view access can change all three from the
-calendar toolbar — it stores per view in the folder config, like a rotation's range — and only an admin
-writes it through. The resolved dates are shown beside the fields, so the effect of `3m` is visible
-without exporting to find out.
-
-**These are properties of the FILE, not of the viewer**, which is exactly why they are settings at all.
-A published file has nobody to ask, so every per-viewer answer has to be pinned or it comes from
-whoever happened to generate it.
-
-**Language.** Everything a calendar shows is translated — event titles through the list vocabulary,
-source labels through `tab.<table>`, the calendar's own name through `view.<name>`, rotation duty titles
-through `list.<table>.<value>`. An unset `lang` resolves differently for the two paths, and each is
-right for its own reason:
-
-- a **download** falls back to the reader's session language, because someone is pressing a button
-  while looking at a screen and the file should match the screen;
-- a **feed** falls back to the deployment's default language. A feed has no viewer and republishes
-  automatically on write, so inheriting the session would mean every subscriber's calendar silently
-  changes language depending on who edited a row last.
-
-Setting `lang` explicitly pins both. `validateSchema` rejects a `lang` this database does not declare —
-it would otherwise render every key as its raw key — but stays silent when no languages are declared,
-since there is then nothing to check against.
-
-**Why `back` is not zero, and why the range matters more to a feed.** A downloaded file is *merged*
-into someone's calendar, so its window only decides how much they get. A subscription is a *mirror* —
-the client replaces the calendar with whatever the file says — so anything outside the window
-**disappears** from the subscriber's view. With `back` at zero, a subscribed calendar would lose its
-history a day at a time, silently, as events fall out of the window.
-
-Two things a file cannot do, worth knowing before choosing between a download and a feed:
-
-| | Existing events | Events you deleted |
-|---|---|---|
-| Re-importing a download | updated in place (UIDs are stable) | **stay forever** — import merges, it never deletes |
-| A subscribed feed | updated | **removed** — the client mirrors the file |
-
-That is the functional argument for a feed over repeated downloads.
+- `back` / `forward` (defaults `3m`, `1y`) use the rotation interval vocabulary. Editable from the
+  calendar toolbar; an admin's change is saved.
+- `lang`: a download defaults to the reader's language, a feed to the database's default.
+- A `datetime` source becomes a timed event (ending after `durationColumn` minutes); a `date` is all-day.
+- A re-imported download updates events but never deletes them; a subscribed feed mirrors the file, so
+  events outside the window disappear from it.
 
 ### Publishing a calendar as a subscribable feed (`feed`)
 
-`"feed": true` on a **calendar** view publishes it as an `.ics` file at a stable URL, so a phone can
-subscribe instead of someone re-exporting. The app renders the file and uploads it through the backend
-blob store (`uploadFile`, the same seam `image` columns use); the object URL is the subscription.
-
 ```json
-{ "name": "family", "feed": true,
-  "calendar": { "source": "events", "dateColumn": "on", "titleColumns": ["title"] } }
+{ "name": "family", "feed": true, "calendar": { "source": "events", "dateColumn": "on" } }
 ```
 
-**The URL is a bearer credential.** Anyone holding the link reads that calendar, without signing in —
-calendar clients cannot authenticate, so this is inherent rather than a shortcut. The path carries a
-128-bit random id and the button is shown only to someone who could publish it. Treat handing out the
-link as handing out the calendar.
+Publishes the `.ics` to the blob store at a stable URL that a phone subscribes to. Needs a blob store
+(Supabase Storage, or Firebase Storage on Blaze).
 
-**`obscureNames` is respected, including in a published file.** `shouldObscure` takes no viewer — it
-reads the view's own config — so a calendar that masks names masks them for everyone, an admin
-included, and the same masked form is what reaches the `.ics`. That is what makes publishing an
-obscured roster safe: the file cannot carry more than the view shows, even though a full-access client
-is what renders it. Note it is the ROTATION view's `obscureNames` that governs an overlaid duty, not
-the calendar's, because the overlay renders through the matrix's own resolvers.
-
-**Only a full-access client republishes.** A restricted member regenerating from their own cache would
-overwrite the complete calendar with the subset they can see — silent loss for every subscriber, caused
-by a legitimate edit. Their write leaves the feed stale instead, which is the safe direction.
-
-**Republished on write**, coalesced: fifty rows in a bulk import produce one upload, not fifty. The
-tables that trigger it are the calendar's sources *and* the rosters behind any rotation overlay — a duty
-roster lives in a lookup table the calendar never names, and editing it changes what the feed says.
-
-**A shared feed cannot use `mineOnly` or an `@me` filter**, and `validateSchema` refuses both. A
-published file has no viewer to resolve "me" against, so it would be rendered as whoever pressed
-publish and then served to everyone — the failure here that leaks rather than merely disappoints. For a
-calendar that is different for each person, use a per-person feed.
+- **The URL is a bearer credential**: anyone with it reads the calendar. It carries a 128-bit random id.
+- `obscureNames` applies to the file as on screen.
+- Republished after writes to its sources or overlaid rosters, coalesced, and only by a full-access
+  client, so a restricted member's partial view never overwrites it.
+- A shared feed cannot use `mineOnly` or an `@me` filter (`validateSchema` refuses both).
+- Calendar apps refresh subscriptions on their own schedule, often hours.
 
 #### Per-person feeds (`feed: "per-person"`)
 
-One file per **subscriber**, each rendered as that person sees the calendar. The rule inverts: every
-source (except one marked `feed: false`) must carry an `@me` filter — on a self-service table,
-`{ "owner": "@me" }` is the subscriber's own rows, since `@me` under an owner column is the account's email — and every overlaid rotation must be `mineOnly`, because an unfiltered
-source would put its rows in everybody's file.
-
-Subscribing is a row the person creates for themselves in an owner-stamped table, named by
-`feedSubscribers`:
+One file per subscriber, rendered as they see the calendar. Every source (except `feed: false` ones) must
+filter by `@me`, and every overlaid rotation must be `mineOnly`. Subscribing is a row the member creates
+in a table named by `feedSubscribers`:
 
 ```json
-"tables": {
-  "cal_subs": {
-    "columns": { "owner": { "type": "owner" }, "lang": "text", "active": "text", "fid": "text", "url": "text" },
-    "ownerWritable": ["lang", "active"],
-    "ownerWritableWhile": { "active": "yes" },
-    "privateRoster": true
-  }
-},
-"views": {
-  "my_calendar": { "feed": "per-person",
-    "feedSubscribers": { "table": "cal_subs", "langColumn": "lang", "activeColumn": "active",
-                         "idColumn": "fid", "urlColumn": "url" },
-    "calendar": { "sources": [{ "table": "duties", "dateColumn": "on", "filter": { "who": "@me" } }] } }
-}
+"tables": { "cal_subs": { "privateRoster": true,
+  "columns": [ { "name": "owner", "type": "owner" }, { "name": "lang" }, { "name": "active" },
+               { "name": "fid" }, { "name": "url" } ],
+  "ownerWritable": ["lang", "active"], "ownerWritableWhile": { "active": "yes" } } },
+"views": [ { "name": "my_calendar", "feed": "per-person",
+  "feedSubscribers": { "table": "cal_subs", "langColumn": "lang", "activeColumn": "active",
+                       "idColumn": "fid", "urlColumn": "url" },
+  "calendar": { "sources": [ { "table": "duties", "dateColumn": "on", "filter": { "who": "@me" } } ] } } ]
 ```
 
-The row has two writers. The subscriber owns the request — `langColumn`, `activeColumn`, and
-`viewColumn` if one table serves several calendars — so those must be in `ownerWritable`. The publisher
-owns the grant — `idColumn` (the file's path) and `urlColumn` (their link) — so those must NOT be: a
-subscriber who could write their own url could point it at a file revocation never reaches.
-
-**`privateRoster: true` is required.** Each link is a bearer credential for one person's calendar, and
-without it every subscription row — link included — is readable by every member.
-
-**Unsubscribing is a state, not a deletion.** The row is the only record of where the file lives, and
-the subscriber cannot blank it themselves. So `ownerWritableWhile` must gate on the active column: once
-it says "no" the row is frozen, and the next publisher pass blanks the file and clears the url.
-Subscribing again makes a new row, and so a new link.
-
-The calendar's toolbar has a **Subscribe** menu for every member who can reach the subscriber table:
-subscribe, pick the file's language, copy their link, unsubscribe. The link appears once a full-access
-client runs a pass — on its next write to a source or to the subscriber table, or when it next opens the
-app. Revocation waits for the same pass.
-
-**Subscriptions are not live.** Calendar clients refresh external `.ics` on their own schedule, often
-many hours, and it is not controllable from here. Publishing on write buys *correctness* — the file
-never disagrees with the database — not speed. For an immediate copy, use the calendar's download
-button.
-
-**A timed event keeps its time.** A source whose `dateColumn` is a `datetime` becomes a timed event in
-the file (in UTC, which every client shows in local time), ending `durationColumn` minutes later; without
-one it has no end time. A `date` stays all-day. The Subscribe menu also sits on an **embedded** calendar,
-so a page like *My calendar* that embeds it offers it where the calendar is.
-
-Requires a backend with a blob store. Firebase Storage needs the Blaze plan; Supabase Storage is on the
-free tier. Without one the publish button does not appear. See ROADMAP, "A subscribable calendar feed",
-for the delivery options and their trade-offs.
+- The member owns `langColumn`, `activeColumn` (and `viewColumn`); the publisher owns `idColumn` and
+  `urlColumn`, which must not be `ownerWritable`. `privateRoster` is required.
+- Unsubscribing sets the active column to "no", which freezes the row; the next publish blanks the file.
+- The calendar's **Subscribe** menu (also on an embedded calendar) subscribes, picks the language and
+  copies the link once a full-access client has published it.
 
 ## timeline (tenth view kind)
 
-A view with a `timeline` field renders its rows as **bars across periods** — a gantt chart. Engine:
-`timeline.js`.
-
-This is the shape a **calendar cannot hold**. A calendar places a row on one day (its `dateColumn`), so
-a row that spans days is either reduced to its start or invisible. A timeline's unit is the *span*.
+Rows as bars across periods (a gantt chart), for rows that span days.
 
 ```json
-{ "name": "project_plan",
-  "sources": ["tasks"],
-  "timeline": {
-    "start": "starts_on",    // REQUIRED — date column the bar begins at
-    "end": "due_on",         // OPTIONAL — date column it ends at (see below)
-    "label": ["title"],      // OPTIONAL — columns forming the bar's caption
-    "from": "2026-01-01",    // OPTIONAL — window start; "today" or omitted = today
-    "periods": 12,           // OPTIONAL — how many periods the window covers (default 12)
-    "interval": "weekly"     // OPTIONAL — period size (default "weekly")
-  }
-}
+{ "name": "project_plan", "sources": ["tasks"],
+  "timeline": { "start": "starts_on", "end": "due_on", "label": ["title"],
+                "from": "today", "periods": 12, "interval": "weekly" } }
 ```
 
-- **`interval`** takes the same vocabulary as a rotation: `daily` · `weekly` · `monthly` · `yearly`, or
-  `"<n><d|w|m|y>"` (`"2w"`, `"3m"`). Reused deliberately, so "a week" means the same thing in both.
-- **`from` defaults to today**, not to the earliest row. A plan is read forward from now, and anchoring
-  to the data's own start means adding one old row silently rescales the whole chart.
-- **`label`** resolves through the same renderer a grid cell uses, so list values render as their labels
-  and `obscureNames` still applies. Omit it and bars are captioned with the view's own name.
-
-**A row with no `end` — or no `end` column configured at all — is a one-period bar.** A row that says
-when it starts and nothing else is a point in time; drawing it to the window edge would invent a
-duration the data does not claim. This is also what lets an ordinary single-date table render here
-without being reshaped.
-
-**Rows outside the window are dropped, not flattened to the edge.** A zero-width bar at the boundary
-reads as "this is happening now", which is the misreading a chart exists to prevent. A bar that
-*crosses* an edge is kept and clipped, and renders with a squared-off end on that side so "continues
-past here" is visible in the shape rather than only in the tooltip.
-
-An end **before** its start is bad data rather than a negative span, and collapses to a one-period bar.
-
-Read-only, like `pivot` and `stats`: a bar is a picture of a row that is edited in its own table. Rows
-come through the ordinary view pipeline, so `sources`, `filter`, computed columns and access gating all
-apply exactly as they do in a data view — a timeline is a data view with a different geometry, not a
-second way to reach rows.
-
-`validateSchema` rejects a missing `start`, a `start`/`end` naming a column that is not in `sources`,
-one that is not a **date** column, an unparseable `interval`, and a non-positive `periods`. Every one of
-those otherwise fails the same silent way — an empty chart, indistinguishable from a table nobody has
-filled in yet.
+- `start` (required) and `end` are date columns of the sources; `interval` uses the rotation vocabulary.
+- `from` defaults to today. A row with no `end` (or an end before its start) is one period long.
+- Rows outside the window are dropped; a bar crossing an edge is clipped with a square end.
+- Read-only; rows come through the normal view pipeline (`filter`, computed columns, access).
 
 ## scan (eleventh view kind)
 
-A view with a `scan` field turns **a code somebody scans or types into a row**. Engine: `scan.js`.
-
-The gesture is "this happened, here, now": a code on the dishwasher that logs a chore done, a code at
-each door on a security round, a control at an orienteering checkpoint, a code on a piece of kit that
-logs it going out. The code names the *thing*; the person comes from being signed in.
+A code scanned or typed becomes a row: a chore done, a door on a security round, a checkpoint. The code
+names the thing; the person is whoever is signed in.
 
 ```json
-{ "name": "chore_scan",
-  "sources": ["chore_log"],          // REQUIRED — the ONE table the scan appends to
-  "kind": "scan",
-  "filter": { "person": "@me" },     // the view lists rows back, like any data view
+{ "name": "chore_scan", "sources": ["chore_log"], "filter": { "person": "@me" },
   "columns": ["done_on", "chore", "status"],
-  "scan": {
-    "column": "chore",               // REQUIRED — a `ref` column; its lookup is the catalogue
-    "codeCol": "code",               // OPTIONAL — the lookup column the code matches (default: its valueCol)
-    "set": { "done_on": "@today" },  // OPTIONAL — the rest of the row
-    "once": "day",                   // OPTIONAL — "day" | "ever"; omitted, every scan appends
-    "label": "text.door_code"         // OPTIONAL — the box's label: a translation key, falling back to the literal
-  }
-}
+  "scan": { "column": "chore", "codeCol": "code", "set": { "done_on": "@today" },
+            "once": "day", "label": "text.door_code", "link": "arm" } }
 ```
 
-A scan view **is a data view** over the log it writes — same `sources`, `filter`, `columns`,
-`defaultSort`, access gating — plus a box to type a code into. It lists the last few rows back so a scan
-is visibly recorded.
+| Key | Meaning |
+|---|---|
+| `column` | Required: a `ref` column. A code must match a row of its lookup (case and spaces ignored); no match or two matches writes nothing. |
+| `codeCol` | The lookup column the code matches (default: its `valueCol`), e.g. an EAN. |
+| `set` | The rest of the row: literals, `@today` or `@now`. |
+| `once` | `"day"` or `"ever"`: refuse a second scan of the same code by the same person. Omitted, every scan appends. |
+| `label` | The box's label. |
+| `link` | What a `?view=…&scan=<code>` link does: `"arm"` (default) fills the box; `"submit"` writes at once. |
 
-**It usually wants no tab of its own.** Embedded through `{{view:x}}`, the box sits on the page it
-writes into — which is what the chores bundle does, putting it at the top of *My chores*, above the log
-it appends to:
-
-```
-## {{t:text.mine_scan}}
-
-{{view:chore_scan}}
-
-## {{t:text.mine_log}}
-
-{{view:chore_mine@both}}
-```
-
-Embedded, it renders **only the box**: the page composes what goes around it, and the outcome line
-already says the scan registered. The print action is top-level only for the same reason. A view kept
-out of `nav` is still a view — `{{view:…}}` and the `?scan=` deep link both name the VIEW, not a tab —
-so removing its tab costs nothing.
+- It is a data view over the log it writes, plus a box. Embedded (`{{view:chore_scan}}`) it shows only
+  the box, so it rarely needs a menu entry.
+- Each scan reports `created`, `already` (with when), `unknown` or `ambiguous`.
+- The row is written through self-service: the table needs an `owner` column, and `ownerWritable` must
+  include `column` and every `set` key. `validateSchema` checks.
+- A QR holding `?view=<view>&scan=<code>` opens in any phone camera. Where the browser has
+  `BarcodeDetector`, a camera button reads a photographed label in the page.
 
 ### A code that changes (`verify`) — a screen at the door vouches for it
-
-A printed code never changes, so a photo of it logs visits from anywhere. With `verify`, the code is
-shown by a **screen at the door** and changes every `rotateMinutes` (default 5):
 
 ```json
 "scan": { "column": "gym", "set": { "visited_on": "@today" },
           "verify": { "claim": "door_code", "set": { "verified": "yes" }, "rotateMinutes": 5 } }
 ```
 
-- **The member** scans or types the code as usual; it is saved as their **claim** (`claim`), unchecked —
-  there is no catalogue to check a changing code against. The outcome reads *Checked in*.
-- **The door screen** is the same view opened by staff (anyone with a write grant on the table): they
-  choose which catalogue row it stands at (the door) and show the QR. While it is open, every 15 seconds
-  it confirms today's claims on the current or previous code — writing `set` and the door into `column`.
-  It is the class check-in's rotation, shared (the `ROTATING_CODE` mixin), not a copy of it.
-- **The claim and the verdict are separate columns**: `claim` must be in `ownerWritable`, and neither the
-  `set` columns nor `column` may be, or a member could confirm themselves. `validateSchema` refuses both,
-  and `once` (every code is fresh). Count only confirmed rows where it matters (`when: { "verified": "yes" }`).
-- What it costs: nothing is confirmed while no door screen is showing the code.
-- **A tablet at the door** (or a room, for an rsvp `checkin` with `rotateMinutes`): sign it in as an **editor**
-  granted only what the screen confirms — `rw` on the log (visits; bookings for class check-in) and `r` on
-  the catalogue it picks from. In the QR, **Full screen** hides the app behind it (and the browser's own
-  bars, where allowed); **Lock** takes a PIN of 4+ digits, after which the code can only be left with that
-  PIN. The lock is the tablet's — kept in its browser, the PIN as a hash — and survives a reload: the app
-  reopens straight into the locked code. Leaving the browser is the tablet's to prevent: iPad Guided
-  Access, Android app pinning, or a kiosk browser. A forgotten PIN: clear the site's data on the tablet.
-
-### The code names a catalogue row
-
-`column` must be a **`ref`**, because the lookup it points at is what a code is checked against. A code
-matching no row is refused rather than written, which is the whole difference between a log worth
-reading and free text. Matching ignores case and surrounding whitespace — a wedge scanner appends Enter
-and sometimes a stray carriage return, and someone typing `cp-07` means the label that reads `CP-07`.
-
-`codeCol` exists for when the label is not the value the row stores: an EAN on a product, a badge
-number, a stamped control id. Two catalogue rows carrying the same code are **refused as ambiguous** —
-guessing writes the wrong door, and the report looks perfectly fine afterwards.
-
-### `set` — the rest of the row
-
-Values are literals, except two tokens resolved at scan time:
-
-| Token | Writes |
-|---|---|
-| `@today` | the local date, `YYYY-MM-DD` |
-| `@now` | an ISO timestamp |
-
-`@now` is what makes a round legible: four controls sharing a *date* says nothing, four controls sharing
-a *minute* says everything. Any other `@word` is rejected at load rather than written through as text.
-Columns with a `default` or `defaultFrom` (`status`, `person`) are filled by the ordinary create path and
-do not belong in `set`.
-
-### `once` — one scan per code
-
-`"day"` refuses a second scan of the same code on the same day and reports **when the first one was**;
-`"ever"` refuses it whenever it was logged. Omitted, every scan appends — washing up twice is two
-chores, and only a route or a checklist wants the other behaviour.
-
-Scoped to the **owner**: two guards walking one route each record their own visit. The day comes from
-`created_at` (in local time, so a 03:00 round does not split at UTC midnight) rather than from the date
-column the scan stamps — that column is what the row *means* and can be back-dated, while `created_at`
-is when the scan happened, which is what `once` is asking about.
-
-### Every outcome is shown
-
-| Outcome | What happened |
-|---|---|
-| `created` | the row was written |
-| `already` | `once` refused it, and the first time is on screen |
-| `unknown` | the code names no catalogue row — nothing written |
-| `ambiguous` | it names several — nothing written |
-
-Silence is the one answer a scanner must never get: a scan that quietly does nothing is
-indistinguishable from one that never registered.
-
-### What it needs to be able to write
-
-The row is written through the **self-service path** — owner-stamped, gated by `ownerWritable` in both
-rules layers — so the target table needs an `owner` column, and `ownerWritable` (when the table declares
-one) must name `scan.column` and every key of `set`. A column left out is *locked* to its declared
-default, so the create is refused whole rather than trimmed.
-
-`validateSchema` reports both, along with a `column` that is not a ref, a `codeCol` that is not a column
-of the lookup, a `set` naming a column that does not exist or naming the scanned column itself, an
-unknown `@token`, and an `once` that is neither `"day"` nor `"ever"`. Each otherwise fails the same
-silent way: a view that renders perfectly and refuses at the write layer with nothing to point at.
+- The code is shown on a screen at the door and changes every `rotateMinutes`. The member's scan is
+  saved as a `claim`; the door screen (the same view opened by staff) confirms claims on the current or
+  previous code every 15 seconds, writing `set` and the door.
+- `claim` must be `ownerWritable`; `set` and `column` must not be. Not with `once`. Count confirmed rows
+  only (`when: { "verified": "yes" }`).
+- **A tablet at the door**: sign it in as an editor with `rw` on the log and `r` on the catalogue. The QR
+  has **Full screen** and **Lock** (a PIN of 4+ digits, kept in that browser). Pin the browser with the
+  OS (Guided Access, app pinning).
 
 ### Printing the codes
 
-**Print codes lives in the Lookup editor**, beside the catalogue whose rows it labels — a label belongs
-to the row it names, not to the view that happens to read it. The button appears on a lookup only when
-some scan view resolves codes against it, and its tooltip names that view, because the QR carries a deep
-link and a link needs a destination. (Two scan views over one catalogue is legitimate — the same route
-logged two ways — and the first is taken, visibly rather than silently.)
-
-It emits one label per catalogue row: the name people read, a **QR**, and the code in text underneath.
-**Each row also carries its own printer**, for the one label that got scuffed or the control added after
-the round was printed — a single label prints under the name of the thing it labels, with no heading. The QR carries the `?view=…&scan=…` deep link, which is what makes the sheet
-useful to a phone — any camera app opens the link, and the app comes up on the right view with the code
-already resolved.
-
-The encoder is vendored (`qrcode-generator`) and **fetched the first time something draws a code, never
-at boot** — so a schema with no scan view never pays for it, and one that has never printed a sheet does
-not either. If it cannot be fetched (no `/vendor`, no network), the sheet falls back to **Code 39**,
-which needs no library at all: 44 characters of nine elements, three of them wide, drawn as SVG rects.
-That is the code a handheld wedge scanner reads.
-
-Code 39 has no lowercase, so its labels print **uppercase**. That costs nothing, because matching
-lowercases both sides: a label reading `DISHES` resolves the catalogue value `Dishes`. Its 43 characters
-are `0-9 A-Z` and `- . space $ / + %`; a code outside them cannot be encoded, and the sheet says so on
-that label rather than printing a name with no code under it. A QR has no such limit — it carries a URL.
-
-The text under each code is not decoration: it is what someone types when a label is scuffed, and it is
-the same path the box takes.
-
-**No camera is involved anywhere in this.** A handheld barcode scanner is a keyboard — it types the code
-and presses Enter — and anyone without one types the code by hand.
-
-### The phone's own camera: `?view=…&scan=…`
-
-A URL of the form
-
-```
-https://<app>/?view=<scan view>&scan=<code>
-```
-
-opens that scan view with the code already in the box. Put that URL in a **QR** on the door and the
-phone's own camera decodes it — iOS Camera, Control Center and Android's camera all offer to open a link
-they find in a QR — so this needs **no `BarcodeDetector`, no decoder, and no camera lifecycle**, on any
-platform. The app's whole share of it is one boot parameter.
-
-**By default it arms the box; it does not write.** A link is something anyone can send you, and a GET
-that logs a visit as you is a row somebody else caused — which for a patrol round is exactly the
-property the log exists to have. So the code arrives resolved and focused, and one deliberate press
-records it.
-
-`"link": "submit"` logs it with no press at all:
-
-```json
-"scan": { "column": "chore", "set": { "done_on": "@today" }, "link": "submit" }
-```
-
-That is the right trade where a wrong row costs nothing and gets reviewed anyway — a household chore
-log, where `status` starts at `logged` and somebody approves it — and the wrong one where the log's
-whole purpose is to say a person was somewhere. It is per view rather than one answer baked in, because
-those are both real deployments. The shipped `chore_scan` sets it; the default stays `"arm"`.
-
-An auto-submitting link **waits for the view's tables before writing**, which arming never has to do:
-the catalogue missing would report a good code as `unknown`, and the log missing would both blind
-`once` to an earlier scan and let the still-running fetch overwrite the new row in the cache — leaving
-the screen and the backend disagreeing.
-
-`view` is honoured only alongside `scan`, and only when it names a scan view: this is a scan contract,
-not a general view-routing parameter. Both are consumed from the address bar once read, so a reload does
-not re-arm and the link does not sit in history carrying a code.
-
-Two things to know before relying on it. An installed **iOS PWA and Safari have separate storage**, so a
-scanned link opening in Safari asks for sign-in once. And every scan is a **page navigation**, so this
-path needs the network — `sw.js` caches nothing, and the app has never started offline. A round in a
-basement wants a scanner that stays on one page.
-
-### Reading a label with the phone's camera
-
-Where the browser has a **`BarcodeDetector`**, the view offers a camera button: photograph a label and
-the code is decoded in the page and logged. It reads both symbologies the app itself produces — the
-sheet's Code 39, and a QR carrying the `?scan=` deep link, which is unwrapped to its code rather than
-navigated to, so photographing your own QR *inside* the app does the write here instead of opening a
-second copy of the app to do the same one.
-
-`BarcodeDetector` is absent on iOS Safari, on Firefox, and on desktop Chrome for Windows. **No button
-appears there, rather than a button that fails** — the camera is an enhancement, and the typed box (with
-a handheld wedge scanner, or fingers) is the path that works everywhere.
-
-It is a **still photograph**, not a video stream: `<input capture>` hands back one frame from the OS
-camera, so there is no `getUserMedia`, no permission of the app's own to hold, no decode loop, and no
-stream to forget to stop — which is how a camera light ends up staying on after somebody navigates away.
-
-**This is the form that works with no network.** The page is never left: the app is already loaded, the
-decode is local, and the write goes into the backend's offline cache. The `?scan=` link cannot do that —
-each scan is a fresh navigation, and `sw.js` caches nothing.
-
-A photograph with **no code** in it, or with **more than one**, is refused and says which. Choosing one
-of several would log a door nobody aimed at, for the same reason a duplicated catalogue code refuses.
-
-Photographing submits immediately, where a deep link only arms the box. Somebody pointing a camera at a
-label *is* the intent; a URL is only ever something that arrived.
+**Print codes** in the Lookup editor (on a catalogue some scan view reads) prints a label per row: its
+name, a QR with the `?scan=` link, and the code as text. Each row also has its own print button. Without
+the QR library the sheet falls back to Code 39 (uppercase; `0-9 A-Z - . space $ / + %`), which a handheld
+scanner reads. A handheld scanner types the code and Enter into the box.
 
 ## Translatable lists (`translatableLists`)
 
-List **values** (the options behind a `select`/`multiselect` column) are translated through
-`list.<list>.<value>` keys — the same keys the grid, board lanes, and pivot axes resolve through. Most
-lists are open data you would never localize (member names, song titles), so the Languages editor does
-**not** expose every list by default. It surfaces list-value keys from two sources:
+List values translate through `list.<list>.<value>` keys. The Languages tab's **Lists** section offers:
 
-1. **Filter/conditional-pinned values** — any value a schema `filter`/`when` references (e.g. a program
-   view filtering `tila: "vastaanotettu"`). These are always translatable (and locked from rename/deletion),
-   because schema logic keys on them; you get exactly those values, not the whole list. This holds whether
-   the filtered column is a `select` (pinned under its list) **or a `ref`** (pinned under its lookup table),
-   so a 2-D ref lane's filter-referenced values can't be renamed or removed from the lookup — the ref/lookup
-   editor shows them locked, the same way the Lists editor locks list values.
-2. **Opt-in lists** — a top-level **`"translatableLists": ["tilat", "organisaatio", …]`** array. Every
-   current value of each named list becomes a translation key. Use this for controlled vocabularies you
-   want fully localized (status lifecycles, organisations, roles) while leaving open/data lists out. An
-   entry may also name a **lookup/ref table** (e.g. a board's 2-D ref-lane table): its distinct cell values
-   across all **text-valued** columns are exposed the same way, so both dimensions of a ref lane are
-   translatable. `number`, `date`, `owner`, `url` and `image` columns contribute no values — a chore
-   catalogue's `points` has no translation, and offering `list.ref_chores.2` would only bury the values
-   that do. Their column **headers** (`field.points`) stay translatable like any other.
-   Opening **Languages** loads every lookup table named here, so the vocabularies offered do not depend
-   on which views you happened to visit first.
+1. Values a schema `filter` or `when` names (locked against rename and delete, since logic depends on them).
+2. Every value of each list or lookup table named in `"translatableLists": ["tilat", "ref_callings"]`
+   (a lookup's text columns only).
 
-```json
-{ "defaultLanguage": "Suomi",
-  "translatableLists": ["tilat", "organisaatio", "tehtävät", "piispakunta"],
-  "tables": { … } }
-```
-
-In the **Languages** tab these keys are grouped under their own collapsible **Lists** section (separate
-from **App** and **Schema**) so they're easy to find. A value with no translation falls back to the raw
-value, so opting a list in is non-breaking.
+An untranslated value shows as itself.
 
 ### A `list:` may name a lookup TABLE
 
-A `select`/`multiselect` column's `list:` normally names a list (a bare array of strings). It may
-instead name a **lookup table** (`isLookup: true`), and then the options are that table's rows:
-
 ```json
-"tasks_ann": {
-  "columns": [ { "name": "tasks", "type": "multiselect", "list": "ref_chores", "sorted": true } ]
-}
+{ "name": "tasks", "type": "select", "multiple": true, "list": "ref_chores", "sorted": true }
+{ "name": "responsible", "type": "select", "list": "ref_callings", "valueCol": "slug" }
 ```
 
-Use it when a catalogue already exists and a second column only needs the *name* from it. In the chores
-example the rotation rosters read `ref_chores`, so every rostered task is a chore the scoreboard can
-price — before, a parallel free-string list held task names that nothing could score.
-
-- **The option value is the lookup's group dimension by default** — `hierarchy.parent` where the table
-  declares one, else its first author-facing column (its name column, the same one a `ref` column's
-  `valueCol` defaults to). The rest of the row stays reference data: `ref_chores.points` is
-  what the scoreboard's `lookup` computed column reads.
-- **`valueCol` picks a different dimension.** One catalogue can answer several questions — the
-  bishopric example's `ref_callings` holds an `organization`, a `calling`, and a `slug` naming the pair
-  — and which of them a picker should offer is the *column's* business, not the table's, because two
-  columns may legitimately want two different ones:
-
-  ```json
-  { "name": "organization", "type": "select", "list": "ref_callings" },                     // organizations
-  { "name": "responsible",  "type": "select", "list": "ref_callings", "valueCol": "slug" }  // positions
-  ```
-
-  Same key, same meaning as on a `ref`. A blank cell in a HANDLE dimension is derived rather than
-  skipped, so blankness no longer keeps a row out of the picker. To keep a row in the catalogue without
-  offering it (an ordination in a column that wants positions), give the column a `listFilter` condition.
-  `valueCol` naming a column the lookup does not have, or a `list:` that
-  is a plain list, is a load-time error: both would fall back silently to the group dimension, which
-  looks like a working picker full of the wrong values.
-- **Values are deduped** across rows and translate through `list.<table>.<value>`, the same keys
-  `translatableLists` exposes when it names a lookup table.
-- **Not editable as a list**: no `allowNew`, and the Lists editor ignores it. A lookup table is
-  maintained in the **Lookup** tab, under its own r/rw table grant — which is the point, since adding a
-  chore there means giving it a points value.
-- Reads still need access to the lookup table itself, like any other table.
+- The options are the lookup's rows: its `hierarchy.parent` (else its name column), or `valueCol`. Values
+  are deduped and translate as `list.<table>.<value>`.
+- `listFilter` keeps a row out of the picker without removing it from the catalogue.
+- Not editable as a list (no `allowNew`); the lookup is maintained in the Lookup tab under its table grant.
 
 ## Who may edit a list (`userWritableLists`)
 
-Editing a list is editing **shared vocabulary**: the member names, the status words every view resolves
-through `list.<list>.<value>`, a board's lane labels. So the **Lists editor is admin-only**, and so is
-every list write by default — a non-admin sees list values but cannot rename, add or delete them.
-
-Individual lists opt back out with a top-level array, for the ones that are just free-form vocabularies
-an ordinary user maintains as they work:
+List values are shared vocabulary, so only admins edit lists, unless named:
 
 ```json
-{ "translatableLists": ["chore_status"],
-  "userWritableLists": ["shop_items"],
-  "tables": { … } }
+"userWritableLists": ["shop_items"]
 ```
 
-- **What it opens**: adding, renaming, reordering and removing that list's VALUES — from the Lists
-  editor and from an `allowNew` cell alike. The Lists editor is per list: an opened list is editable,
-  every other list renders read-only in the same screen.
-- **Who**: any REGISTERED user. A table grant is deliberately not part of the question — see below.
-- **Still admin-only**: deleting the list itself (pruning a whole vocabulary), and every list the
-  schema does not name.
-- **Absent or empty = admin-only**, which is the safe default: a deployment that never declares it
-  cannot silently keep a permissive behaviour.
-- **Why an allowlist and not the table grant**: a list belongs to *every* table whose columns reference
-  it. Keying on the grant meant a member with `rw` on one table (`home_shopping`) inherited write access
-  to every list those columns touch — including `members`, which `home_shopping.added_by` also uses.
-  The allowlist says exactly what it means.
-- **The ownership label is always pinned**, whoever writes: to the `_meta/listTables` mirror on create
-  (where the label is an unverified claim) and to its stored value on update. Re-stamping it decides who
-  can *see* the list, so it stays an admin action.
-- **Validation** rejects a name no column references, since a typo would fail silently (the list would
-  just stay admin-only).
-- **Enforced in all four layers** from a `_meta/listWritable` mirror written by `saveSchema`
-  (`BackendHelpers.userWritableListsOf`): `firestore.rules` (`listUserWritable`), 
-  `supabase-schema.sql` (`app_list_user_writable`), `dev/server.js` (`putListItem` + `saveLists`),
-  and the UI (`canEditList`, which drives both the Lists editor and the `allowNew` combobox so neither
-  offers a write the server will refuse).
+- Any registered user may then add, rename, reorder and remove that list's values (in the Lists editor or
+  an `allowNew` cell). Deleting the list stays admin-only.
+- An allowlist, not the table grant, because a list belongs to every table that uses it.
+- Enforced by every backend from a `_meta/listWritable` mirror written by `saveSchema`.
 
 ## Self-service tables (Firebase)
 
-Any table that declares an **`owner` column** is a **self-service** table: a registered member may
-create / edit / delete **their own** owner-stamped rows there **without a table grant**, while an editor
-(table grant) or admin manages all rows. This is the RSVP/sign-up permission model, available to any
-table — the `rsvp` view is one presentation of it; a plain data grid over an owner-column table (e.g. a
-`leave_requests`, `expenses`, or `shifts` table) is another. Read visibility is the separate `owner` /
-`rosterPublic` axis (private to the owner + organizers, or public) described under **rsvp**.
+A table with an `owner` column is self-service: a registered member may create, edit and delete their own
+rows without a grant; editors with a grant and admins manage all rows. The `rsvp`, `form` and `scan`
+kinds build on it. Every backend enforces it, not only Firebase.
 
-- **In the UI**: a self-service table shows in the nav for such a member and its **Add** button is
-  available; per-row edit/delete is gated on ownership (their own rows are editable, others render
-  read-only, the `owner` column is always read-only). Admins/editors with a grant manage all rows as
-  before.
-- **Who can READ the rows** is the separate `owner` / `rosterPublic` axis. Every owner-stamped row
-  created through the app carries `rosterPublic: true` unless the table sets **`privateRoster: true`**,
-  in which case each row is visible only to its owner and to organizers (a table grant) — the flag has
-  to ride on the row because both rules layers are schema-blind. Leave it off for a shared log whose
-  totals everyone should see (a chore leaderboard); switch it on for genuinely private submissions.
-  Rows written before this behaviour existed carry no flag and stay owner-private until re-saved.
-- **Its lists are readable by every registered member**, grant or not: a member fills in the columns of
-  a self-service table, so the vocabularies those columns use (an rsvp's status list) must reach them.
-  Reading a list reveals no rows. Enforced from the same `_meta/ownerTables` mirror (`listAllowed`,
-  `app_list_allowed`, `ListAccess.filterLists`).
-- **Read-only grant + `owner` column** is the other useful combination: `{ "<table>": "r" }` lets a
-  member see every row while writes still route through self-service, so they change only their own.
-  See **Access modes** below.
-- **How the rules know**: Firestore rules are schema-blind, so `saveSchema` mirrors the set of
-  owner-column tables to `_meta/ownerTables` (`BackendHelpers.ownerTablesOf`). The data rules allow
-  owner-create **only** on a table in that set — otherwise a member could inject owner-stamped rows into
-  any table. The set is re-derived on every schema save; no manual upkeep.
-- **Migration**: if `_meta/ownerTables` doesn't exist yet (rules deployed before the schema was next
-  saved), owner-create falls back to permissive so existing sign-up flows keep working; enforcement
-  activates on the next schema save.
-- **Enforcement** is the Firestore rules. The local/dev server (unauthenticated, loopback only) is not a
-  security boundary, but **mirrors** owner-scoped reads/writes for a self-service table so the local demo
-  behaves like Firebase: a non-granted member reads their own rows (+ `rosterPublic`) and may create /
-  edit / delete only their own owned rows.
-- **Reads must be expressible as a QUERY.** Firestore rules are not filters: a rule testing document
-  fields authorizes a collection read only when the query constrains those same fields, so a member with
-  no grant cannot read the collection at all — they ask for `owner == me` and `rosterPublic == true` and
-  get the union (`backend-firebase._scopedRead`). Two consequences for schema authors: the read gate is a
-  flat disjunction (`grant OR my row OR public row`) rather than a test of whether `owner` is present, so
-  `rosterPublic: true` marks a row public on its own; and a **grantless** member sees only those two
-  slices, never a third condition someone might expect to work. Supabase RLS filters rows natively and so
-  has no such restriction, but its policy is written to the same shape deliberately.
+- **Who reads the rows**: each row carries `rosterPublic: true` (everyone can read it) unless the table
+  sets `"privateRoster": true` (only its owner and grant holders).
+- The lists its columns use are readable by every registered member.
+- A read-only grant (`{ "<table>": "r" }`) plus an `owner` column lets a member see every row and change
+  only their own.
+- Firestore rules cannot filter, so a member without a grant reads `owner == me` and `rosterPublic ==
+  true` as two queries; nothing else is visible to them.
+- `saveSchema` mirrors the owner tables to `_meta/ownerTables`; the rules allow owner-create only there.
 
 #### What `privateRoster` actually guarantees
 
-Both rules layers enforce the **flag on the row**. The flag is written by the **client** — app-core
-stamps `rosterPublic = !privateRoster` when it creates the row — and neither layer holds a mirror of
-the table's policy to check that stamp against. `rosterPublic` is also one of the system columns an
-owner may always write (`ownerSystemCols` in firestore.rules, `OWNER_SYSTEM_COLS` in
-backend-helpers.js), on create and on a later update alike, and being listed there is what lets the
-app stamp it at all.
-
-So the honest statement of the guarantee is:
-
-- **`privateRoster` stops the app from publishing your submissions**, which is what it is for and what
-  it does reliably. Every row written through the UI carries the table's policy.
-- It does **not** stop a member from publishing **their own** rows. A client talking to Firestore or
-  Supabase directly — which any signed-in member's browser can do — may write `rosterPublic: true` on
-  a row it owns, and the rules will honour it.
-- The exposure is bounded to rows that member owns. `update` still requires
-  `resource.data.owner == myEmail()`, so nobody can publish anybody else's response, and
-  `selfServiceTable` confines the whole owner branch to tables that declare an `owner` column.
-- **Switching `privateRoster` on later does not retroactively hide existing rows.** They keep the
-  `rosterPublic: true` they were stamped with and stay readable until they are re-saved. This is the
-  mirror image of the note above about rows predating the flag.
-
-Closing the gap means mirroring the table's policy to `_meta` and verifying the stamp at write time.
-That is deliberately not a one-line rule change: the owner-create path already spends five of
-Firestore's ten `get()` calls per request, so a sixth mirror document has to wait for the
-`_meta/rulesMirror` consolidation that *THE ACCESS-CALL BUDGET* comment at the top of firestore.rules
-prescribes. Verifying on write would also not fix rows already stored, so it needs a sweep beside it.
-
-If a submission must be secret from other members regardless of what they can be talked into sending,
-the boundary to reach for is a **table grant** — a table only organizers hold — not this flag. That is
-the same distinction `mineOnly` and `obscureNames` draw: display intent is not a security boundary.
+The flag rides on each row and is written by the client. So `privateRoster` stops the app from
+publishing submissions, but a member talking to the backend directly may mark **their own** rows public.
+Nobody can publish anyone else's. Turning it on later does not hide rows already stamped public. For a
+secret that must hold against members, use a table only organizers are granted.
 
 ## Access modes (`r` / `rw`)
 
-A user's grant (`_users/<email>.tables`) is one of three shapes, all still accepted:
+A user's grant `tables` is one of:
 
 | Stored value | Means |
 |---|---|
-| `"all"` | every table, read + write |
-| `["tasks", "notes"]` | **legacy** — read + write on each. Nothing writes this shape any more; existing grants keep working untouched |
-| `{ "tasks": "rw", "ref_chores": "r" }` | per-table mode. `"r"` = **visible but not editable** |
+| `"all"` | every table, read and write |
+| `["tasks", "notes"]` | legacy: read and write on each |
+| `{ "tasks": "rw", "ref_chores": "r" }` | per table; `"r"` is visible but not editable |
 
-`"r"` is for reference data a member must see and must not change — a chore catalogue with point
-values, a price list, a status vocabulary. The table appears in the nav, its rows load, its lists and
-ref-pickers resolve, and every cell renders read-only; add/delete/archive controls are hidden.
-
-- **Edited in Settings → Users** as two chip columns: *Tables* (can edit) and *Can view*. They merge
-  into the one stored map, with edit winning where a feature is in both.
-- **Enforced server-side.** Reads use plain membership, which both rules languages satisfy for either
-  container (`x in <map>` matches keys; `jsonb ? k` matches array elements *or* object keys) — which is
-  exactly why no stored grant needed migrating. Writes consult a denormalized **`rwTables`** list saved
-  next to the grant, since neither rules layer can filter a map (same trick as `_meta/ownerTables`).
-  A user doc without `rwTables` predates the split and falls back to membership.
-- **Lists follow the table.** Editing a list requires *write* access to an owning table; a read-only
-  grant sees the list and cannot change it.
-- No grant at all still means no access (fail closed), and clearing every chip in the UI still means
-  "no restriction" rather than locking the user out.
+- Edited in Settings → Users as two chip columns, *Tables* (edit) and *Can view*.
+- Writes are checked against `rwTables`, saved beside the grant.
+- Editing a list needs write access to a table that uses it.
+- No grant means no access.
 
 ### `ownerWritable` — which columns an owner may set
 
-The self-service rule above is **row-level**: a member may rewrite every field of their own row. On a
-table carrying a decision — an approval, a verdict, a paid flag — that means deciding it about
-themselves. A table can name the columns an owner-scoped write may touch:
-
 ```json
-"chore_log": {
-  "columns": [ { "name": "owner", "type": "owner" }, …,
-               { "name": "status", "type": "select", "list": "chore_status", "default": "logged" } ],
-  "ownerWritable": ["person", "chore", "done_on", "note"]
-}
+"chore_log": { "ownerWritable": ["person", "chore", "done_on", "note"], "columns": [ …,
+  { "name": "status", "type": "select", "list": "chore_status", "default": "logged" } ] }
 ```
 
-The owner logs what they did; `status` is not theirs to write. An **editor with a table grant, or an
-admin, is unaffected** — the bound applies only to the owner branch, which is what makes "anyone may
-log, only a parent may approve" expressible without a second table.
+The owner logs the chore; `status` is not theirs to set, so a parent approves. Grant holders and admins
+are not bound.
 
-- **Opt-in**: a table that names no `ownerWritable` keeps the old behaviour (owner writes the whole row).
-- **On create**, a gated column must hold its declared `default` — so a row cannot be *born* approved.
-  That is why `default` matters here: it is the value the rules expect to see.
-- `id`, `owner`, `created_at`, `updated_at` and `rosterPublic` are always permitted (identity and
-  bookkeeping every write stamps).
-- **An owner column reads as the person**: a cell, a board card, a calendar title or a search shows the
-  account's profile name, not the email it stores.
-- **`defaultFrom` columns cannot be gated** — they resolve per user at create time, so no server-side
-  rule can predict the value. List them in `ownerWritable` (as `person` is above) or leave them out of
-  the table.
-- **Enforced in both rules layers**, from a `_meta/ownerWritable` mirror written by `saveSchema`
-  (`BackendHelpers.ownerWritableOf`), the same denormalise-for-schema-blind-rules pattern as
-  `ownerTables` and `pageAccess`. The UI matches it: a gated cell renders read-only for its owner, and a
-  board whose lane column is gated offers that owner no drag and no move-menu — otherwise the write
-  would simply be refused and the card would snap back unexplained.
+- Without `ownerWritable` the owner writes the whole row.
+- On create, a column outside the list must hold its `default`, so a row cannot be born approved.
+- `id`, `owner`, `created_at`, `updated_at` and `rosterPublic` are always allowed.
+- A `defaultFrom` column must be in the list (its value cannot be predicted).
+- Enforced by every backend from `_meta/ownerWritable`; the UI shows those cells read-only to the owner.
 
 ### Identity columns — an owner may only ever name themselves
 
-A column with **`defaultFrom: "@me"`** is an *identity* column: it records which person a row is about.
-It **must** appear in `ownerWritable`, or its owner could not create the row at all — a `defaultFrom`
-value is resolved per user, so the `locked` map cannot predict it. That left the owner free to write
-*somebody else's* identity into it and log the work as them, which the column bounds cannot catch,
-because the column IS one they may write.
-
-So the write layers require an identity column to carry **the caller's own value**. No schema key is
-needed: a `defaultFrom: "@me"` column that is owner-writable is one, automatically.
-
-```json
-"chore_log": {
-  "columns": [ { "name": "owner", "type": "owner" },
-               { "name": "person", "type": "select", "list": "members", "defaultFrom": "@me" } ],
-  "ownerWritable": ["person", "chore", "done_on", "note"]
-}
-```
-
-Ann may log a chore as Ann and may not log one as Bob — on create *or* update. An **editor with a table
-grant, or an admin, is unaffected**: a parent logging on someone's behalf is the owner branch not
-applying, exactly as with the rest of `ownerWritable`.
-
-- **Only for a LIST-backed column.** Without a list the identity is the profile display name, which the
-  user writes themselves — there would be nothing to verify against, so it is left alone rather than
-  pretending.
-- **A write that does not carry the column cannot forge it**, so ordinary cell edits are untouched.
-- **A caller with no identity cannot claim one** — they can't name themselves, so they can't own a row
-  that says who did the work.
-- **How the rules know**: they can't QUERY for "the link naming me". `setListUser` mirrors the answer
-  onto the linked user's grant doc as `identity: { <list>: <value> }` — `_users/<email>` is
-  admin-write-only, so a member cannot forge it, and both rules layers already read it for the grant, so
-  the check costs no extra read. Re-linking a value to someone else clears it from whoever held it.
-- **Migration grace**: a grant written before this has no `identity` map, and is permissive. Failing
-  closed would lock every existing member out of logging until an admin re-saved every link. It starts
-  binding for a user the moment their link is saved again.
-- **Enforced in all four layers**: `firestore.rules` (`ownerIdentityOk`, on owner create *and* update),
-  `supabase-schema.sql` (`app_owner_identity_ok`), `dev/server.js` (which resolves the identity live
-  from the links rather than the mirror), and the UI, which renders the column read-only so it never
-  offers a write the server will refuse.
+A list-backed `defaultFrom: "@me"` column in `ownerWritable` must hold the caller's own value (Ann may log
+a chore as Ann, not as Bob), on create and update. Grant holders are not bound. The check reads the
+`identity` map that linking a list value to an account writes onto the user's grant; grants written
+before that are not checked until the link is saved again.
 
 ### `ownerWritableWhile` — until when an owner may set them
 
-`ownerWritable` bounds *which* fields an owner may rewrite, but ownership never expires: they could
-still edit (or delete) their entry the day after a parent approved it. `ownerWritableWhile` adds the
-missing half — the owner branch reaches a row only **while it is still in one of the listed states**:
-
 ```json
-"chore_log": {
-  "ownerWritable": ["person", "chore", "done_on", "note"],
-  "ownerWritableWhile": { "status": "logged" }
-}
+"ownerWritableWhile": { "status": "logged" }
 ```
 
-"You may fix your entry until it is ruled on." Once `status` leaves `logged` the row is frozen for its
-owner — every column, plus delete and archive — while an editor with a grant, or an admin, is
-unaffected as always.
-
-- **One column, one or more values**: `{ "status": "logged" }` or `{ "status": ["logged", "rejected"] }`
-  (the second lets a rejected entry be corrected and resubmitted). More than one column is rejected at
-  load: the mirror is a single column plus a value list because neither rules language can loop over a
-  map.
-- **Creates always pass** — a new row is by definition in its own starting state, and `ownerWritable`'s
-  `locked` map already stops a row being *born* approved.
-- **Read off the stored row, never the incoming one**, in all four layers — otherwise an owner could
-  send a compliant state alongside the edit and unlock their own approved row.
-- **Inert without `ownerWritable`** (nothing bounds an owner write to begin with); validation says so.
-- **Enforced in all four layers** from the same `_meta/ownerWritable` mirror, which carries the gate as
-  `whileCol` + `whileVals`: `firestore.rules` (`ownerStateOk`), `supabase-schema.sql`
-  (`app_owner_state_ok`), `dev/server.js` (`ownerFieldsOk` + the delete gate), and the UI
-  (`ownerRowWritable`, feeding `cellReadonly` / `canMutateRow`).
+The owner may edit or delete their row only while `status` is one of the values (`["logged", "rejected"]`
+allows resubmitting). Read off the stored row. Creates always pass; one column only; needs `ownerWritable`.
 
 ### Verified attendance — a status the member cannot set, which then freezes their entry
 
-"Did the people who signed up actually turn up?" is `ownerWritable` and `ownerWritableWhile` together,
-and needs no further key. The demo's `rsvps` carries it:
-
 ```json
-"rsvps": {
-  "columns": [ { "name": "owner", "type": "owner" }, …,
-               { "name": "attendance", "type": "select", "list": "attendance_status", "default": "pending" } ],
-  "ownerWritable": ["practice", "response", "note"],
-  "ownerWritableWhile": { "attendance": "pending" }
-}
+"rsvps": { "ownerWritable": ["practice", "response", "note"], "ownerWritableWhile": { "attendance": "pending" },
+  "columns": [ …, { "name": "attendance", "type": "select", "list": "attendance_status", "default": "pending" } ] }
 ```
 
-The member's RSVP is born `pending`. They may change it until an organizer marks it `attended` or
-`absent`; they can never set it themselves, because `attendance` is not in `ownerWritable`. Once it is
-marked, the RSVP picker for that event is disabled and the write layers refuse a change. The organizer's
-screen is any grid over `rsvps`, for example the demo's `attendance_check`, a card per practice embedding
-its responses, and a report counts only rows whose `attendance` is `attended`.
+The member changes their response until an organizer marks `attended` or `absent`; then it is frozen.
 
-Three traps:
-
-- **A table with no `ownerWritable` is unbounded.** Omitting the list does not create a weak gate; it
-  creates no gate. The owner may write every column, the verifier's included.
-- **The gate column needs a non-empty `default`.** Reading a missing property is an evaluation *error* in
-  the Firestore rules language, not `undefined`, so a blank gate fails closed and freezes the row for its
-  owner from birth. Use `"pending"`, never `""`.
-- **Adding the gate to a table that already has rows freezes them.** Rows written before the column
-  existed have no value in it, which is not one of the listed states. Fill the column on the existing rows
-  (as an organizer, or by import) when the schema changes.
-
-`ownerWritableWhile` gates on a column value, not a date: "editable until someone marks attendance" is
-expressible, while "editable until the event happens" is not.
+- The gate column needs a non-empty `default` (a blank one freezes the row from birth).
+- Adding the gate to a table with rows freezes them until the column is filled in.
 
 ### `stamped` — a column the app fills in and nobody rewrites
 
-`ownerWritable` bounds the **owner** branch, and is deliberately inert for an editor holding a table
-grant. That is right for an approval column: a parent holds the grant precisely so they can decide.
-
-A stamped column is the other shape. On a **shared** table — a household shopping list everybody may
-tick off — one column records *who added the row*, and that is not a decision anyone gets to revise.
-Owner-bounding the table would protect it, at the cost of the sharing: nobody could tick off somebody
-else's milk. So this binds the **column** rather than the row.
-
 ```json
-"home_shopping": {
-  "columns": [
-    { "name": "item", "type": "select", "list": "shop_items" },
-    { "name": "shop_status", "type": "select", "list": "shop_status", "default": "needed" },
-    { "name": "added_by", "type": "select", "list": "members",
-      "defaultFrom": "@me", "stamped": true }
-  ]
-}
+{ "name": "added_by", "type": "select", "list": "members", "defaultFrom": "@me", "stamped": true }
 ```
 
-Ann adds the milk and the row says Ann. Bob may tick it off, rename the item and change the quantity —
-and may not relabel who added it, nor may Ann relabel his.
+On a shared table (a shopping list anyone may tick off), records who added the row. On create it must be
+the caller's own value; afterwards nobody but an admin changes it. A write that does not touch it is
+unaffected; an empty stamp may be filled with your own name. A caller with no linked identity cannot
+create rows. One per table, with `defaultFrom: "@me"` and a `list`.
 
-- **Only on a `defaultFrom: "@me"` column backed by a `list`.** The `defaultFrom` is what fills the
-  column in; the list is what the write layers check a value against (the same resolution `@me` uses).
-  Without either, the column would simply be unwritable — a broken table rather than a protected one.
-  `validateSchema` rejects both mistakes at load rather than leaving a column that *looks* protected.
-- **On create** the value must be the caller's own, so a row cannot be added under someone else's name.
-- **On update it may not change at all** — not even to the caller's own value. This is the half
-  `ownerWritable` cannot express, because a table grant makes its bounds inert.
-- **A write that does not carry the column is untouched.** Ticking off somebody else's row never
-  mentions it, and that has to keep working, or protecting the column would cost the sharing.
-- **An empty stored stamp counts as a create.** A row written before the column existed can be filled
-  in — but only with your own name. That is the migration path, not a hole.
-- **A caller with no identity cannot stamp one.** They have no name to write, and a table recording who
-  did something is not one to write anonymously. Note this has **no migration grace**, unlike the
-  identity column: a permissive window is one in which the attribution can be forged. Link the account
-  first (Settings → Lists), or creates on that table are refused.
-- **Admins are exempt**, as they are from every other bound here, so a wrong stamp can be corrected.
-- **One per table**: the value is resolved against the column's list, and neither rules language can
-  loop a map to use a different list per column. A second one is named at load.
-- **Enforced in all four layers** from a `_meta/stamped` mirror written by `saveSchema`
-  (`BackendHelpers.stampedOf`), the same denormalise-for-schema-blind-rules pattern as `ownerWritable`:
-  `firestore.rules` (`stampedOk`), `supabase-schema.sql` (`app_stamped_ok`, which reads the stored row
-  inside its `WITH CHECK` because an RLS update policy never sees old and new at once), the dev server
-  (which runs that SQL), and the UI, which renders the cell read-only so it never offers a write the
-  server will refuse.
-
-> **`stamped` vs `ownerWritable`.** Use `ownerWritable` for a *decision* — an approval, a verdict —
-> where a grant-holder is exactly who should be able to make it. Use `stamped` for a *fact about who
-> acted*, which nobody should revise. They compose: a table can have both.
+Use `ownerWritable` for a decision a grant holder makes; `stamped` for a fact about who acted.
 
 ## user profiles, user-backed lists & membership (Firebase)
 
-These features are Firebase-backed (the local/dev backend mirrors them for tests). They build on the
-per-user access model (`_users/<lowercased-email>` docs; the legacy `_meta/users` map is admin-read
-only).
+All backends implement these; see BACKEND_API.md for the methods.
 
 ### `_profiles/<email>` — opt-in display name + avatar
-Each user has an optional profile `{ name, shared, picture }`, editable only by themselves (or an admin,
-who may set `name` only) under **Settings → My profile**:
-- `name` — the user's display name; the identity that `@me` resolves to and that a user-backed list
-  shows. Optional (a registered user may have no name → `@me` matches nothing).
-- `shared` — opt-in (default `false`). When `true`, the name is readable by any registered user via a
-  **rules-provable** `.where('shared','==',true)` query (a constant comparison — unlike an
-  intersection query, which Firestore cannot prove-authorize).
-- `picture` — an optional self-uploaded avatar stored inline as a `data:` URL. The image is downscaled
-  client-side (longest side ≤ 256px, JPEG) before saving and capped by the rules at ~350KB so a profile
-  doc stays well under Firestore's 1MB document limit — no separate Storage bucket needed.
+
+**Settings → My profile**: a `name` (what `@me` resolves to by default), `shared` (opt in to showing it to
+other members) and a `picture` (≤256 px, stored inline).
 
 ### `listSources: { "<listName>": "users" }` — a name list fed by profiles
-A top-level schema map marking a list as user-backed. On boot the app **merges** the opted-in shared
-display names on top of that list's own values, so `select`/`multiselect` columns and rotation `rosters`
-referencing it become **assignable to registered users** — no manual list upkeep. Example:
-```json
-"listSources": { "members": "users" },
-"tables": { "chore_log": { "columns": { "person": { "type": "select", "list": "members" } } } }
-```
-- The list's stored values are **kept**: a user-backed list still works before anyone opts in (a fresh
-  deployment), and a curated value is never removed by the overlay. Only names the overlay itself
-  injected are withdrawn when a user opts out.
-- Opting in is per-user (**Profile → share name**), so on a new deployment this list contains only its
-  stored values until users share. Seed it if the column must be usable immediately.
+
+The shared profile names are merged into the list's own values, so its columns and rosters can name
+registered users without upkeep.
 
 ### `listSources: { "<listName>": "userlink" }` — curated names, linked accounts
 
-The other way to tie a list to real people, and the **opposite trade-off** from `"users"` (a list is one
-or the other — the key holds a single string). The list keeps its own **curated** values as the display
-name; an admin links each value to an account email in the Lookup tab.
+The list keeps its own values; an admin links each value to an account in the Lookup tab. `@me` on that
+list resolves to the caller's linked value, and avatars follow the account.
 
 | | `"users"` | `"userlink"` |
 |---|---|---|
-| Where the name comes from | each user's profile | the list, curated by an admin |
-| A user renames their profile | the list value changes | nothing moves |
-| Setup | users tick *share my name* | an admin links each value once |
-| Extra | — | avatars, resolved live from the profile |
+| The name comes from | each user's profile | the list, curated by an admin |
+| A profile rename | changes the value | changes nothing |
+| Setup | users tick *share my name* | an admin links each value |
 
 #### `"userlink-name"` — the value names a ROLE, the cell shows who holds it
 
-The same link, with one difference: the cell displays the **linked account's profile name** instead of
-the value. For a list whose values are positions rather than people (`bishop`, `counselor1`), where the
-question a reader has is who currently holds one.
-
 ```json
-"listSources": {
-  "members":   "userlink",        // values are curated names; the link drives @me and the avatar
-  "callings":  "userlink-name"    // values are positions; the cell shows the linked person
-}
+"listSources": { "members": "userlink", "callings": "userlink-name", "ref_callings": "userlink-name" }
 ```
 
-**A lookup TABLE may be the namespace**, not just a list: `"listSources": { "ref_callings": "userlink-name" }`
-links accounts to rows of a catalogue instead of to values of a list beside it. The dimension the links
-are keyed by is the one the referring columns address with `valueCol` — derived rather than declared a
-second time, and a load-time error when no column says which, since the Lookup editor would then have
-no picker to offer and every `@me` would resolve empty. The picker appears per row in the **Lookup**
-tab, where that catalogue is maintained, rather than in the Lists section.
-
-**The role stays on screen.** Where the label shows a person, the value it names is shown beside it: as
-the second line of that option in the dropdown, and as the tooltip of the value wherever it is displayed.
-An unlinked position needs neither, since its label already is the role. The label itself is not changed,
-so a printout shows the name only.
-
-Precedence for a value's label, in `listLabel`: the linked account's name, else the
-`list.<list>.<value>` translation, else the raw value. So it degrades rather than breaks — an unlinked
-value, a linked account that shares no name, and a viewer who may not see that profile all read as the
-label, exactly as a plain `userlink` list does.
-
-Two consequences worth knowing:
-
-- **It is per-viewer.** Non-admins only see profiles whose owner ticked *share my name*; admins see
-  every link. An officer who has not opted in shows the label to everyone else.
-- **It resolves live, so it re-labels history.** A meeting archived in 2024 stores `bishop` and will
-  show whoever is linked *today*. That is also true of naming the person in the translation; the only
-  way to keep the person who actually presided is to store their name in the row.
-
-**`@me` works in both**, resolving per column: on a `userlink` list it becomes the curated value linked
-to the caller's account, otherwise their profile display name. So a household can keep calling someone
-"Ann" while the account behind her is `ann@example.test`, and `{ "person": "@me" }` still finds her rows.
-A member who is linked to nothing resolves to the fail-closed sentinel and matches no rows — the same
-stance as an empty profile name.
-
-- `@me` resolves through a column's `list`. On a `type: "ref"` column it is a load error; point a `list`
-  at the lookup instead.
-- The resolution needs the caller's **own** link, which they may read (`getMyListValues` — a rules-provable
-  equality query on their own email; see the `_list_users` read rule). The full value→email map stays
-  admin-only, and the avatar projection still never carries an email.
-- **Renaming a list value**, or a lookup row's handle (either dimension, when the handle is derived), migrates the link with it, and deleting either drops it; but the identity is keyed by the old string, so a
-  rename that races another writer can leave the link behind.
+- The cell shows the linked person's name, with the role beside it in the picker and tooltip. Unlinked,
+  or a profile the viewer may not see, it shows the translated value.
+- A lookup table may be the namespace; links are keyed by the `valueCol` its columns use.
+- It resolves live, so archived rows show today's holder.
+- Renaming or deleting a value moves or drops its link.
 
 ### Membership requests (self-service, admin-approved)
-An unregistered (but signed-in) user submits a request from the "not registered" banner: a **required**
-display name → writes `_access_requests/<email>` (rules: self create/read/delete; admin read/write).
-An admin sees a **Pending requests** table in Settings → Users and **Approves** (registers the user with
-the schema's `newUser` access, or — with none declared — as an `editor` with no tables, to be given access
-via the chips; the request name is **seeded into the user's profile**
-so `@me` works immediately, still not shared) or **Denies** (deletes the request). The email is taken
-from the authenticated session — never asked for.
+
+A signed-in, unregistered user requests access with a display name. An admin approves it in Settings →
+Users with the schema's `newUser` grant (or as an editor with no tables), seeding the name into the
+profile, or denies it.
 
 ```json
 "newUser": { "role": "viewer", "tables": { "classes": "r", "news": "r" } }
 ```
 
-With `"open": true`, nobody presses Approve: a signed-in account with no record registers **itself** with
-exactly this grant. Both rules layers compare the record it writes with the mirrored grant, field by
-field, so nobody signs up for more or for someone else; `open` needs `tables` to be named. Pair it with
-public tables and member-only views (`requires` on a view) for an app anyone can join.
-
-`newUser` is what one press of Approve hands a new person — a gym member: a viewer who reads the
-schedule and books through self-service. `tables` takes a list of names or a map of table → `r` / `rw`;
-the role is `viewer` or `editor`, never `admin`. `validateSchema` names an unknown role or table.
+- `"open": true`: no approval; a signed-in account registers itself with exactly this grant (checked by
+  the server). Needs `tables`. Pair it with public tables and member-only views for an app anyone can join.
+- `role` is `viewer` or `editor`; `tables` is a list or a map of `r` / `rw`.
 
 ## nav (structure + layout)
+
 ```json
 "nav": {
-  "layout": "drawer",            // "drawer" (default) | "tabs" (top, desktop) | "browse" (pages)
-  "display": "list",             // browse only: "list" (default) | "tiles"
+  "layout": "drawer",
   "items": [
     { "view": "home", "icon": "mdi-home" },
     { "group": "Data", "icon": "mdi-database", "description": "The raw tables",
-      "items": [ { "view": "combined" }, { "table": "tasks" } ] },
-    { "view": "attendance" }
-  ],
-  "bottomNav": ["home", "combined", "attendance"]
+      "items": [ { "view": "combined" }, { "table": "tasks" } ] } ],
+  "bottomNav": ["home", "combined"],
+  "fab": "add"
 }
 ```
-- Item kinds: `{view}`, `{table}`, or `{group, items:[...]}`. A `{view}` may point at a data view or
-  a view with `markdown`, and may carry `items` of its own — the view is then its section's page.
-- Each item: optional `icon`, `title`. Access-filtered (a view needs all its sources).
-- **Nesting** is any depth. The drawer and top tabs draw two levels; a deeper group opens as its
-  page (below), and a deeper view with `items` lists them beneath itself, so every entry is reachable in
-  every layout.
-- **A group's page.** Opening a group — its drawer header, its top tab, its tile or row — shows a page listing its entries. A group's id is its label, and so is its translation key
-  (`nav.<label>`), so two groups with one label are rejected at load.
-- **History.** Every screen opened is a browser history entry, so Back/Forward move between screens
-  and a reload keeps the open one. The screen is kept in the entry's state, not the URL — the address
-  bar never changes, and there are no links to individual screens. An entry naming a screen the user
-  can no longer reach opens the first screen.
-- **`layout: "browse"`** — no drawer, no bottom bar. Home lists the top level; a group opens as a page
-  of its entries; a view with `items` lists them beneath itself; a breadcrumb (`Home › Group › View`,
-  on a phone just `‹ Parent`) leads back up, and the system screens move to a cog in the app bar.
-  Each person can override the layout under **Settings → Navigation**, one choice of four: Side menu,
-  Top navigation, List, Tiles — the last two being browse drawn each way. It is remembered in their
-  browser, and List / Tiles then applies to every level, over the schema's `display`.
-- **`display`** (browse) — `"tiles"` draws a level as a card grid instead of a list. Set it on `nav`
-  for every level, or on a group / a view with `items` for its own page.
-- **`description`** (browse) — a line under the entry's title on its tile or list row. Translatable
-  as `nav.desc.<group label | view | table>`; the authored text is the fallback.
-- **`image`** / **`focus`** — a picture shown in place of the icon on the entry's tile (a 16:9 cover)
-  and list row (a thumbnail); the drawer, tabs and breadcrumb keep the icon. Same address forms as a
-  background's `image` (`https:`, raster `data:`, `asset:<id>`). `focus` (`top` / `center` / `bottom`,
-  default `center`) is which part of the picture a tile keeps when it crops.
-- **Settings → Appearance** (admins) — the schema's `icon`, `image` and `focus`, and a view's
-  `background`, are the shipped defaults; an admin overrides them per entry without touching the
-  schema. One dialog per entry sets how it is shown in menus (Icon | Image) and what is behind its page
-  (None | Icon | Image). The overrides live in the synced folder config (`appConfig.navAppearance`,
-  `appConfig.backgrounds`) and travel with export/import; **Schema default** drops them. Groups are
-  included — a group's page can have a background too.
-- **`adminOnly`** (boolean, optional) — hide the entry from non-admins. On a `{group}` it hides the
-  whole branch. Use it for admin-facing plumbing (the tables behind a rotation, reference data) that
-  members read *through* another view but never need in their own menu, and for approval surfaces: a
-  board whose lane column only an admin may write is a read-only feed for everyone else.
-- **`hideFromAdmin`** (boolean, optional) — the mirror, for views about being a **participant**. In the
-  chores example a parent approves and is never assigned a chore, so "My chores" and "My rewards" are
-  not theirs. This matters beyond tidiness there: an admin is *exempt* from `mineOnly`, so a personal
-  page embedding a `mineOnly` rotation would show them everyone **else's** column under a heading
-  reading "My tasks". Hiding the page is what keeps that exemption correct in the one place it belongs
-  (the standalone matrix).
-- Setting **both** on one entry hides it from every user, which is never the intent — rejected at load.
-- **`roles`** (some of `"admin"`, `"editor"`, `"viewer"`) — who sees the entry; not beside `adminOnly`/`hideFromAdmin`.
-- **`requiresGrant`** (boolean, inherited by a group's branch) — needs a real grant on the entry's tables;
-  own rows and public tables don't count.
-- Both are **tidiness, not access control**: what a member may read or write is decided by their table
-  grants, and an entry hidden here is still reachable if something else links to it. Pair `adminOnly`
-  with a read-only (`'r'`) grant when the point is that members must not change the data.
-- System tabs (Lookup / Languages / Settings) are appended automatically.
-- **`fab`** (`"add"` | `"scan"` | `"none"`, optional) — **the corner button**: ONE floating button in the
-  bottom-right corner, and the screen says what it does. A view's own `fab` wins; else `nav.fab` sets the
-  app's default; else `"add"`, the add-a-row button grids have always had on a phone. `"scan"` needs
-  `nav.scan`. The gym sets `"scan"`, so its corner button opens the camera everywhere.
-- **`scan`** (string[], optional) — **where the scan button sends codes**: scan views, and rsvp views with
-  `checkin`. The button is the corner button with `fab: "scan"`. Left out for whoever confirms the codes
-  (stamps check-ins, verifies a door). It opens the camera where the browser can decode codes in the page
-  (`BarcodeDetector`: Android Chrome), and a typing field where it cannot (iPhone Safari, desktop Chrome
-  on Windows) or when the picture held no code. A QR the app drew carries `?view=…&scan=…` and goes to
-  its own view. A **typed** code finds its own way too, with no question asked: a printed code is
-  found in the catalogue of the scan view that holds it, and a changing code (class check-in, a
-  `verify` door) starts with its destination's **tag** — one character per entry of `scan`, in order
-  (`A`, `B`, …), from the same no-look-alike alphabet, so to a member it is just part of the code. A code
-  that is neither is refused and the field stays open. Either way it **saves** at once — the
-  person pointing the camera is the intent — where a forwarded deep link only arms the box. A link to
-  another site is refused.
-- **`bottomNav`** (string[], optional) — **mobile only**: view/table ids shown in the bottom
-  navigation bar, in this order. More than 5, or menu pages the bar leaves out → the first 4 plus a
-  "⋯ More" button that opens the drawer. Omit to auto-pick the first 5 flattened nav items. Ids must match `items` entries
-  (including nested group children); unresolved ids are silently dropped.
+
+- Items are `{view}`, `{table}` or `{group, items}`, nested to any depth; a `{view}` with `items` is its
+  section's page. Opening a group shows a page of its entries. Group labels must be unique.
+- An entry shows only to users who can reach it. Lookup, Languages and Settings are added automatically.
+- Back and Forward move between screens; a reload keeps the open one.
+
+| Key | Meaning |
+|---|---|
+| `layout` | `drawer` (default), `tabs` (top, desktop), or `browse` (pages with a breadcrumb). Each user may override it in Settings → Navigation. |
+| `display` | Browse: `list` (default) or `tiles`; on `nav` or on one group. |
+| `icon`, `title` | Per entry. |
+| `description` | Browse: a line under the entry (`nav.desc.<id>` translates). |
+| `image`, `focus` | Browse: a picture in place of the icon (`top`/`center`/`bottom` crop). |
+| `adminOnly` | Hidden from non-admins (a whole branch on a group). |
+| `hideFromAdmin` | Hidden from admins: pages about being a participant. Not with `adminOnly`. |
+| `roles` | Who sees it: some of `admin`, `editor`, `viewer`. |
+| `requiresGrant` | Needs a real grant on its tables (own rows and public tables don't count). |
+| `bottomNav` | Phone bottom bar, in order; over 5 → 4 plus **More**. Default: the first 5. |
+| `fab` | The corner button app-wide: `add` (default), `scan` or `none`. A view's `fab` wins. |
+| `scan` | Where the scan button sends codes: scan views and rsvp views with `checkin`. |
+
+- Hiding an entry is tidiness, not access control: grants decide what a user may read or write.
+- Settings → Appearance lets an admin override each entry's icon, image and background, stored in the
+  app config.
+- The scan button opens the camera where the browser can decode in the page (else a text field) and
+  saves at once. A typed changing code starts with a one-character tag naming its entry in `scan`.
 
 ## theme (brand palette)
 
-An optional top-level `theme` **partially overrides** the built-in Vuetify light/dark palettes, so the
-brand is schema-driven (like `icon`/`title`/`nav`). Only the keys you set change; the rest keep
-Vuetify's defaults.
 ```json
-"theme": {
-  "light": { "primary": "#00695c", "secondary": "#26a69a" },
-  "dark":  { "primary": "#4db6ac", "secondary": "#26a69a" }
-}
+"theme": { "light": { "primary": "#00695c", "secondary": "#26a69a" }, "dark": { "primary": "#4db6ac" } }
 ```
-- **Editable roles** (surfaced in the admin editor): `primary`, `secondary`, `surface`, `background`,
-  `on-surface` (labelled "Text"), `error`, `success`. Any Vuetify theme color key works, but these are
-  the curated set. Colors are `#rrggbb` (or `#rgb`).
-- **Where each role shows**: `primary` drives every interactive accent (buttons, active nav, links,
-  switches, focus/selected states) and is the default for Vuetify components; `secondary` tints the
-  metadata/tag chips (multiselect values, union-view source, read-only data chips); `surface`/
-  `background`/`on-surface` are the page/card/text base; `error`/`success` are status colors.
-- **Admin editor**: **Settings → Theme** (admin only) edits `theme` live and auto-saves — a per-role
-  color picker + hex field for each mode, plus **paste-a-palette** (paste a coolors/colorhunt array like
-  `["#ccd5ae",…]`; the colors are sorted by luminance/chroma and mapped to roles). Sets the deployment
-  brand for everyone, not per-user.
-- **Ceiling (no build step)**: only the **runtime** theme API is reachable — colors, `variables`, and
-  component `defaults`. SASS-level tokens (type scale, spacing, border-radius, component shape) need a
-  build and can't be themed here.
-- **Splash / meta**: the pre-Vue splash + static `<meta theme-color>` can't read the schema yet, so the
-  splash reads a `brand_splash` `localStorage` cache (written on load from the live theme) and follows
-  the brand after one warm load; a dynamic `theme-color` meta tracks the in-app light/dark toggle.
 
-## `text` entries (removed)
-The `{ "text": "<key>" }` column entry (free-form text interleaved in a view's columns)
-is **fully removed** — there is no longer any runtime handling for it (the old `_stripTextEntries`
-load-time stripper was deleted). Author prose with a `markdown` view instead (a filtered view +
-markdown + another view replaces text-between-columns). **Legacy schemas with `text` entries must be
-hand-upgraded to `markdown` doc-views** (see [Removed shapes](#removed-shapes-hand-migrate)) before
-deploying — otherwise the entries would surface as phantom columns. Do not author new `text` entries.
+- Overrides Vuetify's palettes key by key. Edited live in Settings → Theme (admins), which also accepts a
+  pasted palette.
+- Roles: `primary` (buttons, links, active states), `secondary` (chips), `surface`, `background`,
+  `on-surface` (text), `error`, `success`. Colours are `#rrggbb` or `#rgb`.
+- Only colours are themable at runtime; type scale, spacing and shapes need a build.
 
 ## Removed shapes (hand-migrate)
-These shapes are **not supported at load** — the runtime has no handling for them, so a legacy schema
-must be edited by hand before it will render correctly. There is no migration tool.
-- **`text` entries** (`{ "text": "<key>" }` in a view's `columns`) — see above; they surface as
-  phantom columns. Replace with a `markdown` doc-view: split the view at each text boundary into
-  sub-views and interleave `{{t:key}}` tokens with one `{{view:subview}}` embed per run of real columns,
-  then point `nav` at the markdown view.
-- **`pages` map** (top-level `pages` + `{ "page": "x" }` nav entries) — the runtime no longer folds
-  `pages` in at load. Author each page as a `markdown` view and use `{ "view": "x" }` in `nav.items`.
-- **Table `header`/`footer`** — replace with a `markdown` doc-view that embeds the table
-  (e.g. a `<table>_doc` view whose markdown is prose around `{{table:<name>}}`). The old behavior
-  emitted `text` entries, which are themselves removed.
-- **Nested `views`** are still supported and flattened at load (`_flattenViews`); the hierarchy is
-  expressed in `nav.items`.
+
+These no longer load; edit the schema by hand:
+
+- **`{ "text": "<key>" }` in `columns`**: use a `markdown` view with `{{t:key}}` between `{{view:…}}` embeds.
+- **A top-level `pages` map** and `{ "page": "x" }` nav entries: author each page as a `markdown` view.
+- **Table `header` / `footer`**: a `markdown` view around `{{table:<name>}}`.
+
+Nested `views` are still flattened at load.
 
 ## Lists and translations
-- **List values** are stored as stable keys (e.g. `"in_progress"`, not "In Progress").
-- **Display** uses translations: `list.status.in_progress` → "In Progress" (localized per active language).
-- **Locked values**: list values referenced in schema filters are auto-seeded and non-deletable.
-  A filter on a `ref` column pins under its **lookup table** instead, and there the pinned value is a
-  **row**, not a list item — nothing seeds a list beside the table (see "A `list:` may name a lookup
-  TABLE"); the ref/lookup editor locks the row.
-- **Translation keys** are auto-generated: `tab.*`, `view.*`, `field.*`, `list.*.*`,
-  `nav.<group>` (group labels), `nav.desc.<id>` (nav descriptions), and `{{t:<key>}}` tokens in markdown views — all collected
-  into the Languages tab.
+
+- List values are stored as stable keys (`in_progress`) and shown through `list.<list>.<value>`.
+- Values a schema filter names are seeded and cannot be deleted; on a `ref` column the lookup row is locked.
+- Translation keys are collected into the Languages tab: `tab.*`, `view.*`, `field.*`, `list.*.*`,
+  `nav.<group>`, `nav.desc.<id>` and `{{t:<key>}}` tokens.

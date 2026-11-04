@@ -1,480 +1,146 @@
-# dbUI App
+# dbUI
 
-A schema-driven web app with multiple backend options. No build step — Vue 3 + Vuetify 3 via CDN.
+A schema-driven web app: a JSON schema defines the tables, columns, views and navigation, and the app
+renders them. Vue 3 and Vuetify, no build step for development.
 
-## Features
-
-Every feature with screenshots, its schema and which backends support it: **[docs/README.md](docs/README.md)**.
-
-- **Schema-driven**: JSON config defines tables, columns, views, and behavior
-- **Four backends**: In-browser Postgres (PGlite in IndexedDB — no account, no server, nothing to install), Supabase (Postgres + RLS), Firebase (Firestore), Dev Server (PGlite — runs the *real* `supabase-schema.sql` policies locally)
-- **i18n**: multi-language with auto-generated translation keys from schema
-- **Views**: flat union, join, and aggregate views, plus **rotationView** (generated rotating roster), **calendar** (month/week/list), **pivot** (cross-tab grid), **rsvp** (self-service signup sheet), **board** (kanban — group a table's rows into lanes by a `select` column; drag a card between lanes to write that column), and **stats** (KPI tiles and progress bars over the same aggregate pipeline a data view uses — adding a `stats` block turns an existing leaderboard into bars), and **scan** (a code somebody scans or types appends a row — a chore logged, a checkpoint visited; a handheld barcode scanner is a keyboard, so no camera is needed — with a printable Code 39 label sheet, a `?scan=` deep link the phone's own camera can open, and an in-page decoder where the browser has one); columns can embed named views/inline tables
-- **Rotating rosters**: `multiselect` columns hold a group of people; rotation tables cycle a group per occurrence (tied to another table's rows) or per calendar interval (`daily/weekly/monthly/yearly` or `<n><unit>` like `3w`), with the anchor stored as editable data
-  - **Occurrence rotations & archiving**: an occurrence rotation assigns each row a roster slot by its rank among the occurrence rows (e.g. ushers cycling through meetings). The rank counts both **active and archived** occurrences, so **archiving** a past occurrence leaves every remaining assignment anchored to its date. **Deleting** an occurrence, however, removes it from the count entirely, so later occurrences shift up a slot. Archive occurrences that happened; reserve delete for genuine mistakes.
-- **Self-service RSVP**: an `rsvp` view is a read-write signup sheet where each member toggles their own attendance; backed by the `owner` column type (auto-stamped current-user email, read-only) + per-row Firestore rules, so a participant writes only their own row without a table grant
-- **Documents**: a view with `markdown` is an editable document with interactive embeds (`{{view:x}}`, `{{self}}` for its own grid, `{{view:x?}}` hides when empty) — bodies stored on the server, not in the schema
-- **Theming**: an optional `schema.theme` sets a brand palette (light/dark colors); an admin **Settings → Theme** editor tweaks it live (per-role pickers + paste-a-palette) and auto-saves, driving all Vuetify accents + the PWA/splash colors
-- **Nav**: explicit sidebar tree with drawer/tabs layout and nested groups
-- **Print**: layout-aware printing (table or card mode), per-card print, embeds included
-- **Responsive**: auto-switches between table and card layout based on column count; mobile gets a bottom navigation bar (`nav.bottomNav`) + floating add button
-- **Installable (PWA)**: web manifest + service worker → install to home screen / desktop and run in a standalone window (no address bar). Name, icon, and theme color follow the schema and the live light/dark theme
-- **Validation**: schema validated at boot time with error reporting
+- **Features**, with screenshots and the backends each supports: [docs/README.md](docs/README.md)
+- **The schema language**: [SCHEMA.md](SCHEMA.md)
+- **Example databases** you can install from the app: [examples/README.md](examples/README.md)
+- **Backend contract**, for writing a new backend: [BACKEND_API.md](BACKEND_API.md)
+- **What is proposed or declined**: [ROADMAP.md](ROADMAP.md)
 
 ## Backends
 
-| Backend | Storage | Auth | Offline | Real-time | Setup |
-|---------|---------|------|---------|-----------|-------|
-| **In this browser** | PGlite (WASM Postgres) in IndexedDB | none — a self-asserted email | ✅ (it *is* local) | n/a — one tab | none |
-| **Firebase** | Firestore | Firebase Auth | ✅ | ✅ Instant | Firebase Console — see **[FIREBASE.md](FIREBASE.md)** |
-| **Supabase** | Postgres (`kv` table + RLS) | Supabase Auth (Google) | ❌ | ✅ Realtime | Supabase dashboard — see **[SUPABASE.md](SUPABASE.md)** |
-| **Dev Server (PGlite)** | PostgreSQL-in-WASM | Trusted `X-User` header (loopback only) | N/A | ✅ SSE | `npm start` |
-| **Dev Server (SQLite)** | SQLite | **none — every request permitted** | N/A | ✅ SSE | `npm start -- --sqlite` |
+| Backend | Storage | Sign-in | Live updates | Setup |
+|---|---|---|---|---|
+| **In this browser** | Postgres (PGlite) in IndexedDB | an email you type in, unverified | — (one tab) | none |
+| **Supabase** | Postgres, row-level security | Supabase Auth | ✅ | [SUPABASE.md](SUPABASE.md) |
+| **Firebase** | Firestore, security rules | Firebase Auth | ✅ | [FIREBASE.md](FIREBASE.md) |
+| **Dev server** | Postgres (PGlite) or SQLite | trusted `X-User` header, loopback only | ✅ | `npm start` |
 
-Each hosted backend has its own end-to-end guide — see **Quick Start (a hosted backend)** below.
-Writing a new backend is a different document: [BACKEND_API.md](BACKEND_API.md) is the contract every
-adapter implements.
+The in-browser, Supabase and dev-server backends all run `supabase-schema.sql`, so the access policy is
+the production one everywhere. `npm start -- --sqlite` trades it for speed: SQLite enforces no access at
+all.
 
-## Quick Start (nothing to install)
+## Quick start
 
-Open the deployed app, pick **In this browser**, and you have a working database. There is no account to
-create, no server to run and nothing to install: PostgreSQL compiled to WebAssembly starts inside the
-tab, its cluster is persisted in IndexedDB, and `supabase-schema.sql` — the same policy file a Supabase
-project runs — is applied to it. So the access model is not simulated here; it is the production one,
-evaluated by a real Postgres.
+**Nothing to install:** open the deployed app and pick **In this browser**. Postgres compiled to
+WebAssembly runs in the tab and keeps its data in IndexedDB.
 
-The one thing that is *not* production-grade is the identity. It comes from `localStorage`, typed in on
-the setup screen, and nothing verifies it — you can act as anyone and rehearse exactly what a viewer, an
-editor or a stranger would see. That is safe precisely because the database is in your own browser and
-belongs to you; the moment a second person is involved, deploy the same app against Supabase or Firebase,
-where the same policies judge a signed token instead.
+- The first start downloads ~17 MB, then works offline.
+- The data stays in this browser. Use Settings → Export for a copy, and Import to move it to Supabase or
+  Firebase later.
+- The browser may evict it under storage pressure; the app asks for persistent storage, and Settings →
+  Local database shows whether it got it.
+- One tab at a time: a second tab is refused rather than corrupting the database.
+- The identity is self-asserted, which is fine for one person and wrong for a team: use a hosted
+  backend once a second person is involved.
 
-Worth knowing before you rely on it:
-
-- **First start downloads ~17 MB** (the WASM engine plus its Postgres data image) and takes a few
-  seconds; after that it is quick and works offline.
-- **The data lives in this browser**, and another device sees nothing. Use *Settings → Export* for a
-  copy — and *Settings → Import* to move it into Firebase or Supabase later.
-- **The browser can delete it without asking.** Origin storage is "best-effort" by default: every engine
-  evicts least-recently-used origins when the device runs low on space, and WebKit also clears
-  script-writable storage for sites that go unvisited for a while. The app therefore calls
-  `navigator.storage.persist()` on boot, which moves the origin to *persistent* — after which only the
-  user deletes it. Browsers decide differently whether to grant it: Chrome and Safari from engagement
-  heuristics (installing the app as a PWA is the reliable one), Firefox by asking. *Settings → Local
-  database* shows which mode you got, how much space is used, and offers to ask again. Export anyway.
-- **One tab at a time.** Two tabs writing one IndexedDB cluster corrupts it, so a second tab takes a Web
-  Lock, fails to get it, and says so rather than opening.
-- **Self-hosting it wants the vendored dist.** `vendor/pglite/` is generated, not committed — run
-  `./update-vendor.sh` (or `scripts/vendor-pglite.sh`) locally; the GitHub Pages workflow materialises it
-  on every deploy, and so does the Firebase Hosting `predeploy` hook (`scripts/vendor-fetch.mjs`). If it is missing the app falls back to jsdelivr, the same way Vue and Vuetify do, so a
-  fresh fork still boots — but self-hosted stays the intended path, because reaching a CDN is the one
-  thing this mode otherwise never does.
-
-## Quick Start (Local Development)
+**Local development:**
 
 ```bash
 cd dev
 npm install
-npm start        # http://127.0.0.1:3000
-npm test         # run backend unit tests
-npx playwright test  # run E2E tests
+npm start            # http://127.0.0.1:3000
+npm test             # unit tests
+npx playwright test --config=playwright.config.js   # UI tests
+npm run typecheck
 ```
 
-**The dev server runs the production access policy.** `npm start` boots PostgreSQL compiled to
-WebAssembly and applies `supabase-schema.sql` — the same file Supabase runs — so a permission question
-is answered in dev exactly as it is in production, rather than by a hand-written imitation of it. It
-costs a few seconds of startup.
+- An empty database offers the shipped examples on its first screen. `npm run seed:import [-- chores]`
+  also seeds an example's users and list links, which the in-app picker never installs.
+- `?user=ann@dev` signs in as that user (the dev server trusts it; it binds to loopback only).
+- `APP_DB=other.db PORT=3200 node server.js` runs an isolated instance; `APP_DB=:memory:` a throwaway one.
+- Reset: delete `dev/local.db*` and `dev/*.pgdata/`, then `localStorage.clear()` in the browser.
 
-`npm start -- --sqlite` (or `--fs`) opts out for speed — but those backends have **no access policy at
-all**: every request is permitted, and the server says so loudly on startup. The access model used to be
-re-implemented here in JavaScript so that dev behaved like production; running the real policies made
-that copy redundant, and it has been deleted rather than left to drift. Use the default whenever the
-question is "can this member actually do that?".
+**A hosted backend:** create the project, publish its access policy, paste its public config into the
+setup screen, and sign in. **The first account to sign in becomes the admin**, so do that right after
+publishing the policy. Then install an example or import a bundle. The step-by-step guides are
+[SUPABASE.md](SUPABASE.md) and [FIREBASE.md](FIREBASE.md).
 
-Browser: click "Create Local Database" → app loads with the schema from
-[`examples/demo-schema.json`](examples/demo-schema.json). Optionally run `npm run seed:import` (with the
-server running) to layer the demo data — rows, lists, translations, rotation config, plus example
-users/profiles — on top of it. `npm run seed:import -- chores` seeds the household example instead,
-with its whole family: five accounts, their profiles, and the **`members` list-user links** that make
-`@me` and the duty matrix's `mineOnly` resolve (`?user=ann@dev` then sees only Ann's column).
+## Deploying
 
-The importable parts live in `examples/<id>-data.json` and `examples/<id>-lang-<code>.json` (the same
-bundle shape as Settings → Import, and the same files the in-app example picker installs). **Users,
-grants and identity links are deliberately not among them** — the importer has no branch for them, and
-if it did, importing an example would be a way to hand somebody a grant. They are seeded through the
-local dev server's admin API by this script alone. Its dates are fixed in the file, so the demo's "this week" and
-"upcoming" drift as it ages — edit `examples/demo-data.json` when that matters, then re-run
-`node scripts/examples-manifest.js`.
+The live site is GitHub Pages: `.github/workflows/deploy-pages.yml` runs on every push to `main`.
+Firebase Hosting works too (`firebase deploy --only hosting`).
 
-**Reset**: delete `dev/local.db*` and `dev/*.pgdata/` + browser `localStorage.clear(); location.reload()`
+Both publish `_site/`, which `node scripts/build-site.js --compile --minify` builds:
 
-> The PGlite default starts from an empty database; an existing `dev/local.db` is not migrated. Nothing
-> is lost — the demo content lives in the repo, so `npm run seed:import` rebuilds it.
+- only the files the app serves (an allowlist), so nothing else in the repo goes public;
+- the Vue templates precompiled, so the page needs no `'unsafe-eval'`;
+- the app's scripts minified (vendor files are already).
 
-**A second, isolated instance.** `PORT` alone is *not* isolation — every dev server shares
-`dev/local.db`, so a reset on one wipes the other. Point `APP_DB` at another file to get a genuinely
-separate database, and its user registry / requests / profiles follow it as
-`<name>.users.json` and friends:
-
-```bash
-APP_DB=chores-demo.db PORT=3200 node server.js     # own DB + own sidecars, dev/local.db untouched
-APP_DB=:memory: PORT=0    node server.js           # throwaway; PORT=0 = any free port, printed on boot
-```
-
-The startup banner prints the database actually in use, so you can confirm which one you are on. An
-empty database offers the shipped examples on its first screen — pick one and it installs, no files to
-download (Settings → Examples reopens the picker). Settings → Import JSON still takes a bundle of your
-own; see [examples/README.md](examples/README.md).
-
-## Quick Start (a hosted backend)
-
-Both hosted backends follow the same three beats — create the project, publish the access policy, then
-paste the project's public config into the app's setup screen and sign in. **The first account to sign
-in becomes the admin**, so do that yourself immediately after publishing the policy; until you do, the
-database is open to whoever gets there first.
-
-The setup itself is per-provider, and each guide carries it end to end rather than a summary here:
-
-- **[FIREBASE.md](FIREBASE.md)** — Firestore + Google auth, publishing `firestore.rules`, linking a
-  clone with `firebase use --add`, why a bare `firebase deploy` fails on the free plan, and the Firefox
-  third-party-cookie problem with Google sign-in.
-- **[SUPABASE.md](SUPABASE.md)** — Postgres + Google auth, the OAuth redirect URIs, running
-  `supabase-schema.sql`, which project key to paste, hosting on GitHub Pages (and pointing a custom
-  domain at it), and how each Firestore rule maps to an RLS policy.
-
-Then fill the database: pick one of the shipped examples on the empty-database screen, or
-Settings → Import from JSON for a bundle of your own.
-
-Both deploys (the Pages workflow and Firebase Hosting's `predeploy`) publish `_site/`, which
-`node scripts/build-site.js --compile --minify` fills with the files the app serves: the Vue templates
-precompiled to render functions, the app's own scripts minified. Development serves the source as it is.
+`vendor/` holds Vue, Vuetify, the icon font, PGlite and the backend SDKs at the versions in
+`vendor/versions`. It is not committed: `./update-vendor.sh` fetches it, and both deploys do so too. Each
+file has an SRI-pinned jsdelivr fallback.
 
 ## Sharing & Access
 
 ### Shareable Links (URL params)
 
-Share a pre-configured link so new users connect instantly without manual setup:
+A link can carry a database's public config, so a new user connects in one click:
 
 ```
-# Firebase
-https://dbui.ddns.net/?mode=firebase&config=BASE64_ENCODED_CONFIG
-
-# Supabase
 https://dbui.ddns.net/?mode=supabase&url=PROJECT_URL&key=PUBLISHABLE_KEY
+https://dbui.ddns.net/?mode=firebase&config=BASE64_CONFIG
+https://dbui.ddns.net/?mode=firebase&k=API_KEY&p=PROJECT_ID     # &d=AUTH_DOMAIN only if not the default
 ```
 
-The app reads URL params on load, stores them in localStorage, then cleans the URL. One click = connected.
-
-> Firebase links also accept the config as discrete params instead of base64:
-> `?mode=firebase&k=<apiKey>&p=<projectId>` (with optional `&d=<authDomain>`). `d=` is
-> **optional** — it defaults to `<projectId>.firebaseapp.com` (the standard Firebase auth
-> domain), so it's only needed for a custom/non-default `authDomain`.
-
-Generate the link from Settings tab (shown under "Share link" for Firebase mode).
-
-### User Access by Backend
-
-| Backend | How to add users | Admin UI? |
-|---------|-----------------|:---:|
-| **In this browser** | Settings → User Access panel (identity is self-asserted — see below) | ✅ Yes |
-| **Firebase** | Settings → User Access panel | ✅ Yes |
-| **Dev Server** | Settings → User Access panel (test with `?user=`) | ✅ Yes |
-| **Supabase** | Settings → User Access panel | ✅ Yes |
+The app asks before connecting to a project it does not know, stores the config, and removes it from
+the address bar. Settings → Share link builds the link. One deployment serves any number of databases:
+each browser keeps its own list.
 
 ### User Registry
 
-Any backend defining `backend_users` gets built-in user access control (Settings → User Access):
+Settings → User Access, on every backend:
 
-1. **Bootstrap mode**: first user auto-registered as admin
-2. **Add users** inline (click +, edit email/role/tables in-place)
-3. **Roles**: admin (manage schema/users/translations + all tables), editor (read+write allowed tables + edit allowed lists), viewer (read-only)
-4. **Per-table access**: two chip columns per user — *Tables* (can edit) and *Can view* (read-only:
-   visible in the nav, rows load, every cell renders read-only, no add/delete). Or "All".
-5. **View filtering**: views are only visible if user has access to ALL source tables
-6. **List filtering**: editors see only lists used by their allowed tables; editing a list needs *write*
-   access to an owning table
-7. **Security Rules** (`firestore.rules`): enforces roles + per-table access server-side. Deploy once.
-
-Local dev: test access control with `http://localhost:3000/?user=editor1` (user must exist in registry).
-
-Firestore document structure (`_users/<email>`, mirrored into the legacy `_meta/users` map):
-```json
-{
-  "user@gmail.com":  { "role": "admin",  "user": "user@gmail.com",  "tables": "all" },
-  "other@gmail.com": { "role": "editor", "user": "other@gmail.com",
-                       "tables": { "tasks": "rw", "notes": "rw", "price_list": "r" },
-                       "rwTables": ["tasks", "notes"] }
-}
-```
-`tables` may also be a plain array of names (the older shape — read + write on each); it keeps working
-unchanged, so no existing deployment needs migrating. `rwTables` is a denormalized copy of the writable
-subset that the rules read, written automatically alongside the grant.
-
-### Multi-Database (Single Deployment)
-
-One hosted instance serves multiple independent databases:
-- Each user enters their own connection details during setup
-- Details stored in browser localStorage (per-origin)
-- Different users on the same URL can connect to different Firebase or Supabase projects
-- Share a pre-configured URL to onboard users to a specific database
+- The first user to sign in becomes the admin.
+- Roles: **admin** (schema, users, translations, every table), **editor** (writes the tables granted),
+  **viewer** (reads only).
+- Each user has two chip rows: tables they may edit, and tables they may only view; or "All".
+- A view is shown only when the user can read all its source tables; a list is editable only with write
+  access to a table that uses it.
+- The access policy (`supabase-schema.sql`, `firestore.rules`) enforces the same on the server.
 
 ## Installable (PWA)
 
-The app is a Progressive Web App — installable to a phone home screen or desktop, running in a
-standalone window with no browser address bar.
+The app installs to a phone's home screen or a desktop window.
 
-- **Static manifest** (`manifest.json`) + `<link rel="manifest">` in `index.html` provide the
-  baseline name/icons/`display: standalone` before the app boots.
-- **Runtime manifest**: once the schema loads, `_updateManifest()` rebuilds the manifest with the
-  live **app title** (per-database name) + theme colors and swaps in a Blob URL.
-  `id`/`start_url`/`scope`/icon `src` are written as **absolute** URLs (a Blob-URL manifest can't
-  resolve relative paths) — which is also why a relative `schema.icons` path is fine to *write*: the
-  app resolves it against the deployment root before it reaches the manifest. `background_color`/`theme_color` follow the current Vuetify theme; a
-  dynamic `theme-color` meta tracks the in-app light/dark toggle. The runtime manifest's install
-  icons come from **`schema.icons` when set, else the bundled static files** (below).
-- **Service worker** (`sw.js`): on the published site it precaches what every boot loads and caches the
-  rest on first use, so a repeat visit downloads nothing and the app opens offline. A deploy changes the
-  app cache; `vendor/` (the 17 MB PGlite dist included) has its own and is kept until it changes. In
-  development it does nothing.
-- **Per-database icons via `schema.icons` (optional).** All three icon surfaces — tab favicon,
-  apple-touch tile, and the manifest install icon — are driven from the database schema, so one
-  deployment serving several databases gives each its own. The fields, defaults and authoring advice
-  are in [SCHEMA.md → icons](SCHEMA.md#icons-title); any field you omit falls back to the bundled
-  static file below, so a deployment can mix or skip `icons` entirely.
-
-  What the **browser** requires, which is what makes this a PWA note rather than a schema note:
-
-  - The manifest **install** icon must be a **square raster PNG** ≥144px. An SVG, or `sizes: "any"`,
-    is skipped for install — fine as a `favicon`, useless as a home-screen tile.
-  - It must end up at a **network URL**. Relative paths are fine to write (the app resolves them), but
-    a `data:` or `blob:` URI is not: Chromium's manifest-icon downloader runs outside the document and
-    cannot fetch renderer-minted URLs — both log *"Icon … failed to load"*. A real cross-origin URL
-    works, including one on another host: icons are exempt from the same-origin rule that binds
-    `start_url`/`scope`, which is what makes this usable when Firebase holds the database and the app
-    is hosted elsewhere.
-  - Production must be **HTTPS→HTTPS**: a cross-origin `http:` icon on an HTTPS page is
-    mixed-content blocked.
-
-  > The E2E suite verifies the manifest and `<link>` tags carry the right URLs, and that the browser
-  > fetches and decodes a cross-origin PNG through the same no-CORS path the install downloader uses.
-  > Headless Chromium does **not** run the desktop install-icon download itself, so confirm the real
-  > install icon once in Chrome → DevTools → Application → Manifest.
-
-### Bundled static icon files (default / fallback)
-
-When `schema.icons` is absent, or a field is omitted, the app uses these files shipped **at the deploy
-root** next to `index.html`. The host must serve them with correct image MIME types.
-
-| File | Size | Purpose |
-|------|------|---------|
-| `favicon.svg` | any | browser-tab favicon (`<link rel="icon">`) |
-| `icon-512.png` | 512×512 | apple-touch-icon + manifest install / splash / maskable icon |
-
-Both are the generic dbUI mark — Material Design Icons' `database-eye` on a transparent background —
-so an unbranded database looks like the app rather than like whichever schema happened to ship its
-artwork at the repo root. To brand ONE database prefer `schema.icons`; replacing these files changes
-the default for every unbranded database at once, which is right only when the whole deployment is a
-single product. [SCHEMA.md → icons](SCHEMA.md#icons-title) covers the trade-offs, including why the
-transparent default can look different on each Android launcher.
-
-Regenerate a square PNG from any SVG with the Chromium the E2E suite already ships:
-
-```bash
-node dev/make-icon-png.mjs favicon.svg icon-512.png 512
-```
-
-It renders full-bleed and inset to the inner 80%, because the manifest declares
-`purpose: "any maskable"` and a round launcher crops to that.
-
-- **Requirements**: install needs HTTPS (Firebase Hosting provides it), a valid manifest, and icon
-  files that are reachable and served as `image/*`.
-
-## Caching
-
-The app is a set of separately cached files that have to come from the same deploy: `index.html` names
-the module list, `ui.html` holds the templates, and `app-core.js` holds the state those templates bind
-to. On a default `max-age`, each expires on its own clock — so for as long as that lasts, a returning
-visitor can hold a **new template bound to an old instance**, which fails on the first render and is
-not fixed by reloading, because each file is individually still "fresh".
-
-`firebase.json` therefore serves the app's own sources (`*.html`, the root `*.js` and `*.json`,
-`firestore.rules`, `supabase-schema.sql` and `examples/**`) with `Cache-Control: no-cache` — revalidate,
-not "don't cache": the browser keeps the bytes and Hosting answers `304` when nothing changed.
-`vendor/**` is left on the default, since those change only on a deliberate dependency bump.
-
-> **GitHub Pages cannot set headers.** It serves everything with `max-age=600`, so that deployment keeps
-> a ten-minute window after each push where a visitor can pick up a mixed set. A hard reload clears it.
+- `manifest.json` is the starting point; once the schema loads, the app swaps in a manifest with the
+  database's title, theme colours and icons.
+- Icons come from `schema.icons` ([SCHEMA.md → icons](SCHEMA.md#icons-title)), else from `favicon.svg` and
+  `icon-512.png` at the site root. An install icon must be a square PNG ≥144 px at a network URL (not
+  `data:` or `blob:`), served over HTTPS. Regenerate the PNG with
+  `node dev/make-icon-png.mjs favicon.svg icon-512.png 512`.
+- The service worker (`sw.js`) caches the published site: a repeat visit downloads nothing and the app
+  opens offline. In development it does nothing.
 
 ## Content-Security-Policy
 
-The app ships a CSP built in **`/csp.js`** (one source of truth — rationale documented in the file):
-Firebase-mode origins with multi-database wildcards, hash-allowed inline boot scripts (no
-`'unsafe-inline'` scripts), `'unsafe-eval'` only in development for Vue's in-browser template compiler
-(the published page precompiles its templates and drops it), and
-loopback entries so local dev + the Firebase emulators keep working.
+`csp.js` defines one policy. `npm run csp:sync` writes it into `index.html` (an enforcing `<meta>` tag,
+the only option on GitHub Pages) and `firebase.json` (a Report-Only header). `dev/test/csp.test.js` fails
+if either drifts or if an inline script changes without its hash. The E2E suite runs under the policy.
 
-One policy, delivered three ways, because the app is deployed three ways:
+- Inline scripts are allowed by hash only. `'unsafe-eval'` is there for Vue's in-browser compiler in
+  development; the published page drops it.
+- **Violation reports** are off until a collector is set in `csp.js` (`REPORT_ENDPOINT`). The page posts
+  them itself, since a `<meta>` policy cannot carry `report-uri`. Loopback pages never report. Collectors:
+  - Supabase Edge Function (free): apply `supabase/csp-reports.sql`, then
+    `supabase functions deploy csp-report --no-verify-jwt` and set `DBUI_CSP_REPORT_TOKEN`.
+  - Firebase Cloud Function `cspReport` (Blaze plan): `firebase deploy --only functions,hosting`.
+  - Self-hosted: `REPORT_TOKEN=… node dev/csp-report-collector.js`.
 
-- **Enforced in every E2E run**: the dev server sends the policy as an enforcing header under
-  `CSP=1` (the E2E harness sets it on every worker's server), so CI proves the app works under the policy.
-- **Static hosts, GitHub Pages included — ENFORCING**: `index.html` carries
-  `<meta http-equiv="Content-Security-Policy">`, generated by `buildPolicy({ meta: true })`. This is
-  the delivery that covers the Pages deploy (`deploy-pages.yml` uploads the repo root on every push to
-  `main`), and it is the **only** one available there: Pages serves static files and cannot send a
-  custom header. The tag sits immediately after `<meta charset>` because a meta CSP governs only what
-  the parser fetches *after* it — the preload links a few lines below are fetches.
-  Two directives are header-only and therefore absent from it: `frame-ancestors` (GitHub Pages sends
-  its own `X-Frame-Options: deny`, which covers the same threat) and `report-uri`.
-- **Firebase Hosting**: `firebase.json` sends **`Content-Security-Policy-Report-Only`**, and keeps
-  `frame-ancestors` + `report-uri`, which a meta tag cannot express. It stays Report-Only: the
-  enforcing evidence comes from the E2E run and the Pages deploy, and nobody is currently deploying
-  to Hosting. Rename the key to `Content-Security-Policy` when that changes.
-- **Violation reporting is a SEPARATE mechanism, and it is off by default.** `report-uri` is a
-  header-only directive — a `<meta>` CSP ignores it, exactly as it ignores `frame-ancestors` — so on
-  GitHub Pages the policy has no way to ask for reports. The page reports for itself instead:
-  `csp-client.js` listens for `securitypolicyviolation` (which fires however the policy arrived),
-  de-duplicates by directive + blocked URI, caps at ten per page load, and POSTs the same
-  `{"csp-report": {…}}` body all three collectors understand. An inline listener at the top of
-  `index.html` queues violations from before the first fetch in `<head>`, so a blocked boot resource
-  is still reported.
-
-  **To turn it on**, deploy a collector and name it — one line, then a sync:
-
-  ```bash
-  # free collector, no Blaze plan needed
-  supabase functions deploy csp-report --no-verify-jwt
-  supabase secrets set DBUI_CSP_REPORT_TOKEN=<long random string>
-  ```
-  ```js
-  // csp.js
-  var REPORT_ENDPOINT = 'https://<project>.supabase.co/functions/v1/csp-report';
-  ```
-  ```bash
-  cd dev && npm run csp:sync
-  ```
-
-  **A page on loopback never reports.** `localhost`, `127.0.0.1` and `::1` are development, and
-  their violations are not production telemetry — without that rule every `npm start` and every
-  E2E run files into the deployment's shared collector, and the E2E suite deliberately provokes a
-  violation to test this very module. The counters are keyed by directive + blocked URI, so that
-  noise would be indistinguishable from a real visitor's.
-
-  It ships empty on purpose: a collector URL belongs to a deployment, and a default would post your
-  violations to somebody else's table. A `*.supabase.co` collector needs no `connect-src` change (the
-  wildcard is already there for the backend); a collector anywhere else must be added to
-  `CONNECT_HOSTS`, or the report POST is blocked by the policy it is reporting on — `csp.test.js`
-  checks that whenever the endpoint is set. One gap cannot be closed from the page: a violation *of
-  `connect-src`* may not be reportable, because the report is itself a connection.
-- **Keeping it in sync**: `npm run csp:sync` (in `dev/`) regenerates **both** static copies —
-  `firebase.json`'s header and `index.html`'s meta tag — from `csp.js`. `dev/test/csp.test.js` fails
-  CI if either drifts, if the meta tag drops below the first `<link>`/`<script>`, or if an inline
-  script in `index.html` is edited without its hash updating.
-  additions; a Supabase backend needs `https://*.supabase.co` in `connect-src`.
-
-### Violation reports
-
-The production (Report-Only) header carries `report-uri /csp-report` (relative — `csp.js`
-`REPORT_URI`). Two ways to collect:
-
-**A. Firebase-native (same-origin, recommended when hosting on Firebase Hosting).**
-The `/csp-report` Hosting rewrite (`firebase.json`) routes reports to the `cspReport` Cloud
-Function (`functions/`), which aggregates them into the client-inaccessible `_csp_reports`
-Firestore collection (one doc per distinct violation, counted at write time). Requires the
-**Blaze plan** (Cloud Functions) — and note that this is what makes a bare `firebase deploy` fail on
-the free plan, since it tries to deploy `functions/` too. See
-[Deploying](FIREBASE.md#deploying-and-why-plain-firebase-deploy-may-fail). Setup:
-
-```bash
-firebase functions:secrets:set DBUI_CSP_REPORT_TOKEN   # long random string; gates the read endpoint
-cd functions && npm install && cd ..                   # deploy analyzes source locally, needs node_modules
-firebase deploy --only functions,hosting               # run from the repo root
-```
-
-Read the aggregated summary: `https://<your-hosting-domain>/csp-report?token=<DBUI_CSP_REPORT_TOKEN>`
-
-**B. Supabase Edge Function (free tier, no Blaze).** Same collector, on a free Supabase project —
-useful when you want the policy soak without enabling billing, and independent of which backend the
-app uses: on Firestore, only the `report-uri` changes.
-
-```bash
-psql "$SUPABASE_DB_URL" -f supabase/csp-reports.sql   # or paste it into the SQL editor, once
-supabase functions deploy csp-report --no-verify-jwt
-supabase secrets set DBUI_CSP_REPORT_TOKEN=<long random string>
-```
-
-Then point the policy at it — `csp.js` takes the endpoint as `buildPolicy({ reportUri })`, so set it to
-`https://<project-ref>.supabase.co/functions/v1/csp-report` and regenerate the header value in
-`firebase.json` (or your host's headers file). Read the summary at that URL with `?token=…`.
-
-`--no-verify-jwt` is required and is not a loosening: a browser posts violation reports with no
-credentials and ignores the response, so a function demanding a JWT would receive nothing. Writes are
-append-only counters keyed by the violation itself; the only read is token-gated. Reports land in
-`public.csp_reports`, which has RLS on with **no policies** — unreachable by `anon`/`authenticated`,
-reached by the function's service role. `dev/test/supabase-csp-collector.test.js` executes that SQL
-against a real PostgreSQL and asserts both halves: the log is closed to the app's users, and repeat
-reports increment atomically rather than losing concurrent ones.
-
-**C. Self-hosted (any static host, no Blaze).** Run the dependency-free collector
-(`REPORT_TOKEN=... node dev/csp-report-collector.js`, port 3900) on your own box behind an
-HTTPS-terminating proxy, and point `csp.js` `REPORT_URI` at its absolute URL.
-
-The dev/CI **enforcing** policy deliberately omits `report-uri` so test runs never post to the
-real collector; `dev/test/csp.test.js` pins that split.
-
-## Schema Reference
-
-Everything about the schema document — tables and column types, the view kinds, embeds, filters,
-computed and rotation columns, markdown documents and their tokens, `nav`, lists and translations,
-access and self-service — is in **[SCHEMA.md](SCHEMA.md)**, the single source of truth.
-
-Point your editor at the meta-schema and it will complete and check the vocabulary as you type:
-
-```json
-{ "$schema": "./schema.schema.json", "tables": { ... }, "views": [ ... ], "nav": { ... } }
-```
-
----
+  Read them in Settings → Security policy reports, or with `npm run csp:log`.
 
 ## Architecture
 
 ```
-┌──────────────────────────────────────────────────┐
-│                  index.html                      │  ← auto-detects backend
-├────────────────┬─────────────────────────────────┤
-│  app-core.js │         ui.html                 │  ← Vue 3 app + template
-├────────────────┼─────────────────────────────────┤
-│  backend-*.js  │  demo-schema.json / firebase-cfg │  ← platform + config
-├────────────────┴─────────────────────────────────┤
-│  backend-kv.js (Supabase, PGlite, Firestore)     │  ← one contract, three hosts
-├──────────────────────────────────────────────────┤
-│ Supabase │ Firestore │ PGlite (browser / dev)    │
-└──────────────────────────────────────────────────┘
+index.html                picks the backend, loads the scripts
+ui.html, app-core.js      the Vue app: templates and the root component
+*.js (columns, rows, …)   pure domain modules, unit-tested in Node
+backend-*.js              the platform: sign-in, live updates, uploads
+backend-kv.js             the backend contract, shared by Supabase, PGlite and Firebase
+storage-*.js              each store's get/put/delete
 ```
 
-The two Postgres backends are split along one line: **backend-kv.js is the contract** (which store a row
-lives in, what shape it has, which schema-derived facts the schema-blind policies need mirrored) and the
-`backend-*.js` file above it is the **platform** (who the caller is, whether other clients exist, where an
-uploaded file goes). `backend-supabase.js` and `backend-local-pglite.js` are platforms only — they share
-that one contract, and both run `supabase-schema.sql` underneath it, so a policy question has a single
-answer whether the database is in São Paulo or in the tab. `backend-firebase.js` runs the same contract
-over Firestore documents, overriding only where Firestore differs (rules-provable queries, batches,
-transactions).
-
-**Schema flow:**
-1. Server loads `examples/demo-schema.json` from disk (dev) or the database (Supabase/Firebase)
-2. Client receives schema via `getSchema()`
-3. `validateSchema()` checks for errors
-4. Tables auto-created if missing (`initSchema`)
-5. UI renders based on schema definitions
-
-**Key design decisions:**
-- Schema is pure JSON (user-editable via Settings → Import without code access)
-- `defaultSchema` in app-core.js is minimal empty fallback only
-- All backends implement the same contract — [BACKEND_API.md](BACKEND_API.md) is that contract, and
-  `dev/test/backend-conformance.test.js` enforces it
-
-## Roadmap
-
-Features that have been proposed but not built — the candidate view kinds, the column types several of
-them are really waiting on, and what has been declined and why — are in
-**[ROADMAP.md](ROADMAP.md)**, along with the five-step seam every new view kind goes through.
+`validateSchema()` (`schema-validate.js`) checks the schema at load and reports what it cannot use. Every
+backend implements [BACKEND_API.md](BACKEND_API.md); `dev/test/backend-conformance.test.js` holds them to it.
