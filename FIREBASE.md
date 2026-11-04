@@ -1,154 +1,71 @@
-# Firebase backend + Firebase Hosting
+# Firebase
 
-Firebase (Firestore) is one of the two hosted backends, alongside [Supabase](SUPABASE.md) and the local
-dev server. It is the only backend with an offline cache and the only one whose access rules are
-enforced by a rules language rather than by SQL — `firestore.rules` is the authority on who may read
-and write what, and `storage.rules` does the same for uploaded images and published calendar feeds.
+Firestore as the database, Firebase Auth for sign-in, `firestore.rules` and `storage.rules` as the
+access policy. The only backend with an offline cache.
 
 | File | Role |
-|------|------|
-| `backend-firebase.js` | Backend + `backend_users` + sign-in (Google, and an emailed link). Classic script (globals `backend` / `backend_users` / `triggerOAuth` / `authEmailStart` / `authEmailVerify`). |
-| `storage-firestore.js` | Storage adapter over Firestore collections. |
-| `firestore.rules` | Who may read and write each collection. The production access model. |
-| `storage.rules` | Image uploads: registration gate, per-user path scoping, size and content-type caps. Calendar feeds (`feeds/<id>.ics`): written and listed by full-access members only (an admin, or a grant of every table). |
-| `firebase.json` | Hosting config (what is published, the CSP header) + emulator ports. |
-| `dev/test-emulator/firestore-rules.mjs` | The rules, executed against the Firestore emulator. |
-| `dev/test-ui/firebase-emulator.spec.js` | The whole app against the auth/firestore/storage emulators. |
+|---|---|
+| `backend-firebase.js` | The platform: sign-in (Google, emailed link), live updates, uploads. Builds on `backend-kv.js`. |
+| `storage-firestore.js` | Reads and writes Firestore documents. |
+| `firestore.rules` | Who may read and write each collection. |
+| `storage.rules` | Uploads (registered users, own folder, size and type caps) and calendar feeds (full-access members). |
+| `dev/test-emulator/firestore-rules.mjs` | The rules against the Firestore emulator (`npm run test:rules`). |
+| `dev/test-ui/firebase-emulator.spec.js` | The app against the emulators (`npm run test:e2e-firebase`). |
 
-## Project setup
+## Setup
 
-1. Create project at [console.firebase.google.com](https://console.firebase.google.com)
-2. Enable Firestore Database + Google Auth provider. For sign-in without Google, see
-   [Email sign-in](#email-sign-in): one command sets it up.
-3. Add your domain to Authentication → Authorized domains — **every origin the app is served from**,
-   e.g. `127.0.0.1` for local dev and `dbui.ddns.net` for the deployed site. Sign-in fails with
-   `auth/unauthorized-domain` from an origin that is not listed, so a change of hosting domain has to
-   be made here too.
-4. Register Web app → copy config JSON
-5. Firestore → Rules → paste contents of `firestore.rules` → Publish
-6. Run the app, select Firebase mode, paste config → Sign in with Google
-7. Settings → Import from JSON to load schema + data
-
-First user is auto-registered as admin (bootstrap mode). After that, only registered users can access. Per-table permissions configurable per user.
-
-> ⚠️ **Sign in yourself immediately after publishing the rules.** The first Google account to sign
-> in becomes the admin — so never share the app URL or a pre-configured link before you have signed
-> in once. Anyone holding the link during the bootstrap window could claim the admin role.
->
-> A stronger fix, if you would rather not rely on timing: seed the admin `/_users/<email>` document
-> at deploy time, which closes the window entirely rather than shortening it.
-
+1. Create a project at [console.firebase.google.com](https://console.firebase.google.com).
+2. Enable Firestore and the Google sign-in provider (for email sign-in see below).
+3. Add every origin the app is served from to Authentication → Authorized domains (`127.0.0.1` for dev,
+   your site's host). An unlisted origin fails with `auth/unauthorized-domain`.
+4. Register a web app and copy its config.
+5. Publish the rules: paste `firestore.rules` in Firestore → Rules, or deploy them (below).
+6. Open the app, choose Firebase, paste the config, and **sign in right away**: the first account becomes
+   the admin.
+7. Install an example, or Settings → Import.
 
 ## Email sign-in
 
-Beside Google, the app signs people in with an emailed **link** — no password, and it proves the person
-owns the address. **There is no mail server to set up**: Firebase sends these emails itself, for free, from
-`noreply@<project>.firebaseapp.com` (the text is under **Authentication → Templates**; a custom sender
-domain is optional). The rules count a caller only with a verified email (`signedIn()`), so even email +
-password without verification grants nothing.
-
-### By script (recommended)
+Firebase sends the sign-in links itself, from `noreply@<project>.firebaseapp.com`; there is no mail
+server to set up. The rules count only verified emails.
 
 ```bash
 cd dev
-npm run firebase:auth                      # asks for the project id and site
+npm run firebase:auth -- --project <project-id> --site https://example.org/ --deploy-rules
 ```
 
-It turns on **Email/Password → Email link (passwordless sign-in)**, adds the site's host and `localhost`
-to the authorized domains (keeping the ones there), and offers to deploy `firestore.rules` and
-`storage.rules`. It needs the [Google Cloud CLI](https://cloud.google.com/sdk) (`gcloud auth login`
-once) and, for the rules, the Firebase CLI. To answer up front:
+This turns on Email link (passwordless) sign-in, adds the site and `localhost` to the authorized domains,
+and deploys the rules. It needs the Google Cloud CLI (`gcloud auth login`). By hand: Authentication →
+Sign-in method → Email/Password → Email link.
 
-```bash
-npm run firebase:auth -- --project <firebase-project-id> --site https://gym.example.fi/ --deploy-rules [--dry-run] [--yes]
-```
+## Deploying
 
-### By hand
-
-```bash
-gcloud auth login
-curl -X PATCH "https://identitytoolkit.googleapis.com/admin/v2/projects/<firebase-project-id>/config?updateMask=signIn.email" \
-  -H "Authorization: Bearer $(gcloud auth print-access-token)" \
-  -H "X-Goog-User-Project: <firebase-project-id>" -H "Content-Type: application/json" \
-  -d '{"signIn":{"email":{"enabled":true,"passwordRequired":false}}}'
-firebase deploy --only firestore:rules,storage
-```
-
-Or in the console: **Authentication → Sign-in method → Email/Password**, turn on **Email link
-(passwordless sign-in)**, and add the site under **Authentication → Settings → Authorized domains**.
-
-## Linking a clone to your project (do this once)
-
-`firebase deploy` needs to know *which* project, and a fresh clone does not say — nothing here names one.
-The link lives in `.firebaserc`, which is **not committed**: it would name whoever wrote it, and a fork
-running `firebase deploy` would then aim at somebody else's project. So each clone makes its own:
+A clone names no project. Link yours once; `.firebaserc` is gitignored so a fork never deploys to yours:
 
 ```bash
 npm install -g firebase-tools
-firebase login                 # once per machine
-firebase use --add             # pick your project, give it an alias (e.g. `default`)
+firebase login
+firebase use --add
 ```
 
-`firebase use --add` writes `.firebaserc` in the repo root. It is in `.gitignore` for the reason above —
-leave it there. `firebase use` with no arguments shows which project you are currently pointed at, which
-is worth checking before any deploy that matters.
-
-## Deploying (and why plain `firebase deploy` may fail)
+Then deploy the rules first, the site second:
 
 ```bash
-firebase deploy --only firestore:rules,storage  # rules FIRST — see the note below (`storage` is storage.rules)
+firebase deploy --only firestore:rules,storage
 firebase deploy --only hosting
 ```
 
-Rules before the app, always: the app is what starts making requests, so a deploy that ships new code
-against yesterday's rules is a window where the two disagree.
+- The hosting `predeploy` fetches `vendor/` and builds `_site/`. It fails if `vendor/versions` was changed
+  without `./update-vendor.sh`.
+- **On the free (Spark) plan, always use `--only`.** A bare `firebase deploy` also deploys `functions/`
+  (the CSP report collector), which needs the Blaze plan. Without it, `/csp-report` simply 404s.
 
-**`vendor/` is refreshed for you.** Hosting uploads the working tree, and `vendor/` (Vue, Vuetify, MDI,
-the QR encoder, PGlite) is gitignored, so it holds whatever the last local run fetched. The hosting
-`predeploy` hook runs `node scripts/vendor-fetch.mjs`, which brings it to the versions in
-`vendor/versions` (a no-op when it already matches). It needs only Node and npm, so it works on Windows
-and Linux alike. It fails the deploy if the SRI hashes in `index.html` / `app-core.js` do not match the
-fetched files, which means `vendor/versions` was edited without running `./update-vendor.sh`: run that on
-a machine with bash (Linux, WSL or Git Bash) and commit before deploying.
+## Firefox and Safari: Google sign-in fails on another host
 
-**On the free (Spark) plan, deploy with `--only`.** A bare `firebase deploy` also deploys
-`functions/`, and the CSP report collector there declares a Secret Manager secret — both Cloud
-Functions and Secret Manager need the **Blaze** plan, so the deploy dies before it gets to your app:
+When the app is not on Firebase Hosting, Firebase's sign-in handler on `<project>.firebaseapp.com` is a
+third party, and Firefox's Total Cookie Protection (and Safari's ITP) block it.
 
-```
-Error: Request to https://secretmanager.googleapis.com/v1/.../DBUI_CSP_REPORT_TOKEN
-had HTTP Error: 403, This API method requires billing to be enabled.
-```
-
-Nothing about the app needs that function. The `/csp-report` Hosting rewrite pointing at a function
-that was never deployed is not a deploy error and not a runtime one either — the path 404s, and a
-browser drops an undeliverable CSP report silently. The only thing you lose is the aggregated
-violation counts described under [Violation reports](README.md#violation-reports); the Report-Only header
-still works, so you can still watch violations in DevTools while you soak the policy.
-
-Firebase config is stored in browser localStorage. Share a pre-configured URL to onboard users without manual setup.
-
-## Firefox: "Sign in with Google" fails (third-party cookies)
-
-Google sign-in (`signInWithPopup`) loads Firebase's auth handler from `<projectId>.firebaseapp.com`.
-When the app is hosted on a **different origin** (e.g. GitHub Pages) that handler runs as a
-*third party*, and Firefox's **Enhanced Tracking Protection** + **Total Cookie Protection** (default
-since FF 103) block its cookies/storage — so sign-in silently fails. Same applies to Safari ITP.
-
-User-side fixes (easiest first):
-
-1. **Per-site (recommended):** click the **shield icon** left of the address bar → turn
-   **Enhanced Tracking Protection OFF** for this site → reload.
-2. **Cookie exception:** Settings → Privacy & Security → Cookies and Site Data →
-   **Manage Exceptions** → add `https://<projectId>.firebaseapp.com` → **Allow**.
-3. **Global:** set ETP to **Standard** (not Strict) — least reliable, since Standard still
-   partitions third-party storage; prefer the exception in (2).
-
-Robust fix (no per-user setting): serve the auth handler **same-origin** with the app — host on
-**Firebase Hosting** (or a custom domain whose `authDomain` matches the app's origin). Then the auth
-popup is first-party and no third-party cookies are involved.
-
-> A custom domain on **GitHub Pages** does *not* buy this. `dbui.ddns.net` changes where the app is
-> served, not where the handler is: `authDomain` stays `<projectId>.firebaseapp.com`, which is still a
-> third party to it. Only a host that can serve Firebase's `/__/auth/*` handler under the app's own
-> origin — Firebase Hosting with that domain attached — makes the popup first-party.
+- A user can turn off Enhanced Tracking Protection for the site (the shield icon), or allow cookies for
+  `https://<project>.firebaseapp.com`.
+- The real fix is Firebase Hosting with the app's own domain, which makes the handler first-party. A
+  custom domain on GitHub Pages does not.
