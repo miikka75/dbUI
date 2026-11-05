@@ -169,6 +169,10 @@ test.describe('Browse carousel', () => {
     await expect(carousel(page)).toBeVisible();
     await expect(page.locator('[data-testid="nav-level-tiles"]')).toHaveCount(0);
     await expect(centred(page)).toHaveAttribute('data-testid', 'nav-level-item-combined');
+    // No image: the icon is the picture, most of the tile's width, the words below it.
+    const icon = await centred(page).locator('.tile-icon-art .v-icon').boundingBox();
+    const tile = await centred(page).boundingBox();
+    expect(icon.width).toBeGreaterThan(tile.width * 0.5);
     await item(page, 'grp:Data').dispatchEvent('click');          // a tap, without scrolling it into view first
     await expect(centred(page)).toHaveAttribute('data-testid', 'nav-level-item-grp:Data');
     expect(await current(page)).toBe('__home');

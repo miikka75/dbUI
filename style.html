@@ -130,6 +130,8 @@ input[type="date"]:focus { outline: none; border-color: rgb(var(--v-theme-primar
 .tile-carousel:focus-visible { outline: 2px solid rgb(var(--v-theme-primary)); outline-offset: 2px; border-radius: 4px; }
 /* 100% of the padded box: 70% of the row, so the first and last can sit in the centre too. */
 .tile-carousel > * { flex: 0 0 100%; scroll-snap-align: center; }
+/* image-tile's iconArt: the icon is sized against the tile's width (cqw), however wide the tile is. */
+.tile-icon-art { container-type: inline-size; }
 .tile-carousel-dots { display: flex; justify-content: center; gap: 6px; margin-top: 8px; }
 .tile-carousel-dots span { width: 7px; height: 7px; border-radius: 50%; background: rgb(var(--v-theme-on-surface), 0.25); }
 .tile-carousel-dots span.on { background: rgb(var(--v-theme-primary)); }

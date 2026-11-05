@@ -9645,6 +9645,7 @@ function createVueApp() {
     props: { src: { type: String, default: '' }, zoom: Boolean, zoomLabel: { type: String, default: '' }, aspect: { type: String, default: '16 / 9' },
              focus: { type: String, default: 'center' }, fit: { type: String, default: 'cover' },
              icon: { type: String, default: '' }, placeholder: Boolean,
+             iconArt: Boolean,   // with `placeholder`: the icon IS the picture, drawn large in the theme colour
              imgTestid: { type: String, default: undefined } },
     emits: ['zoom'],
     computed: {
@@ -9660,7 +9661,8 @@ function createVueApp() {
       + '<v-card variant="outlined" class="h-100">'
       + '<button v-if="src && zoom" type="button" class="tile-zoom" :title="zoomLabel" :aria-label="zoomLabel" @click.stop="$emit(\'zoom\')"><img :src="src" class="tile-img" :style="imgStyle" loading="lazy" alt="" :data-testid="imgTestid"></button>'
       + '<img v-else-if="src" :src="src" class="tile-img" :style="imgStyle" loading="lazy" alt="" :data-testid="imgTestid">'
-      + '<div v-else-if="placeholder" class="tile-img" :style="{ aspectRatio: aspect, display: \'flex\', alignItems: \'center\', justifyContent: \'center\', background: \'rgb(var(--v-theme-on-surface), 0.05)\' }"><v-icon size="40" :icon="icon" style="opacity:0.35"></v-icon></div>'
+      + '<div v-else-if="placeholder" class="tile-img" :class="{ \'tile-icon-art\': iconArt }" :style="{ aspectRatio: aspect, display: \'flex\', alignItems: \'center\', justifyContent: \'center\', background: iconArt ? \'rgb(var(--v-theme-primary), 0.08)\' : \'rgb(var(--v-theme-on-surface), 0.05)\' }">'
+      + '<v-icon :size="iconArt ? \'60cqw\' : 40" :icon="icon" :color="iconArt ? \'primary\' : undefined" :style="iconArt ? undefined : \'opacity:0.35\'"></v-icon></div>'
       + '<slot :bare="!src && !placeholder"></slot>'
       + '</v-card>'
   });
