@@ -12,7 +12,7 @@
   //
   // A node carries what a renderer draws: id, title, icon, and — where the schema gives them — the
   // `description` a tile or list row shows under the title, and on a node with children the
-  // `display` its page uses ('list' | 'tiles'; a group's own, else the nav's, else 'list'). An `image`
+  // `display` its page uses ('list' | 'tiles' | 'carousel'; a group's own, else the nav's, else 'list'). An `image`
   // (with its crop `focus`) is what tiles and list rows show in place of the icon.
   //
   // `opts.appearance` is the deployment's override per entry id (appConfig.navAppearance, edited in
@@ -79,12 +79,13 @@
 
   // The nav's own rules — the ones that need no schema to check. validateRefs adds the ones that do
   // (an entry naming a view or table that does not exist).
-  var DISPLAYS = ['list', 'tiles'];
+  var DISPLAYS = ['list', 'tiles', 'carousel'];
+  var DISPLAYS_TEXT = '"list", "tiles" or "carousel"';
   // Which part of an image a 16:9 tile keeps when it crops.
   var FOCUS = ['top', 'center', 'bottom'];
   function errors(nav) {
     var errs = [], groups = {};
-    if (nav && nav.display !== undefined && DISPLAYS.indexOf(nav.display) < 0) errs.push('Nav -> `display` must be "list" or "tiles" (got ' + JSON.stringify(nav.display) + ')');
+    if (nav && nav.display !== undefined && DISPLAYS.indexOf(nav.display) < 0) errs.push('Nav -> `display` must be ' + DISPLAYS_TEXT + ' (got ' + JSON.stringify(nav.display) + ')');
     (function walk(items) { (items || []).forEach(function(it) {
       if (!it) return;
       // A truthy non-boolean (e.g. "admin") would hide the entry too, but silently reads as a role name
@@ -100,7 +101,7 @@
       }
       // Both together hides the entry from EVERYONE, which is never what anyone means by writing them.
       if (it.adminOnly && it.hideFromAdmin) errs.push('Nav -> "' + (it.view || it.table || it.group) + '" sets both `adminOnly` and `hideFromAdmin`, which hides it from every user');
-      if (it.display !== undefined && DISPLAYS.indexOf(it.display) < 0) errs.push('Nav -> "' + (it.view || it.table || it.group) + '": `display` must be "list" or "tiles" (got ' + JSON.stringify(it.display) + ')');
+      if (it.display !== undefined && DISPLAYS.indexOf(it.display) < 0) errs.push('Nav -> "' + (it.view || it.table || it.group) + '": `display` must be ' + DISPLAYS_TEXT + ' (got ' + JSON.stringify(it.display) + ')');
       if (it.description !== undefined && typeof it.description !== 'string') errs.push('Nav -> "' + (it.view || it.table || it.group) + '": `description` must be text');
       if (it.image !== undefined && typeof it.image !== 'string') errs.push('Nav -> "' + (it.view || it.table || it.group) + '": `image` must be text (an https URL or "asset:<id>")');
       if (it.focus !== undefined && FOCUS.indexOf(it.focus) < 0) errs.push('Nav -> "' + (it.view || it.table || it.group) + '": `focus` must be "top", "center" or "bottom"');
