@@ -1,10 +1,14 @@
 # Navigation
 
-`nav` lists the screens in order, grouped to any depth. `layout` is a drawer, top tabs or browse pages (with `display: "tiles"`); each user may switch layout in Settings. `bottomNav` adds a phone bottom bar, `roles` / `requiresGrant` hide items, and every screen is a browser history entry.
+`nav` lists the screens in order, grouped to any depth. `layout` is a drawer, top tabs or browse pages (with `display: "tiles"`, or `"carousel"`: on a phone, tiles swiped sideways, the centred one opening on a tap); each user may switch layout in Settings. `bottomNav` adds a phone bottom bar, `roles` / `requiresGrant` hide items, and every screen is a browser history entry.
 
 ![Browse layout as tiles (demo)](../screenshots/nav-tiles.png)
 
 *Browse layout as tiles (demo)*
+
+![Browse layout as a carousel on a phone (demo)](../screenshots/nav-carousel.png)
+
+*Browse layout as a carousel on a phone (demo)*
 
 ![Drawer with a group (chores)](../screenshots/nav-drawer.png)
 

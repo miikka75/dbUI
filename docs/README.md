@@ -35,7 +35,7 @@ Every feature of the app, with a page each: what it does, the schema that turns 
 | Access | [Public tables (visitors)](features/public-tables.md) | Tables anyone can read without an account — a timetable, a price list — with a Sign in button. | ✅ | ✅ | ✅ | ✅ |
 | Access | [Membership requests & open sign-up](features/membership.md) | A new account requests access with its name, or joins on its own with a fixed grant. | ✅ | ✅ | ✅ | ✅ |
 | Access | [Profiles & user-linked lists](features/profiles.md) | Display name and avatar per user; list values linked to accounts so `@me` and per-person views work. | ✅ | ✅ | ✅ | ✅ |
-| Look & navigation | [Navigation](features/navigation.md) | Side drawer, top tabs or browse pages (list or tiles), nested groups, role-based items and a phone bottom bar. | ✅ | ✅ | ✅ | ✅ |
+| Look & navigation | [Navigation](features/navigation.md) | Side drawer, top tabs or browse pages (list, tiles or a phone carousel), nested groups, role-based items and a phone bottom bar. | ✅ | ✅ | ✅ | ✅ |
 | Look & navigation | [Theme & appearance](features/theme.md) | Brand palette for light and dark mode, edited live; background images and menu tiles per screen. | ✅ | ✅ | ✅ | ✅ |
 | Look & navigation | [Languages & translations](features/i18n.md) | Every label is a translation key; the Languages tab edits them per language. | ✅ | ✅ | ✅ | ✅ |
 | Look & navigation | [Print](features/print.md) | Print a view as a table or cards, a single card, or a label sheet; embeds included. | ✅ | ✅ | ✅ | ✅ |

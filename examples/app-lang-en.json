@@ -321,6 +321,7 @@
       "settings.nav_layout": "Navigation",
       "settings.nav_list": "List",
       "settings.nav_tiles": "Tiles",
+      "settings.nav_carousel": "Carousel",
       "settings.reset": "Reset browser settings",
       "settings.role": "Role",
       "settings.rotation_anchor": "List start date",

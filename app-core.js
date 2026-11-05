@@ -411,6 +411,7 @@ function createVueApp() {
       openedGroups: [],
       navLayoutOverride: localStorage.getItem('app_nav_layout') || null,
       navDisplayOverride: localStorage.getItem('app_nav_display') || null,
+      carouselAt: {},   // a browse carousel's centred entry per level, so coming back lands on it
       mobile: window.innerWidth < 768,
       windowWidth: window.innerWidth,
       theme: localStorage.getItem('app_theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'),
@@ -639,12 +640,19 @@ function createVueApp() {
       navConfig: function() { return (this.schemaData && this.schemaData.nav) || null; },
       // One of 'drawer' | 'tabs' | 'browse'; anything else (a typo, a value from a newer build) is the drawer.
       navLayout: function() { var v = this.navLayoutOverride || (this.navConfig && this.navConfig.layout); return v === 'tabs' || v === 'browse' ? v : 'drawer'; },
-      // How a nav level draws its entries: 'list' | 'tiles'. The schema sets it on the nav and per group;
-      // a person's own choice in Settings overrides both, on every level.
-      navDisplay: function() { var v = this.navDisplayOverride || (this.navConfig && this.navConfig.display); return v === 'tiles' ? 'tiles' : 'list'; },
-      // The Settings choice: 'drawer' | 'tabs', or browse as 'list' | 'tiles'.
+      // How a nav level draws its entries: 'list' | 'tiles' | 'carousel'. The schema sets it on the nav and
+      // per group; a person's own choice in Settings overrides both, on every level.
+      navDisplay: function() { var v = this.navDisplayOverride || (this.navConfig && this.navConfig.display); return v === 'tiles' || v === 'carousel' ? v : 'list'; },
+      // The Settings choice: 'drawer' | 'tabs', or browse as 'list' | 'tiles' | 'carousel'.
       navChoice: function() { return this.navLayout === 'browse' ? this.navDisplay : this.navLayout; },
-      levelDisplay: function() { var self = this; return function(node) { return self.navDisplayOverride || (node && node.display) || 'list'; }; },
+      // A carousel shows one entry at a time, so it is drawn only on a phone and for a few entries; else tiles.
+      levelDisplay: function() {
+        var self = this;
+        return function(node) {
+          var d = self.navDisplayOverride || (node && node.display) || 'list';
+          return d === 'carousel' && !(self.mobile && node && node.children && node.children.length <= 8) ? 'tiles' : d;
+        };
+      },
       // Browse mode's root: the top-level entries, as the page a user starts on and returns to. The system
       // screens are not on it — in browse they live in the app bar's cog menu.
       navHome: function() {
@@ -1226,7 +1234,7 @@ function createVueApp() {
          'part.backup', 'part.schema', 'part.languages', 'part.reference', 'part.data', 'part.users',
          'msg.nothing_to_export', 
          'settings.examples', 'settings.examples_update', 'settings.examples_reinstall', 'settings.examples_notes_more',
-         'settings.reset', 'settings.nav_layout', 'settings.nav_drawer', 'settings.tabs_nav', 'settings.nav_list', 'settings.nav_tiles', 'settings.appearance',
+         'settings.reset', 'settings.nav_layout', 'settings.nav_drawer', 'settings.tabs_nav', 'settings.nav_list', 'settings.nav_tiles', 'settings.nav_carousel', 'settings.appearance',
          'appearance.menu', 'appearance.background', 'appearance.icon', 'appearance.image', 'appearance.none', 'appearance.search',
          'appearance.same_as_menu', 'appearance.other_icon', 'appearance.focus',
          'appearance.focus_top', 'appearance.focus_center', 'appearance.focus_bottom', 'theme.primary', 'theme.secondary', 'theme.surface', 'theme.background', 'theme.text', 'theme.error', 'theme.success', 'local.title', 'local.used', 'local.quota', 'local.persistent', 'local.best_effort_title', 'local.best_effort', 'local.keep', 'local.install_hint', 'examples.title', 'examples.intro', 'examples.tables', 'examples.views', 'examples.sample_rows', 'examples.languages', 'examples.app_text', 'examples.with_data', 'examples.data_warning', 'examples.replace_warning', 'examples.export_first', 'examples.install',
@@ -1551,7 +1559,7 @@ function createVueApp() {
       setNavLayout: function(v) { this.navLayoutOverride = v; localStorage.setItem('app_nav_layout', v); },
       setNavDisplay: function(v) { this.navDisplayOverride = v; localStorage.setItem('app_nav_display', v); },
       setNavChoice: function(v) {
-        if (v === 'list' || v === 'tiles') { this.setNavLayout('browse'); this.setNavDisplay(v); }
+        if (v === 'list' || v === 'tiles' || v === 'carousel') { this.setNavLayout('browse'); this.setNavDisplay(v); }
         else this.setNavLayout(v);
       },
 
@@ -9656,6 +9664,65 @@ function createVueApp() {
       + '<slot :bare="!src && !placeholder"></slot>'
       + '</v-card>'
   });
+  // Tiles in one row swiped sideways: the centred one faces forward, the others turn away. The snap is the
+  // browser's (scroll-snap); a press on a side tile centres it rather than opening it. `index` is the
+  // centred tile, reported back as it changes.
+  app.component('tile-carousel', {
+    props: { index: { type: Number, default: 0 }, label: { type: String, default: '' } },
+    emits: ['update:index'],
+    data: function() { return { at: -1, count: 0 }; },
+    mounted: function() {
+      var self = this;
+      this.still = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+      this.onResize = function() { self.paint(); };
+      window.addEventListener('resize', this.onResize);
+      this.$nextTick(function() { self.count = self.slides().length; self.go(Math.min(self.index, self.count - 1), true); self.paint(); });
+    },
+    updated: function() { this.count = this.slides().length; this.paint(); },
+    unmounted: function() { window.removeEventListener('resize', this.onResize); cancelAnimationFrame(this.raf); },
+    methods: {
+      slides: function() { return this.$refs.track ? Array.prototype.slice.call(this.$refs.track.children) : []; },
+      onScroll: function() { var self = this; cancelAnimationFrame(this.raf); this.raf = requestAnimationFrame(function() { self.paint(); }); },
+      // Each tile's turn from its distance to the centre, in tile widths; the nearest is the centred one.
+      paint: function() {
+        var track = this.$refs.track, self = this, best = -1, bestD = Infinity;
+        if (!track) return;
+        var mid = track.scrollLeft + track.clientWidth / 2;
+        this.slides().forEach(function(el, i) {
+          var d = (el.offsetLeft + el.offsetWidth / 2 - mid) / (el.offsetWidth || 1), k = Math.max(-1, Math.min(1, d));
+          if (Math.abs(d) < bestD) { bestD = Math.abs(d); best = i; }
+          el.style.transform = self.still ? '' : 'perspective(800px) rotateY(' + (k * 35).toFixed(1) + 'deg) scale(' + (1 - Math.abs(k) * 0.12).toFixed(3) + ')';
+          el.style.opacity = String(1 - Math.abs(k) * 0.35);
+        });
+        this.slides().forEach(function(el, i) { if (i === best) el.setAttribute('aria-current', 'true'); else el.removeAttribute('aria-current'); });
+        if (best !== this.at) { this.at = best; this.$emit('update:index', best); }
+      },
+      go: function(i, now) {
+        var el = this.slides()[i], track = this.$refs.track;
+        if (!el) return;
+        track.scrollTo({ left: el.offsetLeft + el.offsetWidth / 2 - track.clientWidth / 2, behavior: now || this.still ? 'auto' : 'smooth' });
+      },
+      onClick: function(e) {
+        var i = this.slides().findIndex(function(el) { return el.contains(e.target); });
+        if (i >= 0 && i !== this.at) { e.stopPropagation(); e.preventDefault(); this.go(i); }
+      },
+      onKey: function(e) {
+        if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+          e.preventDefault();
+          this.go(Math.max(0, Math.min(this.count - 1, this.at + (e.key === 'ArrowRight' ? 1 : -1))));
+        } else if ((e.key === 'Enter' || e.key === ' ') && e.target === this.$refs.track) {
+          var el = this.slides()[this.at];
+          if (el) { e.preventDefault(); el.click(); }
+        }
+      }
+    },
+    template: ''
+      + '<div>'
+      + '<div ref="track" class="tile-carousel" tabindex="0" role="region" aria-roledescription="carousel" :aria-label="label"'
+      + ' @scroll.passive="onScroll" @click.capture="onClick" @keydown="onKey"><slot></slot></div>'
+      + '<div class="tile-carousel-dots" aria-hidden="true"><span v-for="i in count" :key="i" :class="{ on: i - 1 === at }"></span></div>'
+      + '</div>'
+  });
 
   // ---- Shared UI elements. One definition each, used everywhere the element appears; CLAUDE.md
   // ("UI conventions") lists them, and dev/test/ui-conventions.test.js fails on a hand-made copy. ----
@@ -11580,7 +11647,15 @@ function createVueApp() {
     props: { below: { type: Boolean, default: false } },
     computed: {
       a: function() { return appInstance; },
-      node: function() { return appInstance.currentNavNode; }
+      node: function() { return appInstance.currentNavNode; },
+      look: function() { return this.node ? this.a.levelDisplay(this.node) : 'list'; },
+      // The tiles' frame: a grid, or a carousel that reports its centred entry back for the next visit.
+      frame: function() {
+        var id = this.node.id, at = this.a.carouselAt;
+        return this.look === 'carousel'
+          ? { index: at[id] || 0, label: this.node.title, 'onUpdate:index': function(i) { at[id] = i; }, 'data-testid': 'nav-level-carousel' }
+          : { min: '280px', 'data-testid': 'nav-level-tiles' };
+      }
     },
     template: '#nav-level-tpl'
   });

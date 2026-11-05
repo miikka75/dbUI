@@ -1120,7 +1120,7 @@ profile, or denies it.
 | Key | Meaning |
 |---|---|
 | `layout` | `drawer` (default), `tabs` (top, desktop), or `browse` (pages with a breadcrumb). Each user may override it in Settings → Navigation. |
-| `display` | Browse: `list` (default) or `tiles`; on `nav` or on one group. |
+| `display` | Browse: `list` (default), `tiles` or `carousel`; on `nav` or on one group. A carousel is swiped sideways and its centred tile opens on a tap; it is drawn on a phone for up to 8 entries, else tiles. |
 | `icon`, `title` | Per entry. |
 | `description` | Browse: a line under the entry (`nav.desc.<id>` translates). |
 | `image`, `focus` | Browse: a picture in place of the icon (`top`/`center`/`bottom` crop). |

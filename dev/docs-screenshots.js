@@ -24,6 +24,7 @@ const EXTRA = require('./docs-screenshots-schema.json');
 const SHOTS = {
   demo: [
     { file: 'nav-tiles', view: null },
+    { file: 'nav-carousel', view: null, viewport: PHONE, before: (p) => p.locator('.tile-carousel').evaluate((el) => { el.scrollLeft = el.children[0].offsetWidth; }) },
     { file: 'data-view-table', view: 'all_items' },
     { file: 'data-view-cards', view: 'summary_cards' },
     { file: 'data-view-gallery', view: 'notes_gallery' },
