@@ -173,8 +173,14 @@ test.describe('Browse carousel', () => {
     const icon = await centred(page).locator('.tile-icon-art .v-icon').boundingBox();
     const tile = await centred(page).boundingBox();
     expect(icon.width).toBeGreaterThan(tile.width * 0.5);
+    await expect(centred(page)).not.toHaveClass(/v-card--variant-outlined/);   // no border: just the picture
+    // The centred entry's name sits at the bottom of the window, not on the tile.
+    const caption = page.locator('[data-testid="tile-carousel-caption"]');
+    await expect(caption).toContainText('combined');
+    expect((await caption.boundingBox()).y).toBeGreaterThan(800 - 150);
     await item(page, 'grp:Data').dispatchEvent('click');          // a tap, without scrolling it into view first
     await expect(centred(page)).toHaveAttribute('data-testid', 'nav-level-item-grp:Data');
+    await expect(caption).toContainText('Data');
     expect(await current(page)).toBe('__home');
     await centred(page).click();
     await expect.poll(() => current(page)).toBe('grp:Data');

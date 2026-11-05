@@ -9646,6 +9646,7 @@ function createVueApp() {
              focus: { type: String, default: 'center' }, fit: { type: String, default: 'cover' },
              icon: { type: String, default: '' }, placeholder: Boolean,
              iconArt: Boolean,   // with `placeholder`: the icon IS the picture, drawn large in the theme colour
+             frameless: Boolean, // no card border or surface: just the picture
              imgTestid: { type: String, default: undefined } },
     emits: ['zoom'],
     computed: {
@@ -9658,32 +9659,43 @@ function createVueApp() {
       }
     },
     template: ''
-      + '<v-card variant="outlined" class="h-100">'
+      + '<v-card :variant="frameless ? \'text\' : \'outlined\'" class="h-100" :class="{ \'tile-frameless\': frameless }">'
       + '<button v-if="src && zoom" type="button" class="tile-zoom" :title="zoomLabel" :aria-label="zoomLabel" @click.stop="$emit(\'zoom\')"><img :src="src" class="tile-img" :style="imgStyle" loading="lazy" alt="" :data-testid="imgTestid"></button>'
       + '<img v-else-if="src" :src="src" class="tile-img" :style="imgStyle" loading="lazy" alt="" :data-testid="imgTestid">'
-      + '<div v-else-if="placeholder" class="tile-img" :class="{ \'tile-icon-art\': iconArt }" :style="{ aspectRatio: aspect, display: \'flex\', alignItems: \'center\', justifyContent: \'center\', background: iconArt ? \'rgb(var(--v-theme-primary), 0.08)\' : \'rgb(var(--v-theme-on-surface), 0.05)\' }">'
-      + '<v-icon :size="iconArt ? \'60cqw\' : 40" :icon="icon" :color="iconArt ? \'primary\' : undefined" :style="iconArt ? undefined : \'opacity:0.35\'"></v-icon></div>'
+      + '<div v-else-if="placeholder" class="tile-img" :class="{ \'tile-icon-art\': iconArt }" :style="{ aspectRatio: aspect, display: \'flex\', alignItems: \'center\', justifyContent: \'center\', background: iconArt ? \'none\' : \'rgb(var(--v-theme-on-surface), 0.05)\' }">'
+      + '<v-icon :size="iconArt ? \'min(80cqw, 80cqh)\' : 40" :icon="icon" :color="iconArt ? \'primary\' : undefined" :style="iconArt ? undefined : \'opacity:0.35\'"></v-icon></div>'
       + '<slot :bare="!src && !placeholder"></slot>'
       + '</v-card>'
   });
   // Tiles in one row swiped sideways: the centred one faces forward, the others turn away. The snap is the
   // browser's (scroll-snap); a press on a side tile centres it rather than opening it. `index` is the
-  // centred tile, reported back as it changes.
+  // centred tile, reported back as it changes; the `caption` slot gets it, to name that tile beneath.
+  // `fill` stretches it to the bottom of the window, so the caption and dots sit there.
   app.component('tile-carousel', {
-    props: { index: { type: Number, default: 0 }, label: { type: String, default: '' } },
+    props: { index: { type: Number, default: 0 }, label: { type: String, default: '' }, fill: Boolean },
     emits: ['update:index'],
-    data: function() { return { at: -1, count: 0 }; },
+    data: function() { return { at: -1, count: 0, room: 0 }; },
+    computed: {
+      wrapStyle: function() { return this.fill && this.room ? { minHeight: 'calc(100dvh - ' + this.room + 'px)' } : null; }
+    },
     mounted: function() {
       var self = this;
       this.still = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
-      this.onResize = function() { self.paint(); };
+      this.onResize = function() { self.measure(); self.paint(); };
       window.addEventListener('resize', this.onResize);
-      this.$nextTick(function() { self.count = self.slides().length; self.go(Math.min(self.index, self.count - 1), true); self.paint(); });
+      this.$nextTick(function() { self.measure(); self.count = self.slides().length; self.go(Math.min(self.index, self.count - 1), true); self.paint(); });
     },
     updated: function() { this.count = this.slides().length; this.paint(); },
     unmounted: function() { window.removeEventListener('resize', this.onResize); cancelAnimationFrame(this.raf); },
     methods: {
       slides: function() { return this.$refs.track ? Array.prototype.slice.call(this.$refs.track.children) : []; },
+      // What the window holds besides the carousel: everything above it, and its ancestors' bottom padding.
+      measure: function() {
+        if (!this.fill || !this.$el.getBoundingClientRect) return;
+        var room = this.$el.getBoundingClientRect().top + window.scrollY;
+        for (var e = this.$el.parentElement; e && e !== document.body; e = e.parentElement) room += parseFloat(getComputedStyle(e).paddingBottom) || 0;
+        this.room = Math.ceil(room);
+      },
       onScroll: function() { var self = this; cancelAnimationFrame(this.raf); this.raf = requestAnimationFrame(function() { self.paint(); }); },
       // Each tile's turn from its distance to the centre, in tile widths; the nearest is the centred one.
       paint: function() {
@@ -9693,8 +9705,10 @@ function createVueApp() {
         this.slides().forEach(function(el, i) {
           var d = (el.offsetLeft + el.offsetWidth / 2 - mid) / (el.offsetWidth || 1), k = Math.max(-1, Math.min(1, d));
           if (Math.abs(d) < bestD) { bestD = Math.abs(d); best = i; }
-          el.style.transform = self.still ? '' : 'perspective(800px) rotateY(' + (k * 35).toFixed(1) + 'deg) scale(' + (1 - Math.abs(k) * 0.12).toFixed(3) + ')';
+          // Neighbours are drawn a quarter tile inwards, behind the centred one, so their pictures show at the sides.
+          el.style.transform = self.still ? '' : 'perspective(800px) translateX(' + (-k * 25).toFixed(1) + '%) rotateY(' + (k * 35).toFixed(1) + 'deg) scale(' + (1 - Math.abs(k) * 0.12).toFixed(3) + ')';
           el.style.opacity = String(1 - Math.abs(k) * 0.35);
+          el.style.zIndex = String(10 - Math.round(Math.abs(d)));
         });
         this.slides().forEach(function(el, i) { if (i === best) el.setAttribute('aria-current', 'true'); else el.removeAttribute('aria-current'); });
         if (best !== this.at) { this.at = best; this.$emit('update:index', best); }
@@ -9719,10 +9733,13 @@ function createVueApp() {
       }
     },
     template: ''
-      + '<div>'
+      + '<div class="tile-carousel-wrap" :style="wrapStyle">'
       + '<div ref="track" class="tile-carousel" tabindex="0" role="region" aria-roledescription="carousel" :aria-label="label"'
       + ' @scroll.passive="onScroll" @click.capture="onClick" @keydown="onKey"><slot></slot></div>'
+      + '<div class="tile-carousel-foot">'
+      + '<div aria-live="polite" data-testid="tile-carousel-caption"><slot v-if="at >= 0" name="caption" :index="at"></slot></div>'
       + '<div class="tile-carousel-dots" aria-hidden="true"><span v-for="i in count" :key="i" :class="{ on: i - 1 === at }"></span></div>'
+      + '</div>'
       + '</div>'
   });
 
@@ -11655,7 +11672,7 @@ function createVueApp() {
       frame: function() {
         var id = this.node.id, at = this.a.carouselAt;
         return this.look === 'carousel'
-          ? { index: at[id] || 0, label: this.node.title, 'onUpdate:index': function(i) { at[id] = i; }, 'data-testid': 'nav-level-carousel' }
+          ? { index: at[id] || 0, label: this.node.title, fill: !this.below, 'onUpdate:index': function(i) { at[id] = i; }, 'data-testid': 'nav-level-carousel' }
           : { min: '280px', 'data-testid': 'nav-level-tiles' };
       }
     },
