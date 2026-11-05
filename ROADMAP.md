@@ -108,6 +108,21 @@ A per-row template beside `markdown`, rendered once per matching row in place of
 - `browse`: tile images (cover art), only if asked.
 - `groupBy.having`: no predicate over an aggregated row yet.
 
+### Browse: a carousel on the phone (`display: "carousel"`)
+
+A third browse `display` beside `list` and `tiles`: a level's entries as one row of `image-tile` cards,
+swiped left and right, the centred one large and the others turned away in 3D.
+
+- **Swipe** is CSS scroll-snap (the browser's own momentum); the 3D is `perspective` + `rotateY` from
+  each card's distance to the centre. No library, no CSP change.
+- **Swiping centres an entry; tapping it opens it.** Opening when a swipe settles would navigate while
+  someone is only looking. The centred entry's title and `description` show beneath, with dots for
+  position; the position is kept when coming back.
+- **Phone only, few entries**: wider screens and levels with more than 8 entries draw as `tiles`.
+- **Accessible**: reduced motion keeps the cards flat; arrow keys move; announced as a carousel.
+- Where: `nav.js` `DISPLAYS`, `levelDisplay`, a fifth choice in Settings → Navigation, `validateSchema`,
+  a UI test (swipe, tap, keyboard, reduced motion), docs/features/navigation.md with a screenshot.
+
 ### Not started
 
 - **`feed`**: a reverse-chronological activity stream; pairs with an audit trail if one is added.
