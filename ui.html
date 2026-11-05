@@ -551,9 +551,11 @@
     </div>
     <!-- The shared tile (image-tile, as the gallery layout uses): an entry's image is the cover, cropped to
          16:9 around its focus; without one the tile has no picture and the entry's icon sits by the title.
-         The same tiles go in a grid or, on a phone, a carousel. -->
+         The same tiles go in a grid or, on a phone, a carousel, where an entry with no image has its icon
+         drawn as the picture. -->
     <component v-if="look !== 'list'" :is="look === 'carousel' ? 'tile-carousel' : 'tile-grid'" :key="look + node.id" v-bind="frame">
       <image-tile v-for="c in node.children" :key="c.id" :src="c.image ? a.assetSrc(c.image) : ''" :focus="c.focus || 'center'"
+                  :placeholder="look === 'carousel'" :icon-art="look === 'carousel'" :icon="c.icon" :aspect="look === 'carousel' ? '4 / 3' : '16 / 9'"
                   :img-testid="'nav-tile-img-' + c.id" :data-testid="'nav-level-item-' + c.id" @click="a.selectTab(c.id)" v-slot="{ bare }">
         <v-card-item>
           <template v-if="bare" v-slot:prepend><v-icon :icon="c.icon" color="primary" size="32"></v-icon></template>
