@@ -17,7 +17,7 @@ versions of the elements below.
 | Expanding a row in place | The row's name as a chevron toggle (Settings → Calendars) |
 | Multi-selects a reader narrows by (a calendar's or a page's `filters`) | `<pick-filters :cols :picked :items :label @set>` |
 | A whole number set by hand (walk-ins at the desk) | `<count-stepper :value="n" @change="…">`: − n +, never below 0 |
-| A grid of tiles with pictures (the nav's Tiles, the gallery layout) | `<tile-grid :min="…">` of `<image-tile :src :aspect :focus>`; the tile's words go in its slot, a click is the caller's |
+| A grid of tiles with pictures (the nav's Tiles, the gallery layout) | `<tile-grid :min="…">` of `<image-tile :src :aspect :focus>`; the tile's words go in its slot, a click is the caller's. Swiped in one row: `<tile-carousel v-model:index>` around the same tiles |
 
 **Buttons** take one of four roles, documented at the top of `settings-view-tpl` in `ui.html`:
 

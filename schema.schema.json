@@ -910,9 +910,10 @@
           "type": "string",
           "enum": [
             "list",
-            "tiles"
+            "tiles",
+            "carousel"
           ],
-          "description": "BROWSE ONLY: how a level's entries are drawn — a list (default) or a grid of tiles. A group or a view with entries may override it with its own."
+          "description": "BROWSE ONLY: how a level's entries are drawn — a list (default), a grid of tiles, or a carousel of them swiped sideways (on a phone with at most 8 entries; tiles elsewhere). A group or a view with entries may override it with its own."
         },
         "items": {
           "type": "array",
@@ -998,7 +999,8 @@
           "type": "string",
           "enum": [
             "list",
-            "tiles"
+            "tiles",
+            "carousel"
           ],
           "description": "BROWSE ONLY: on a group or a view with entries, how its page draws them. Defaults to the nav's `display`."
         },

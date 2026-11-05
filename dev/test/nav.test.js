@@ -122,7 +122,8 @@ describe('descriptions, display, and translation keys', () => {
   it('rejects an unknown display and a non-text description', () => {
     const errs = Nav.errors({ display: 'grid', items: [{ view: 'a', display: 'cards' }, { view: 'b', description: 3 }] });
     assert.equal(errs.length, 3);
-    assert.match(errs[0], /`display` must be "list" or "tiles"/);
+    assert.match(errs[0], /`display` must be "list", "tiles" or "carousel"/);
+    assert.deepEqual(Nav.errors({ display: 'carousel', items: [{ group: 'G', display: 'carousel', items: [] }] }), []);
     assert.match(errs[1], /"a": `display`/);
     assert.match(errs[2], /"b": `description` must be text/);
   });
