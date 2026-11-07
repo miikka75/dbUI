@@ -1,12 +1,13 @@
-// The Past tab offers Restore, not archive, in every layout (the card, split and list layouts used to
-// show the archive button there, which did nothing).
+// The Past tab offers Restore, not archive, in every layout and on a board (they used to show the
+// archive button there, which did nothing).
 const { test, expect } = require('./server-fixture');
 const SCHEMA = require('./fixture-schema.json');
 
-for (const layout of ['card', 'split', 'list']) {
+for (const layout of ['card', 'split', 'list', 'board']) {
   test('Past tab in the ' + layout + ' layout restores a row', async ({ page }) => {
     const schema = JSON.parse(JSON.stringify(SCHEMA));
-    schema.views.push({ name: 'tickets_' + layout, sources: ['tickets'], mode: 'join', layout, columns: ['title', 'status'] });
+    // The fixture already has tickets_board.
+    if (layout !== 'board') schema.views.push({ name: 'tickets_' + layout, sources: ['tickets'], mode: 'join', layout, columns: ['title', 'status'] });
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.request.post('/api/resetData');
     await page.request.post('/api/saveSchema', { data: { schema } });
