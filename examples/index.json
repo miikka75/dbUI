@@ -20,30 +20,30 @@
       "title": "Bishopric Tool",
       "description": "A ward bishopric’s working tool — meeting programs, assignments, interviews and a members roster.",
       "icon": "./examples/bishopric-favicon.svg",
-      "revision": 49,
+      "revision": 50,
       "tables": 14,
       "views": 19,
       "schema": {
         "file": "bishopric-schema.json",
-        "hash": "8c5f9fa34129029d"
+        "hash": "b7d2169710ce4461"
       },
       "languages": [
         {
           "code": "en",
           "name": "English",
           "file": "bishopric-lang-en.json",
-          "hash": "9f23d31b9b523ba5"
+          "hash": "b01488b337e0f7e9"
         },
         {
           "code": "fi",
           "name": "Suomi",
           "file": "bishopric-lang-fi.json",
-          "hash": "90ebe0fbdb49fe09"
+          "hash": "3b4c3cc3ca050e15"
         }
       ],
       "about": {
         "file": "bishopric-about.json",
-        "hash": "ef0aa78ddd53e5eb"
+        "hash": "51010bc7a79eb295"
       },
       "notes": {
         "29": "Welcome the newly baptized and those who moved in; releases now come before sustainings.",
@@ -65,7 +65,8 @@
         "46": "Callings can be put in order by hand within a status: drop a card on another to place it before it, or use Move up / Move down in the card's menu. Cards no longer follow the date. Existing callings keep their current order until the first move.",
         "47": "Callings cards are compact: a closed card shows the name with the organization and calling beneath; the chevron on the name opens it to every field. Each status column folds by its heading. Both are remembered in this browser.",
         "48": "The meeting agenda lists callings (releases, sustainings, ordinations, welcomes) in the same order as the Calling board.",
-        "49": "In Finnish, the music leader calling is now called Musiikinohjaaja."
+        "49": "In Finnish, the music leader calling is now called Musiikinohjaaja.",
+        "50": "The meeting agenda has an Announcements field; the program shows it after the visitors and before the opening hymn, as the General Handbook (29.2.1.1) orders the meeting."
       }
     },
     {

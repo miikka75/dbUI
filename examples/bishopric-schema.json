@@ -191,6 +191,10 @@
             }
           },
           {
+            "name": "announcements",
+            "type": "text"
+          },
+          {
             "name": "opening_prayer",
             "list": "members",
             "allowNew": true,
@@ -710,6 +714,7 @@
             },
             "name": "visitors"
           },
+          "announcements",
           "opening_hymn",
           {
             "name": "opening_prayer",
@@ -1061,6 +1066,7 @@
           "theme",
           "presiding",
           "responsible",
+          "announcements",
           "opening_prayer",
           "stake_business",
           "testimony1",
