@@ -122,6 +122,10 @@
             "type": "select"
           },
           {
+            "name": "intermediate_number",
+            "type": "text"
+          },
+          {
             "name": "closing_hymn",
             "type": "select",
             "list": "hymns"
@@ -1101,6 +1105,7 @@
           "talk1",
           "talk2",
           "intermediate_hymn",
+          "intermediate_number",
           "talk3",
           {
             "view": "doc_thanks"
@@ -1183,6 +1188,7 @@
           "sacrament_hymn",
           "musical_number",
           "intermediate_hymn",
+          "intermediate_number",
           "closing_hymn"
         ],
         "sources": [

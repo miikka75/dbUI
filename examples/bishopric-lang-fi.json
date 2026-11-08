@@ -22,6 +22,7 @@
       "field.feed_id": "Syötteen tunnus",
       "field.feed_url": "Kalenterilinkki",
       "field.intermediate_hymn": "Välilaulu",
+      "field.intermediate_number": "Musiikkiesitys",
       "field.interpreter": "Tulkki",
       "field.item": "Asia",
       "field.lang": "Kieli",

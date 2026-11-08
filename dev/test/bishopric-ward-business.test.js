@@ -104,6 +104,12 @@ describe('bishopric example — ward business in the sacrament meeting program',
     assert.equal(idx('testimony1'), idx('musical_number') + 1);
   });
 
+  it('the intermediate slot takes a hymn or a musical number', () => {
+    const idx = (name) => program.columns.indexOf(name);
+    assert.equal(idx('intermediate_number'), idx('intermediate_hymn') + 1);
+    assert.equal(program.hideEmpty, true, 'the one left empty is not shown');
+  });
+
   it('the program has no stake business blocks', () => {
     const stake = program.columns.filter((c) => c && typeof c.markdown === 'string' && c.markdown.indexOf('text.stake_') >= 0);
     assert.deepEqual(stake, []);
