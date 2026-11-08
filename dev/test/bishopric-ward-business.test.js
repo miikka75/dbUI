@@ -98,6 +98,12 @@ describe('bishopric example — ward business in the sacrament meeting program',
     });
   });
 
+  it('the musical number follows the sacrament, before any speaker', () => {
+    const idx = (name) => program.columns.findIndex((c) => c === name || (c && (c.name === name || c.view === name)));
+    assert.equal(idx('musical_number'), idx('doc_sacrament') + 1);
+    assert.equal(idx('testimony1'), idx('musical_number') + 1);
+  });
+
   it('the program has no stake business blocks', () => {
     const stake = program.columns.filter((c) => c && typeof c.markdown === 'string' && c.markdown.indexOf('text.stake_') >= 0);
     assert.deepEqual(stake, []);
