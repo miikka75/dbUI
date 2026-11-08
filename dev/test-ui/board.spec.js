@@ -187,7 +187,7 @@ test.describe('Board embedded in a page', () => {
     // A board, not a table of its rows.
     await expect(page.locator('[data-testid="board-view"] [data-testid="board-lane-open"] [data-testid="board-card-tk1"]')).toBeVisible();
     await expect(page.locator('[data-testid="board-del-tk1"]')).toHaveCount(0);
-    await expect(page.locator('[data-testid="board-arch-tk1"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid="board-card-tk1"] button:has(.mdi-archive-outline)')).toHaveCount(0);
 
     await page.locator('[data-testid="board-card-tk1"] [data-testid="board-move-tk1"]').click();
     await page.locator('.v-overlay .v-list-item', { hasText: 'done' }).first().click();

@@ -122,6 +122,10 @@
             "type": "select"
           },
           {
+            "name": "intermediate_number",
+            "type": "text"
+          },
+          {
             "name": "closing_hymn",
             "type": "select",
             "list": "hymns"
@@ -189,6 +193,10 @@
                 { "organization": "ward" }
               ]
             }
+          },
+          {
+            "name": "announcements",
+            "type": "text"
           },
           {
             "name": "opening_prayer",
@@ -710,6 +718,7 @@
             },
             "name": "visitors"
           },
+          "announcements",
           "opening_hymn",
           {
             "name": "opening_prayer",
@@ -764,13 +773,25 @@
                       "organization": {
                         "ne": "young_men_priests"
                       }
+                    },
+                    {
+                      "organization": {
+                        "ne": "stake"
+                      }
                     }
                   ]
                 },
                 {
                   "$and": [
                     {
-                      "status": "set_apart"
+                      "$or": [
+                        {
+                          "status": "set_apart"
+                        },
+                        {
+                          "status": "setting_apart_recorded"
+                        }
+                      ]
                     },
                     {
                       "$or": [
@@ -782,6 +803,9 @@
                         },
                         {
                           "organization": "young_men_priests"
+                        },
+                        {
+                          "organization": "stake"
                         }
                       ]
                     }
@@ -940,6 +964,11 @@
                   "organization": {
                     "ne": "elders_quorum"
                   }
+                },
+                {
+                  "organization": {
+                    "ne": "stake"
+                  }
                 }
               ]
             },
@@ -1003,7 +1032,14 @@
             "filter": {
               "$and": [
                 {
-                  "status": "set_apart"
+                  "$or": [
+                    {
+                      "status": "set_apart"
+                    },
+                    {
+                      "status": "setting_apart_recorded"
+                    }
+                  ]
                 },
                 {
                   "$or": [
@@ -1023,18 +1059,53 @@
             "markdown": "{{t:text.quorum_announcement_header}}\n\n{{self}}\n\n{{t:text.quorum_announcement_footer}}"
           },
           {
+            "mode": "union",
+            "bare": true,
+            "readonly": true,
+            "hideEmpty": true,
+            "columns": [
+              "person",
+              "organization",
+              "calling",
+              "notes"
+            ],
+            "sources": [
+              "admin_callings"
+            ],
+            "defaultSort": "position",
+            "filter": {
+              "$and": [
+                {
+                  "$or": [
+                    {
+                      "status": "set_apart"
+                    },
+                    {
+                      "status": "setting_apart_recorded"
+                    }
+                  ]
+                },
+                {
+                  "organization": "stake"
+                }
+              ]
+            },
+            "markdown": "{{t:text.announcement_header}}\n\n{{self}}\n\n{{t:text.announcement_footer}}"
+          },
+          {
             "view": "doc_sacrament_intro"
           },
           "sacrament_hymn",
           {
             "view": "doc_sacrament"
           },
+          "musical_number",
           "testimony1",
           "testimony2",
           "talk1",
           "talk2",
-          "musical_number",
           "intermediate_hymn",
+          "intermediate_number",
           "talk3",
           {
             "view": "doc_thanks"
@@ -1061,6 +1132,7 @@
           "theme",
           "presiding",
           "responsible",
+          "announcements",
           "opening_prayer",
           "stake_business",
           "testimony1",
@@ -1116,6 +1188,7 @@
           "sacrament_hymn",
           "musical_number",
           "intermediate_hymn",
+          "intermediate_number",
           "closing_hymn"
         ],
         "sources": [
@@ -1975,6 +2048,12 @@
         "position": "905",
         "organization": "ward",
         "calling": "technology_assistant"
+      },
+      {
+        "id": "rc-stake-service_missionary",
+        "position": "906",
+        "organization": "stake",
+        "calling": "service_missionary"
       }
     ]
   }

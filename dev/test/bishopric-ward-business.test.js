@@ -8,7 +8,9 @@
 //     sustained in the quorum meeting, and are only ANNOUNCED in sacrament meeting (Handbook 10);
 //   - the elders quorum presidency is presented by the stake presidency, which brings its own business,
 //     and other elders quorum callings (secretary, teacher) are sustained in the quorum meeting
-//     (Handbook 8.3.4–8.3.5) -- so no elders quorum calling is on this ward program.
+//     (Handbook 8.3.4–8.3.5) -- so no elders quorum calling is on this ward program;
+//   - stake callings the ward announces (a service missionary) are announced once set apart, never
+//     sustained.
 //
 // Each block is a filter over admin_callings. They are written separately, so nothing but this test
 // stops a calling from matching two blocks at once or none at all.
@@ -35,6 +37,7 @@ const BLOCKS = {
   releases: block('releases_header'),
   sustaining: block('sustaining_header'),
   announcement: block('quorum_announcement_header'),
+  otherAnnouncement: block('announcement_header'),
   ordination: block('ordination_header')
 };
 const WARD_HEADER = block('ward_business');
@@ -43,12 +46,14 @@ const wardHeader = (row) => Rows.condMatches(row, WARD_HEADER.filter);
 
 describe('bishopric example — ward business in the sacrament meeting program', () => {
   ['young_men_deacons', 'young_men_teachers', 'young_men_priests'].forEach((org) => {
-    it(org + ' callings are announced once set apart, never sustained', () => {
+    it(org + ' callings are announced once set apart (also once recorded), never sustained', () => {
       const row = { organization: org, calling: 'president' };
       assert.deepEqual(landsIn(Object.assign({ status: 'accepted' }, row)), []);
       assert.equal(wardHeader(Object.assign({ status: 'accepted' }, row)), false);
-      assert.deepEqual(landsIn(Object.assign({ status: 'set_apart' }, row)), ['announcement']);
-      assert.equal(wardHeader(Object.assign({ status: 'set_apart' }, row)), true);
+      ['set_apart', 'setting_apart_recorded'].forEach((status) => {
+        assert.deepEqual(landsIn(Object.assign({ status }, row)), ['announcement'], status);
+        assert.equal(wardHeader(Object.assign({ status }, row)), true, status);
+      });
     });
   });
 
@@ -56,6 +61,22 @@ describe('bishopric example — ward business in the sacrament meeting program',
     const callings = doc.tables.ref_callings.filter((r) => r.organization === 'young_men_priests').map((r) => r.calling);
     assert.deepEqual(callings, ['first_assistant', 'second_assistant', 'secretary']);
     assert.deepEqual(landsIn({ status: 'set_apart', organization: 'young_men_priests', calling: 'first_assistant' }), ['announcement']);
+  });
+
+  it('a stake calling is announced once set apart (also once recorded), never sustained', () => {
+    const row = { organization: 'stake', calling: 'service_missionary' };
+    assert.deepEqual(landsIn(Object.assign({ status: 'accepted' }, row)), []);
+    assert.equal(wardHeader(Object.assign({ status: 'accepted' }, row)), false);
+    ['set_apart', 'setting_apart_recorded'].forEach((status) => {
+      assert.deepEqual(landsIn(Object.assign({ status }, row)), ['otherAnnouncement'], status);
+      assert.equal(wardHeader(Object.assign({ status }, row)), true, status);
+    });
+    assert.ok(BLOCKS.otherAnnouncement.markdown.indexOf('sustaining_footer') < 0);
+  });
+
+  it('the stake group holds the service missionary', () => {
+    const callings = doc.tables.ref_callings.filter((r) => r.organization === 'stake').map((r) => r.calling);
+    assert.deepEqual(callings, ['service_missionary']);
   });
 
   it('an ordination is put to a vote in its own block', () => {
@@ -77,6 +98,18 @@ describe('bishopric example — ward business in the sacrament meeting program',
     });
   });
 
+  it('the musical number follows the sacrament, before any speaker', () => {
+    const idx = (name) => program.columns.findIndex((c) => c === name || (c && (c.name === name || c.view === name)));
+    assert.equal(idx('musical_number'), idx('doc_sacrament') + 1);
+    assert.equal(idx('testimony1'), idx('musical_number') + 1);
+  });
+
+  it('the intermediate slot takes a hymn or a musical number', () => {
+    const idx = (name) => program.columns.indexOf(name);
+    assert.equal(idx('intermediate_number'), idx('intermediate_hymn') + 1);
+    assert.equal(program.hideEmpty, true, 'the one left empty is not shown');
+  });
+
   it('the program has no stake business blocks', () => {
     const stake = program.columns.filter((c) => c && typeof c.markdown === 'string' && c.markdown.indexOf('text.stake_') >= 0);
     assert.deepEqual(stake, []);
@@ -91,8 +124,10 @@ describe('bishopric example — ward business in the sacrament meeting program',
   });
 
   it('a ward calling set apart after its sustaining is not on the program again', () => {
-    assert.deepEqual(landsIn({ status: 'set_apart', organization: 'primary', calling: 'president' }), []);
-    assert.equal(wardHeader({ status: 'set_apart', organization: 'primary', calling: 'president' }), false);
+    ['set_apart', 'setting_apart_recorded'].forEach((status) => {
+      assert.deepEqual(landsIn({ status, organization: 'primary', calling: 'president' }), [], status);
+      assert.equal(wardHeader({ status, organization: 'primary', calling: 'president' }), false, status);
+    });
   });
 
   it('a calling not yet accepted is in none of them', () => {
@@ -111,7 +146,7 @@ describe('bishopric example — ward business in the sacrament meeting program',
 
   it('ward business runs blessing, confirmation, welcomes, releases, sustainings, ordinations, announcements', () => {
     const idx = (b) => program.columns.indexOf(b);
-    const order = ['blessing', 'confirmation', 'welcomeBaptized', 'welcomeMovedIn', 'releases', 'sustaining', 'ordination', 'announcement'];
+    const order = ['blessing', 'confirmation', 'welcomeBaptized', 'welcomeMovedIn', 'releases', 'sustaining', 'ordination', 'announcement', 'otherAnnouncement'];
     order.forEach((k, i) => { if (i) assert.equal(idx(BLOCKS[k]), idx(BLOCKS[order[i - 1]]) + 1, k + ' follows ' + order[i - 1]); });
     assert.equal(idx(BLOCKS.blessing), idx(WARD_HEADER) + 1);
   });
@@ -152,7 +187,7 @@ describe('bishopric example — ward business in the sacrament meeting program',
   it('every block the program uses has an English and a Finnish text', () => {
     ['en', 'fi'].forEach((code) => {
       const text = fs.readFileSync(path.join(__dirname, '..', '..', 'examples', 'bishopric-lang-' + code + '.json'), 'utf8');
-      ['quorum_announcement_header', 'quorum_announcement_footer', 'blessing_header', 'blessing_footer', 'confirmation_header', 'confirmation_footer', 'welcome_baptized_header', 'welcome_moved_in_header', 'welcome_footer'].forEach((key) => {
+      ['quorum_announcement_header', 'quorum_announcement_footer', 'announcement_header', 'announcement_footer', 'blessing_header', 'blessing_footer', 'confirmation_header', 'confirmation_footer', 'welcome_baptized_header', 'welcome_moved_in_header', 'welcome_footer'].forEach((key) => {
         assert.ok(text.indexOf('"text.' + key + '"') >= 0, code + ' defines text.' + key);
       });
     });

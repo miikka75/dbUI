@@ -62,6 +62,14 @@ describe('UI conventions', () => {
     assert.equal(count(core, handMade), 0, 'app-core.js has a hand-made two-press icon' + SEE);
   });
 
+  it("a row's archive is <row-archive>, so the Past tab offers Restore", () => {
+    // The board's bare archive x stayed on archived cards with no Restore. Embedded archived rows are read-only.
+    const archive = /action="archive"/g;
+    const own = componentSource('row-archive') + componentSource('embed-view');
+    assert.equal(count(ui, archive), 0, 'ui.html archives a row without <row-archive>' + SEE);
+    assert.equal(count(core, archive) - count(own, archive), 0, 'app-core.js archives a row without <row-archive>' + SEE);
+  });
+
   it('a collapsible Settings section uses <section-toggle>', () => {
     const settings = template('settings-view-tpl');
     assert.equal(count(settings, /@click="a\.settings\._collapse/g), 0, 'a Settings section toggles itself by hand' + SEE);

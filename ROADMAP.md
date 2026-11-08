@@ -31,6 +31,26 @@ Embedding is free: `embed-view` dispatches on the same classifier, so a new kind
 - **Clearing a member's last table chip saves `'all'`** (full access) when they have no view-only
   grants. Pinned by a test as intended; worth a decision, since removing access grants it.
 
+### Reminders and notifications (Supabase only)
+
+Telling someone about a row while their app is closed: a class in two hours, a waitlist place they were
+just given. Needs a sender that runs with no browser open: on Supabase, `pg_cron` + `pg_net` calling an
+Edge Function, on the free plan, like `supabase/functions/csp-report`. Firebase needs Blaze; the
+in-browser backend sends nothing; the dev server logs what it would send, for tests.
+
+- **Schema**: `"remind": { "at": "starts_at", "before": "2h", "to": "owner", "text": "text.class_soon" }`
+  on a table. `to` is an `owner` column or a `userlink` list column. Server events (waitlist promotion,
+  an approval) write the same outbox from their trigger.
+- **Delivery**: an outbox table; cron every 5 min → the `notify` function sends what is due, marks it
+  sent, retries a few times. Before sending it checks the recipient may still read the row.
+- **Opt-in**, per person and channel, in Settings → My profile; nothing is sent by default. The text is
+  the view name and the row's title, nothing the recipient cannot see in the app.
+- **Channels, in order**: (1) Web Push: a VAPID key pair, `push` and `notificationclick` in `sw.js`
+  opening `?view=`; on iPhone only for the installed app. (2) Email through a provider's free tier, with
+  a verified sender domain and an unsubscribe link. Telegram, SMS or WhatsApp only if asked (SMS and
+  WhatsApp are paid per message); Signal has no bot API.
+- No CSP change: the browser talks only to its own push service.
+
 ### Gym example: what is left (only if asked)
 
 - **Waitlist on Firestore.** Supabase promotes in a trigger; Firestore has no server code. Options: a
@@ -172,12 +192,13 @@ A per-row template beside `markdown`, rendered once per matching row in place of
   organizer's shared code instead. The verifier-scans-attendee arrangement was dropped with it.
 - **Moving the string templates into `ui.html`** (code review 2026-11-01, 4a). Not needed to drop
   `'unsafe-eval'`: the build compiles them where they are.
-- **Gym features that need a server we do not have**: opening the gate, push notifications, payment,
-  device step sync.
+- **Gym features that need a server we do not have**: opening the gate, payment, device step sync.
+  (Push notifications moved to **Open**: Supabase Edge Functions are that server.)
 
 ## Suggested order
 
 1. The two code-review follow-ups (retiring `app-core-fn.js`, splitting `app-core.js`), in small PRs.
    The split goes when few PRs touching `app-core.js` are open.
 2. A decision on the last-chip grant.
-3. Everything else under **Open** waits for someone to ask.
+3. Reminders and notifications: push first, then email.
+4. Everything else under **Open** waits for someone to ask.

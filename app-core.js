@@ -11505,7 +11505,7 @@ function createVueApp() {
       // The card's own actions sit under its fields, so the header keeps its width for the title.
       + '        <div v-if="canEditCard(item) && !isClosed(item)" style="display:flex;justify-content:flex-end;gap:2px">'
       + '          <v-btn v-if="canEditCard(item) && !cfg.summary" :icon="editing[item.id] ? \'mdi-check\' : \'mdi-pencil-outline\'" size="x-small" variant="text" density="comfortable" :color="editing[item.id] ? \'primary\' : undefined" :title="t(\'btn.edit\')" @click="toggleEdit(item)" :data-testid="\'board-edit-\'+item.id"></v-btn>'
-      + '          <confirm-x v-if="!embed && canEditCard(item) && hasArchive" :armed="isArchArmed(item)" action="archive" dense density="comfortable" :data-testid="\'board-arch-\'+item.id" @click="archItem(item)"></confirm-x>'
+      + '          <row-archive v-if="!embed && canEditCard(item) && hasArchive" :archived="a.viewingArchive" :armed="isArchArmed(item)" dense density="comfortable" @archive="archItem(item)" @restore="a.restoreRow(item)"></row-archive>'
       + '          <confirm-x v-if="!embed && canEditCard(item)" :armed="isDelArmed(item)" dense density="comfortable" :data-testid="\'board-del-\'+item.id" @click="delItem(item)"></confirm-x>'
       + '        </div>'
       + '      </div>'
