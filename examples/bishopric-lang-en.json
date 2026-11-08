@@ -22,6 +22,7 @@
       "field.feed_id": "Feed id",
       "field.feed_url": "Calendar link",
       "field.intermediate_hymn": "Intermediate hymn",
+      "field.intermediate_number": "Intermediate musical number",
       "field.interpreter": "Interpreter",
       "field.item": "Item",
       "field.lang": "Language",
