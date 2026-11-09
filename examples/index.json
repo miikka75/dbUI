@@ -43,7 +43,7 @@
       ],
       "about": {
         "file": "bishopric-about.json",
-        "hash": "7a7405c71d79e199"
+        "hash": "ea0994611e38e56b"
       },
       "notes": {
         "29": "Welcome the newly baptized and those who moved in; releases now come before sustainings.",
@@ -69,7 +69,7 @@
         "50": "The meeting agenda has an Announcements field; the program shows it after the visitors and before the opening hymn, as the General Handbook (29.2.1.1) orders the meeting.",
         "51": "Aaronic Priesthood quorum callings stay in the announcement once their setting apart is recorded, not only once set apart. A new Stake group holds stake callings the ward announces (now the service missionary): they are not presented for a sustaining vote, and are announced in a block of their own once set apart or recorded. EXISTING DATABASE: an update does not change catalogue rows, so in Lookup, under ref_callings, add the organization stake with the calling service_missionary.",
         "52": "The program shows the musical number right after the sacrament, before the first speaker. Music has an Intermediate musical number beside the intermediate hymn; the program shows whichever is filled in, in the same place.",
-        "53": "Responsibilities by person is a list of positions beside the open one, like the meeting agenda: pick a position to see everything it holds. On a phone a position opens as its own screen, and Back returns to the list. Its callings show only those still to be extended or thanked (Called and Released); the rest of a calling's progress stays on the Callings board."
+        "53": "Responsibilities by person is a list of positions beside the open one, like the meeting agenda: pick a position to see everything it holds. On a phone a position opens as its own screen, and Back returns to the list. Its callings show only those at Called to a position or Released; the rest of a calling's progress stays on the Callings board."
       }
     },
     {
