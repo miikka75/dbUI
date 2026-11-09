@@ -399,6 +399,8 @@ test.describe('gallery layout', () => {
 
   test('gallery options reach the tile: image, size, shape and fit', async ({ page }) => {
     await open(page);
+    // Boot is lazy: the nav can render before photos is cached.
+    await page.waitForFunction(() => appInstance.dataCache.photos);
     const r = await page.evaluate(() => {
       // A second image column, so `image` has something to choose between.
       window.SCHEMA.photos.columns.cover = { type: 'image' };
