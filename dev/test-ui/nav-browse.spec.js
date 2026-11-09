@@ -113,6 +113,16 @@ test.describe('Browse layout', () => {
     await expect(page.locator('[data-testid="nav-level-tiles"]')).toHaveCount(0);
   });
 
+  test('Settings offers the carousel, which a phone then draws', async ({ page }) => {
+    await boot(page, { width: 390 });
+    await page.locator('[data-testid="browse-system-menu"]').click();
+    await page.locator('[data-testid="browse-system-__settings"]').click();
+    await page.locator('[data-testid="nav-layout-carousel"]').click();
+    await page.evaluate(() => appInstance.selectTab('__home'));
+    await expect(page.locator('[data-testid="nav-level-carousel"]')).toBeVisible();
+    expect(await page.evaluate(() => localStorage.getItem('app_nav_display'))).toBe('carousel');
+  });
+
   test('Settings switches a drawer schema into browse, live', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.request.post('/api/resetData');
@@ -134,5 +144,87 @@ test.describe('Browse layout', () => {
     await expect(page.locator('.v-navigation-drawer')).toHaveCount(1);
     await expect(page.locator('[data-testid="nav-layout-toggle"] .v-btn--active')).toHaveCount(1);
     await expect(page.locator('[data-testid="nav-layout-drawer"]')).toHaveClass(/v-btn--active/);
+  });
+});
+
+test.describe('Browse carousel', () => {
+  const CAROUSEL = Object.assign({}, BROWSE, { nav: Object.assign({}, BROWSE.nav, { display: 'carousel' }) });
+  async function bootCarousel(page, { width = 390, schema = CAROUSEL } = {}) {
+    await page.setViewportSize({ width, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema } });
+    await page.addInitScript(() => {
+      localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local');
+      localStorage.removeItem('app_nav_layout'); localStorage.removeItem('app_nav_display');
+    });
+    await page.goto('/');
+    await page.waitForSelector('[data-testid="nav-level"]', { timeout: 6000 });
+  }
+  const carousel = (page) => page.locator('[data-testid="nav-level-carousel"]');
+  const centred = (page) => page.locator('[data-testid="nav-level-carousel"] [aria-current="true"]');
+  const track = (page) => page.locator('[data-testid="nav-level-carousel"] .tile-carousel');
+
+  test('a press on a side tile centres it; a press on the centred one opens it', async ({ page }) => {
+    await bootCarousel(page);
+    await expect(carousel(page)).toBeVisible();
+    await expect(page.locator('[data-testid="nav-level-tiles"]')).toHaveCount(0);
+    await expect(centred(page)).toHaveAttribute('data-testid', 'nav-level-item-combined');
+    // No image: the icon is the picture, most of the tile's width, the words below it.
+    const icon = await centred(page).locator('.tile-icon-art .v-icon').boundingBox();
+    const tile = await centred(page).boundingBox();
+    expect(icon.width).toBeGreaterThan(tile.width * 0.5);
+    await expect(centred(page)).not.toHaveClass(/v-card--variant-outlined/);   // no border: just the picture
+    // The centred entry's name sits at the bottom of the window, not on the tile.
+    const caption = page.locator('[data-testid="tile-carousel-caption"]');
+    await expect(caption).toContainText('combined');
+    expect((await caption.boundingBox()).y).toBeGreaterThan(800 - 150);
+    await item(page, 'grp:Data').dispatchEvent('click');          // a tap, without scrolling it into view first
+    await expect(centred(page)).toHaveAttribute('data-testid', 'nav-level-item-grp:Data');
+    await expect(caption).toContainText('Data');
+    expect(await current(page)).toBe('__home');
+    await centred(page).click();
+    await expect.poll(() => current(page)).toBe('grp:Data');
+  });
+
+  test('a swipe centres the nearest tile, and Back returns to it', async ({ page }) => {
+    await bootCarousel(page);
+    await track(page).evaluate((el) => { el.scrollLeft = el.scrollWidth; });
+    await expect(centred(page)).toHaveAttribute('data-testid', 'nav-level-item-grp:Data');
+    await centred(page).click();
+    await expect.poll(() => current(page)).toBe('grp:Data');
+    await page.goBack();
+    await expect.poll(() => current(page)).toBe('__home');
+    await expect(centred(page)).toHaveAttribute('data-testid', 'nav-level-item-grp:Data');
+  });
+
+  test('arrow keys move between tiles and Enter opens the centred one', async ({ page }) => {
+    await bootCarousel(page);
+    await track(page).focus();
+    await page.keyboard.press('ArrowRight');
+    await expect(centred(page)).toHaveAttribute('data-testid', 'nav-level-item-grp:Data');
+    await page.keyboard.press('ArrowLeft');
+    await expect(centred(page)).toHaveAttribute('data-testid', 'nav-level-item-combined');
+    await page.keyboard.press('Enter');
+    await expect.poll(() => current(page)).toBe('combined');
+  });
+
+  test('side tiles turn away; with reduced motion they stay flat', async ({ page }) => {
+    await bootCarousel(page);
+    await expect.poll(() => item(page, 'grp:Data').evaluate((el) => el.style.transform)).toContain('rotateY');
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.reload();
+    await expect(carousel(page)).toBeVisible();
+    expect(await item(page, 'grp:Data').evaluate((el) => el.style.transform)).toBe('');
+  });
+
+  test('a wide screen, or more than 8 entries, draws tiles', async ({ page }) => {
+    await bootCarousel(page, { width: 1280 });
+    await expect(page.locator('[data-testid="nav-level-tiles"]')).toBeVisible();
+    await expect(carousel(page)).toHaveCount(0);
+    const MANY = Object.assign({}, CAROUSEL, { nav: { layout: 'browse', display: 'carousel',
+      items: Array.from({ length: 9 }, (_, i) => ({ group: 'G' + i, items: [{ table: 'tasks' }] })) } });
+    await bootCarousel(page, { schema: MANY });
+    await expect(page.locator('[data-testid="nav-level-tiles"]')).toBeVisible();
+    await expect(carousel(page)).toHaveCount(0);
   });
 });

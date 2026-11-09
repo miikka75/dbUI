@@ -969,7 +969,7 @@
   ],
   "nav": {
     "layout": "browse",
-    "display": "tiles",
+    "display": "carousel",
     "items": [
       {
         "group": "Documents",

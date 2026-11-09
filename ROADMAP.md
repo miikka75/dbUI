@@ -173,7 +173,8 @@ A per-row template beside `markdown`, rendered once per matching row in place of
 - **RSVP**: attendance verification; QR check-in with the organizer's shared, rotating code (#265);
   registering at the venue with a QR (option A, #265).
 - **Navigation and look**: `nav.layout: "browse"` (#230); one Appearance editor for icon, image and
-  background (#231); comparison rows shared with the page.
+  background (#231); comparison rows shared with the page; a swiped 3D carousel on the phone
+  (`display: "carousel"`; tapping a side tile centres it, only the centred one opens).
 - **Search and display**: runtime search over the rendered text; empty groups; a rotation narrowed to
   nothing says so; one date format in the grid and the calendar.
 - **Setup**: `npm run check:live` and `npm run supabase:setup` for a fresh Supabase project.

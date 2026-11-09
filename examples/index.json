@@ -5,13 +5,13 @@
       "code": "en",
       "name": "English",
       "file": "app-lang-en.json",
-      "hash": "fee18e9e8bc7a5e0"
+      "hash": "40fcbb2f105f4981"
     },
     {
       "code": "fi",
       "name": "Suomi",
       "file": "app-lang-fi.json",
-      "hash": "b66ca27ec2fa648c"
+      "hash": "ebdaac4de10fa993"
     }
   ],
   "bundles": [
@@ -117,12 +117,12 @@
       "title": "Team Demo",
       "description": "The widest tour of what the app does: rotations, RSVPs, a board, embeds, doc-views, archived rows and mirrored tables.",
       "icon": null,
-      "revision": 15,
+      "revision": 16,
       "tables": 11,
       "views": 29,
       "schema": {
         "file": "demo-schema.json",
-        "hash": "45f2300e8bddb4fc"
+        "hash": "5c90c525b9006b93"
       },
       "languages": [
         {
@@ -150,7 +150,7 @@
       },
       "about": {
         "file": "demo-about.json",
-        "hash": "0d34d2ad6b9fc1ab"
+        "hash": "0405b97137f3f14b"
       },
       "notes": {
         "5": "Adds `teams`, a catalogue whose parent column holds another ROW's id (`hierarchy.by: \"id\"`) instead of a group's value — so the Lookup tab shows it three levels deep (Acme > Engineering > Backend) rather than the two every other lookup has. Nothing existing changes: `cities` still groups by value, side by side with it, which is the point of shipping both.",
@@ -163,7 +163,8 @@
         "12": "Adds Take Attendance under Crew: each practice as a card listing who answered, where an organizer marks each person Attended or Absent. A member cannot mark themselves, and once they are marked their RSVP for that practice can no longer be changed. RSVPs now also keep to their own fields (practice, response, note), so a member can no longer write anything else on their response.",
         "13": "Check-in with a code: on a day with practices, My RSVP shows one Check-in code box for the whole day. Members type the code shown at practice, or scan it: an organizer can show it as a QR code that opens the app with the code filled in. The code counts for every practice the member answered for that day. The organizer types the same code on their own screen and presses Check in, which marks everyone who entered it as Attended in all of the day's practices. The code is never saved, so it cannot be looked up from home.",
         "14": "No visible change: the schema moves to version 5, where a booking cut-off is written as a duration (\"30min\").",
-        "15": "Tickets can be put in order by hand: on the Tickets board, drop a card on another to place it before it, or use Move up / Move down in the card's menu. The order is kept for everyone."
+        "15": "Tickets can be put in order by hand: on the Tickets board, drop a card on another to place it before it, or use Move up / Move down in the card's menu. The order is kept for everyone.",
+        "16": "On a phone, the menu pages are a carousel: swipe left and right, tap the card in the middle to open it. Wider screens keep the tiles."
       }
     },
     {
