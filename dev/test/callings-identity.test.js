@@ -113,7 +113,10 @@ describe('a calling outside the bishopric reaches its own card', () => {
       { id: 'm2', date: '2026-04-01', theme: 'Visit', presiding: 'Visiting Seventy', responsible: '' }
     ],
     admin_callings: [{ id: 'c1', date: '2026-02-01', person: 'Ann', organization: 'primary', calling: 'teacher',
-                       status: 'under_discussion', responsible: 'primary_president' }],
+                       status: 'called', responsible: 'primary_president' },
+                     // Only `called` and `released` reach a card; the rest of the pipeline is the board's.
+                     { id: 'c2', person: 'Dee', organization: 'primary', calling: 'teacher',
+                       status: 'under_discussion', responsible: 'ward_technology_specialist' }],
     admin_interviews: [{ id: 'i1', meeting: 'Sun', person: 'Bo', topic: 'temple', responsible: 'primary_president' }],
     admin_reminders: [{ id: 'r1', date: '2026-02-10', item: 'Order manuals', person: 'Cy', responsible: 'primary_president' }],
     admin_responsibilities: [
@@ -138,6 +141,7 @@ describe('a calling outside the bishopric reaches its own card', () => {
     assert.ok(keys.includes('bishopric_bishop'), 'the bishopric must not lose what it already had');
     assert.ok(!keys.includes(''), 'an unassigned row must not mint a card for nobody');
     assert.ok(!keys.includes('Visiting Seventy'), 'a visiting authority is not a ward position');
+    assert.ok(!keys.includes('ward_technology_specialist'), 'a calling still under discussion is not a card');
   });
 
   it('and her card carries every kind of responsibility, sliced by the block filters', () => {

@@ -1275,24 +1275,35 @@
           "column": "callings"
         },
         "filter": {
-          "$or": [
+          "$and": [
             {
-              "responsible": {
-                "notEmpty": true
-              }
-            },
-            {
-              "$and": [
+              "$or": [
                 {
-                  "presiding": {
+                  "responsible": {
                     "notEmpty": true
                   }
                 },
                 {
-                  "presiding": {
-                    "notMatchList": "visitors"
-                  }
+                  "$and": [
+                    {
+                      "presiding": {
+                        "notEmpty": true
+                      }
+                    },
+                    {
+                      "presiding": {
+                        "notMatchList": "visitors"
+                      }
+                    }
+                  ]
                 }
+              ]
+            },
+            {
+              "$or": [
+                { "_source": { "ne": "admin_callings" } },
+                { "status": "called" },
+                { "status": "released" }
               ]
             }
           ]
@@ -1307,10 +1318,9 @@
         ],
         "hideArchive": true,
         "readonly": true,
-        "layout": "card",
+        "layout": "split",
         "hideEmpty": true,
         "collect": "responsible",
-        "collapsed": true,
         "mode": "union",
         "defaultSort": "callings",
         "columns": [
@@ -1364,6 +1374,12 @@
             "sources": [
               "admin_callings"
             ],
+            "filter": {
+              "$or": [
+                { "status": "called" },
+                { "status": "released" }
+              ]
+            },
             "bare": true,
             "hideEmpty": true,
             "markdown": "{{t:tab.admin_callings}}\n\n{{self}}",
